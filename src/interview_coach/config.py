@@ -10,5 +10,9 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://interview_coach:interview_coach@db:5432/interview_coach"
     )
 
+    jwt_secret: str = "change-me-in-prod"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60
+
 
 settings = Settings()

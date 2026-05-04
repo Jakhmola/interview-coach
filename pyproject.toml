@@ -23,6 +23,14 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "python-dotenv==1.1.1",
     "tenacity==8.5.0",
+    "sqlalchemy[asyncio]>=2.0,<3",
+    "asyncpg>=0.30",
+    "alembic>=1.14",
+    "psycopg[binary]>=3.2",
+    "python-jose[cryptography]>=3.3",
+    "bcrypt>=4.2",
+    "email-validator>=2.2",
+    "aiosqlite>=0.20",
 ]
 
 [dependency-groups]
