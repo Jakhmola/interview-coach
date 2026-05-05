@@ -1,10 +1,11 @@
 import uuid
 from collections.abc import Sequence
+from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from interview_coach.db.models import Document, Job, User
+from interview_coach.db.models import Document, Job, ProfileRow, User
 
 # --- users ---
 
@@ -117,3 +118,54 @@ async def create_job(
     await session.commit()
     await session.refresh(job)
     return job
+
+
+async def update_job_parsed_json(
+    session: AsyncSession,
+    job_id: uuid.UUID,
+    user_id: uuid.UUID,
+    parsed: dict[str, Any],
+) -> bool:
+    """Set jobs.parsed_json (Phase 6 JobAnalyzer output). Returns True on hit."""
+    job = await get_job(session, job_id, user_id)
+    if job is None:
+        return False
+    job.parsed_json = parsed
+    await session.commit()
+    return True
+
+
+# --- profiles ---
+
+
+async def get_profile(session: AsyncSession, user_id: uuid.UUID) -> ProfileRow | None:
+    result = await session.execute(select(ProfileRow).where(ProfileRow.user_id == user_id))
+    return result.scalar_one_or_none()
+
+
+async def upsert_profile(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    profile_json: dict[str, Any],
+    source_doc_ids: list[str],
+    model_name: str,
+) -> ProfileRow:
+    """One profile per user; rebuild replaces. updated_at auto-bumps via onupdate."""
+    existing = await get_profile(session, user_id)
+    if existing is None:
+        row = ProfileRow(
+            user_id=user_id,
+            profile_json=profile_json,
+            source_doc_ids=source_doc_ids,
+            model_name=model_name,
+        )
+        session.add(row)
+    else:
+        existing.profile_json = profile_json
+        existing.source_doc_ids = source_doc_ids
+        existing.model_name = model_name
+        row = existing
+    await session.commit()
+    await session.refresh(row)
+    return row

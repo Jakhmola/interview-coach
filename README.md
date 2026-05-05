@@ -30,25 +30,57 @@ uv sync
 make test
 ```
 
-## Ollama setup (host, not container)
+## LLM setup — `llama-server` on host
 
-The agents (Phase 6+) call Ollama running on your **host** machine; the api
-container reaches it via `host.docker.internal:11434`.
+The agents (Phase 6+) call an OpenAI-compatible local server. We use
+`llama.cpp`'s `llama-server` running on the **host** in its own GPU
+container; the api container reaches it via `host.docker.internal:8080`.
+
+### One-time: download the GGUF
 
 ```sh
-# Install Ollama: https://ollama.com/download
-ollama pull qwen3:8b      # ~5 GB; one-time
-ollama serve              # if not already running as a service
+mkdir -p ~/models
+# Pick one (the second is much smaller for slow boxes):
+huggingface-cli download unsloth/Qwen3-8B-GGUF Qwen3-8B-Q4_K_M.gguf --local-dir ~/models
 ```
 
-Override the default with `MODEL_NAME` in `.env` (e.g., a smaller model for
-testing on a slow box). `OLLAMA_BASE_URL` defaults to
-`http://host.docker.internal:11434`.
+(If you don't have `huggingface-cli`: `pipx install -U "huggingface_hub[cli]"`.)
 
-Quick LLM check (host):
+### Run llama-server (GPU, OpenAI-compatible)
 
 ```sh
-INTEGRATION=1 uv run pytest tests/test_llm_ollama.py::test_real_ollama_streaming -v
+docker rm -f llama-server 2>/dev/null
+docker run -d --gpus all \
+  -v ~/models:/models \
+  -p 8080:8080 \
+  --name llama-server \
+  ghcr.io/ggml-org/llama.cpp:server-cuda \
+  -m /models/Qwen3-8B-Q4_K_M.gguf \
+  --host 0.0.0.0 --port 8080 \
+  --n-gpu-layers 99 \
+  --ctx-size 8192 \
+  --jinja \
+  --alias qwen3-8b
+```
+
+Verify:
+
+```sh
+curl http://localhost:8080/v1/models | jq
+curl -s http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3-8b","messages":[{"role":"user","content":"hi in 3 words"}]}'
+```
+
+Settings come from `.env`:
+- `LLM_BASE_URL=http://localhost:8080/v1` (host runs); compose overrides to
+  `http://host.docker.internal:8080/v1` for the api container.
+- `MODEL_NAME=qwen3-8b` (matches `--alias` on the server).
+
+### Quick LLM check from Python
+
+```sh
+INTEGRATION=1 uv run pytest tests/test_llm.py::test_real_llm_streaming -v
 ```
 
 ## Layout

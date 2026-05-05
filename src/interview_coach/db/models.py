@@ -88,3 +88,40 @@ class Job(Base):
     )
 
     __table_args__ = (CheckConstraint("source in ('pasted', 'url')", name="ck_jobs_source"),)
+
+
+class ProfileRow(Base):
+    """Persisted candidate profile built by the ProfileBuilder agent.
+
+    Named `ProfileRow` (not `Profile`) because `Profile` is the Pydantic
+    schema in `agents/schemas.py` — keeping them distinct avoids accidental
+    cross-imports.
+    """
+
+    __tablename__ = "profiles"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    profile_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), nullable=False
+    )
+    source_doc_ids: Mapped[list[Any]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), nullable=False
+    )
+    model_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )

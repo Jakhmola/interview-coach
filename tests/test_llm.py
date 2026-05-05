@@ -1,8 +1,8 @@
-"""LLM adapter tests.
+"""LLM adapter tests against the OpenAI-compatible client.
 
-Most tests mock the underlying `ChatOllama` so `make test` stays fast and
-doesn't depend on a live Ollama. The opt-in `test_real_ollama_streaming` test
-hits the real model on host when `INTEGRATION=1` is set.
+Most tests mock the underlying `ChatOpenAI` so `make test` stays fast and
+doesn't depend on a live llama-server. The opt-in `test_real_llm_streaming`
+test hits the real local server when `INTEGRATION=1` is set.
 """
 
 import os
@@ -13,17 +13,18 @@ import httpx
 import pytest
 from langchain_core.messages import AIMessageChunk, HumanMessage
 
-from interview_coach.llm import ollama as llm_module
-from interview_coach.llm.ollama import chat_model, stream_text
+from interview_coach.llm import client as llm_module
+from interview_coach.llm.client import chat_model, stream_text
 
 
 def test_chat_model_uses_settings(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(llm_module.settings, "model_name", "qwen3:8b")
-    monkeypatch.setattr(llm_module.settings, "ollama_base_url", "http://example:11434")
+    monkeypatch.setattr(llm_module.settings, "model_name", "qwen3-8b")
+    monkeypatch.setattr(llm_module.settings, "llm_base_url", "http://example:8080/v1")
+    monkeypatch.setattr(llm_module.settings, "llm_api_key", None)
 
     llm = chat_model(temperature=0.5)
-    assert llm.model == "qwen3:8b"
-    assert "example:11434" in llm.base_url
+    assert llm.model_name == "qwen3-8b"
+    assert "example:8080/v1" in str(llm.openai_api_base)
     assert llm.temperature == 0.5
 
 
@@ -33,9 +34,9 @@ def test_chat_model_default_temperature() -> None:
 
 
 def test_chat_model_forwards_overrides() -> None:
-    llm = chat_model(temperature=0.0, num_predict=128)
+    llm = chat_model(temperature=0.0, max_tokens=128)
     assert llm.temperature == 0.0
-    assert llm.num_predict == 128
+    assert llm.max_tokens == 128
 
 
 async def _async_iter(items: list) -> AsyncIterator:
@@ -117,19 +118,15 @@ def test_to_text_handles_list_content() -> None:
     assert llm_module._to_text(["a", {"text": "b"}, "c"]) == "abc"
 
 
-# --- Opt-in integration: hits real Ollama on host ---
+# --- Opt-in integration: hits real local llama-server ---
 
 
 @pytest.mark.skipif(
     os.environ.get("INTEGRATION") != "1",
-    reason="Set INTEGRATION=1 to run; requires `ollama pull qwen3:8b` on host.",
+    reason="Set INTEGRATION=1 to run; requires llama-server running on host.",
 )
-async def test_real_ollama_streaming() -> None:
-    """Stream from a real Ollama instance and assert we got non-empty text.
-
-    Drains the generator to completion (closing it cleanly) instead of breaking
-    early — that's the pattern callers should follow too.
-    """
+async def test_real_llm_streaming() -> None:
+    """Stream from a real local server and assert we got non-empty text."""
     tokens: list[str] = []
     agen = stream_text([HumanMessage("Say hello in three words.")], temperature=0.0)
     try:
@@ -138,5 +135,5 @@ async def test_real_ollama_streaming() -> None:
     finally:
         await agen.aclose()
 
-    assert tokens, "expected at least one token from Ollama"
+    assert tokens, "expected at least one token from the LLM"
     assert any(c.isalpha() for c in "".join(tokens))

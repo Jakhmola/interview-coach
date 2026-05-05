@@ -1,0 +1,110 @@
+"""JobAnalyzer unit tests with mocked MCP loader and mocked LLM."""
+
+from collections.abc import AsyncIterator
+from unittest.mock import AsyncMock
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from interview_coach.agents.nodes import job_analyzer
+from interview_coach.agents.schemas import JobAnalysis, Seniority
+from interview_coach.db import models, repos
+from interview_coach.db.models import Job, User
+
+
+@pytest.fixture
+async def agent_session(monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[AsyncSession]:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(models.Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    monkeypatch.setattr(job_analyzer, "AsyncSessionLocal", factory)
+    async with factory() as s:
+        yield s
+    await engine.dispose()
+
+
+@pytest.fixture
+async def alice(agent_session: AsyncSession) -> User:
+    return await repos.create_user(agent_session, "alice@example.com", "x")
+
+
+@pytest.fixture
+async def alice_job(agent_session: AsyncSession, alice: User) -> Job:
+    return await repos.create_job(
+        agent_session,
+        user_id=alice.id,
+        source="pasted",
+        raw_text="We are hiring a senior backend engineer with FastAPI experience.",
+    )
+
+
+def _fake_analysis() -> JobAnalysis:
+    return JobAnalysis(
+        title="Senior Backend Engineer",
+        seniority=Seniority.senior,
+        must_have_skills=["fastapi", "python"],
+        nice_to_have_skills=["kubernetes"],
+        responsibilities=["Design and own backend services."],
+        behavioral_signals=["ownership"],
+        company_name="Acme",
+    )
+
+
+async def test_analyze_job_persists_into_parsed_json(
+    agent_session: AsyncSession,
+    alice: User,
+    alice_job: Job,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_loader(uid: str, jid: str) -> dict:
+        assert uid == str(alice.id)
+        assert jid == str(alice_job.id)
+        return {
+            "id": str(alice_job.id),
+            "raw_text": alice_job.raw_text,
+            "source": "pasted",
+            "source_url": None,
+        }
+
+    monkeypatch.setattr(job_analyzer, "_load_job", fake_loader)
+
+    fake_llm = AsyncMock()
+    fake_llm.ainvoke = AsyncMock(return_value=_fake_analysis())
+
+    def fake_chat_model(**_: object):
+        m = AsyncMock()
+        m.with_structured_output = lambda _schema, **_kwargs: fake_llm
+        return m
+
+    monkeypatch.setattr(job_analyzer, "chat_model", fake_chat_model)
+
+    result = await job_analyzer.analyze_job(alice_job.id, alice.id)
+
+    assert isinstance(result, JobAnalysis)
+    assert result.must_have_skills == ["fastapi", "python"]
+
+    # Read in a fresh session to avoid the fixture session's identity-map cache.
+    factory = job_analyzer.AsyncSessionLocal
+    async with factory() as fresh:
+        job = await repos.get_job(fresh, alice_job.id, alice.id)
+    assert job is not None
+    assert job.parsed_json is not None
+    assert job.parsed_json["must_have_skills"] == ["fastapi", "python"]
+    assert job.parsed_json["seniority"] == "senior"
+
+
+async def test_analyze_job_not_found(
+    agent_session: AsyncSession,
+    alice: User,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def raises(*_: object) -> dict:
+        raise job_analyzer.JobNotFoundError("nope")
+
+    monkeypatch.setattr(job_analyzer, "_load_job", raises)
+
+    import uuid as _uuid
+
+    with pytest.raises(job_analyzer.JobNotFoundError):
+        await job_analyzer.analyze_job(_uuid.uuid4(), alice.id)
