@@ -35,3 +35,6 @@ htmlcov/
 
 # Per-phase detailed plan; overwritten each phase, master is in plan/master.md
 plan/current-phase.md
+
+# Claude Code per-machine settings (permission grants etc.)
+.claude/

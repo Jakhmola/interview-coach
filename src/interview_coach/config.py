@@ -16,5 +16,8 @@ class Settings(BaseSettings):
 
     tavily_api_key: str | None = None
 
+    ollama_base_url: str = "http://host.docker.internal:11434"
+    model_name: str = "qwen3:8b"
+
 
 settings = Settings()
