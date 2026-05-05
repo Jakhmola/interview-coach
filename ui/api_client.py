@@ -15,11 +15,13 @@ class ApiError(Exception):
 
 def _client(token: str | None = None) -> httpx.Client:
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    return httpx.Client(base_url=API_BASE_URL, headers=headers, timeout=10.0)
+    return httpx.Client(base_url=API_BASE_URL, headers=headers, timeout=30.0)
 
 
 def _unwrap(r: httpx.Response) -> Any:
     if r.is_success:
+        if r.status_code == 204:
+            return None
         return r.json()
     detail: str
     try:
@@ -27,6 +29,9 @@ def _unwrap(r: httpx.Response) -> Any:
     except Exception:
         detail = r.text
     raise ApiError(r.status_code, detail)
+
+
+# --- auth ---
 
 
 def healthz() -> dict[str, Any]:
@@ -47,3 +52,31 @@ def login(email: str, password: str) -> dict[str, Any]:
 def me(token: str) -> dict[str, Any]:
     with _client(token) as c:
         return _unwrap(c.get("/auth/me"))
+
+
+# --- documents ---
+
+
+def upload_document(token: str, kind: str, filename: str, content_type: str, data: bytes) -> dict:
+    with _client(token) as c:
+        r = c.post(
+            "/documents",
+            data={"kind": kind},
+            files={"file": (filename, data, content_type)},
+        )
+    return _unwrap(r)
+
+
+def list_documents(token: str) -> list[dict]:
+    with _client(token) as c:
+        return _unwrap(c.get("/documents"))
+
+
+def get_document(token: str, document_id: str) -> dict:
+    with _client(token) as c:
+        return _unwrap(c.get(f"/documents/{document_id}"))
+
+
+def delete_document(token: str, document_id: str) -> None:
+    with _client(token) as c:
+        _unwrap(c.delete(f"/documents/{document_id}"))

@@ -1,7 +1,10 @@
+import io
 from collections.abc import AsyncIterator
 
 import pytest
+from docx import Document as DocxDocument
 from httpx import ASGITransport, AsyncClient
+from reportlab.pdfgen import canvas
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from interview_coach.api.main import app
@@ -32,3 +35,56 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
     app.dependency_overrides.clear()
+
+
+# --- Document fixture builders ---
+
+
+def make_pdf(text: str = "Hello, world.") -> bytes:
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf)
+    c.drawString(72, 720, text)
+    c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+def make_docx(text: str = "Hello, world.") -> bytes:
+    doc = DocxDocument()
+    doc.add_paragraph(text)
+    buf = io.BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+@pytest.fixture
+def sample_pdf() -> bytes:
+    return make_pdf("Alice Engineer\nSenior Software Engineer\nPython, Postgres, FastAPI.")
+
+
+@pytest.fixture
+def sample_docx() -> bytes:
+    return make_docx("Project: Interview Coach\nBuilt a multi-agent interview practice tool.")
+
+
+# --- Auth helper ---
+
+
+@pytest.fixture
+async def auth_token(client: AsyncClient) -> str:
+    r = await client.post(
+        "/auth/register",
+        json={"email": "alice@example.com", "password": "hunter22a"},
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["access_token"]
+
+
+@pytest.fixture
+async def second_user_token(client: AsyncClient) -> str:
+    r = await client.post(
+        "/auth/register",
+        json={"email": "bob@example.com", "password": "hunter22a"},
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["access_token"]

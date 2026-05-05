@@ -75,6 +75,9 @@ def render_home() -> None:
         )
         st.code(state.get_token() or "", language=None)
 
+    st.subheader("Next step")
+    st.write("Head to the **Setup** page (sidebar) to upload your CV and project docs.")
+
     st.subheader("API status")
     try:
         payload = api_client.healthz()

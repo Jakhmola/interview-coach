@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from interview_coach import __version__
 from interview_coach.api.auth import router as auth_router
+from interview_coach.api.documents import router as documents_router
 from interview_coach.config import settings
 
 logging.basicConfig(
@@ -23,6 +24,7 @@ app.add_middleware(
 
 
 app.include_router(auth_router)
+app.include_router(documents_router)
 
 
 @app.get("/healthz")
