@@ -8,3 +8,11 @@ class UnsupportedFormat(IngestionError):
 
 class ExtractionFailed(IngestionError):
     pass
+
+
+class FetchFailed(IngestionError):
+    pass
+
+
+class KeyMissing(IngestionError):
+    pass

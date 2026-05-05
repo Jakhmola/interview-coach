@@ -2,7 +2,7 @@ import streamlit as st
 from ui import api_client, state
 
 st.set_page_config(page_title="Setup — Interview Coach", page_icon="📄")
-st.title("Setup — documents")
+st.title("Setup")
 
 if not state.is_logged_in():
     st.warning("Please log in first.")
@@ -94,3 +94,76 @@ else:
                         st.caption(f"... truncated; showing first 2000 of {len(text):,} chars")
                 except api_client.ApiError as e:
                     st.error(e.detail)
+
+
+# --- Job description ---
+
+st.divider()
+st.header("Job description")
+st.caption(
+    "Paste a JD or fetch it from a URL. URL fetch needs `TAVILY_API_KEY` set in `.env`. "
+    "Multiple JDs are allowed; the most recent is used by the agents."
+)
+
+paste_tab, url_tab = st.tabs(["Paste text", "Fetch from URL"])
+
+with paste_tab:
+    with st.form("jd_paste_form", clear_on_submit=True):
+        jd_text = st.text_area("JD text", height=240, key="jd_text_input")
+        submitted = st.form_submit_button("Save")
+    if submitted:
+        if not jd_text.strip():
+            st.error("Paste something first.")
+        else:
+            try:
+                job = api_client.submit_job_text(token, jd_text)
+                st.success(f"Saved JD ({job['char_count']:,} chars).")
+            except api_client.ApiError as e:
+                st.error(e.detail)
+
+with url_tab:
+    with st.form("jd_url_form", clear_on_submit=True):
+        jd_url = st.text_input("JD URL (https://...)", key="jd_url_input")
+        submitted = st.form_submit_button("Fetch and save")
+    if submitted:
+        u = jd_url.strip()
+        if not u:
+            st.error("Enter a URL first.")
+        else:
+            try:
+                job = api_client.submit_job_url(token, u)
+                st.success(f"Fetched and saved JD ({job['char_count']:,} chars).")
+            except api_client.ApiError as e:
+                st.error(e.detail)
+
+
+st.subheader("Your JDs")
+
+try:
+    jobs = api_client.list_jobs(token)
+except api_client.ApiError as e:
+    st.error(e.detail)
+    jobs = []
+
+if not jobs:
+    st.info("No JDs yet.")
+else:
+    for j in jobs:
+        with st.container(border=True):
+            cols = st.columns([4, 2, 2, 1])
+            label = f"[{j['source_url']}]({j['source_url']})" if j.get("source_url") else "_pasted_"
+            cols[0].markdown(f"**{j['source']}**  \n{label}")
+            cols[1].caption(f"{j['char_count']:,} chars")
+            cols[2].caption(j["created_at"][:19].replace("T", " "))
+            if cols[3].button("Delete", key=f"jdel-{j['id']}"):
+                try:
+                    api_client.delete_job(token, j["id"])
+                    st.rerun()
+                except api_client.ApiError as e:
+                    st.error(e.detail)
+
+            with st.expander("Preview"):
+                preview = j.get("preview", "")
+                st.text(preview if preview else "(empty)")
+                if j["char_count"] > len(preview):
+                    st.caption(f"... preview only; full text is {j['char_count']:,} chars")

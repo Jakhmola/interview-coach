@@ -80,3 +80,31 @@ def get_document(token: str, document_id: str) -> dict:
 def delete_document(token: str, document_id: str) -> None:
     with _client(token) as c:
         _unwrap(c.delete(f"/documents/{document_id}"))
+
+
+# --- jobs ---
+
+
+def submit_job_text(token: str, text: str) -> dict:
+    with _client(token) as c:
+        return _unwrap(c.post("/jobs", json={"text": text}))
+
+
+def submit_job_url(token: str, url: str) -> dict:
+    with _client(token) as c:
+        return _unwrap(c.post("/jobs", json={"url": url}))
+
+
+def list_jobs(token: str) -> list[dict]:
+    with _client(token) as c:
+        return _unwrap(c.get("/jobs"))
+
+
+def get_job(token: str, job_id: str) -> dict:
+    with _client(token) as c:
+        return _unwrap(c.get(f"/jobs/{job_id}"))
+
+
+def delete_job(token: str, job_id: str) -> None:
+    with _client(token) as c:
+        _unwrap(c.delete(f"/jobs/{job_id}"))

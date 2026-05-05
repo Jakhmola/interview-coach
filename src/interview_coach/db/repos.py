@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from interview_coach.db.models import Document, User
+from interview_coach.db.models import Document, Job, User
 
 # --- users ---
 
@@ -81,3 +81,39 @@ async def create_document(
     await session.commit()
     await session.refresh(doc)
     return doc
+
+
+# --- jobs ---
+
+
+async def list_jobs_for_user(session: AsyncSession, user_id: uuid.UUID) -> Sequence[Job]:
+    result = await session.execute(
+        select(Job).where(Job.user_id == user_id).order_by(Job.created_at.desc())
+    )
+    return result.scalars().all()
+
+
+async def get_job(session: AsyncSession, job_id: uuid.UUID, user_id: uuid.UUID) -> Job | None:
+    result = await session.execute(select(Job).where(Job.id == job_id, Job.user_id == user_id))
+    return result.scalar_one_or_none()
+
+
+async def delete_job(session: AsyncSession, job_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+    result = await session.execute(delete(Job).where(Job.id == job_id, Job.user_id == user_id))
+    await session.commit()
+    return (result.rowcount or 0) > 0
+
+
+async def create_job(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    source: str,
+    raw_text: str,
+    source_url: str | None = None,
+) -> Job:
+    job = Job(user_id=user_id, source=source, source_url=source_url, raw_text=raw_text)
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+    return job

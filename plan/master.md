@@ -118,7 +118,7 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 0     | Skeleton & infra                     | ✅          |
 | 1     | Auth + persistence                   | ✅          |
 | 2     | Document ingestion (PDF + DOCX)      | ✅          |
-| 3     | Job description ingestion            | ⏳          |
+| 3     | Job description ingestion            | ✅          |
 | 4     | MCP wiring                           | ⏳          |
 | 5     | LLM layer                            | ⏳          |
 | 6     | ProfileBuilder + JobAnalyzer agents  | ⏳          |
