@@ -32,3 +32,6 @@ pg_data/
 .coverage
 htmlcov/
 .ruff_cache/
+
+# Per-phase detailed plan; overwritten each phase, master is in plan/master.md
+plan/current-phase.md
