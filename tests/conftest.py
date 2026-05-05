@@ -12,6 +12,15 @@ from interview_coach.db import models
 from interview_coach.db.session import get_db
 
 
+@pytest.fixture(autouse=True)
+def _scrub_tavily_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests must not pick up a real Tavily key from the developer's `.env`.
+    Any test that wants a key must monkeypatch it explicitly."""
+    from interview_coach.config import settings
+
+    monkeypatch.setattr(settings, "tavily_api_key", None)
+
+
 @pytest.fixture
 async def db_session() -> AsyncIterator[AsyncSession]:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")

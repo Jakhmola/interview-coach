@@ -1,4 +1,6 @@
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,7 +16,17 @@ logging.basicConfig(
     format='{"level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
 )
 
-app = FastAPI(title="interview-coach API", version=__version__)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    yield
+    # Shutdown: drop cached MCP client (if any) and let subprocess servers exit
+    from interview_coach.mcp.client import reset_client
+
+    await reset_client()
+
+
+app = FastAPI(title="interview-coach API", version=__version__, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,7 +34,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 app.include_router(auth_router)
 app.include_router(documents_router)
