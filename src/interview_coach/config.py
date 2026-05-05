@@ -16,9 +16,10 @@ class Settings(BaseSettings):
 
     tavily_api_key: str | None = None
 
-    # OpenAI-compatible LLM endpoint (we use llama.cpp's llama-server locally;
-    # any OpenAI-compatible server works: vLLM, LM Studio, OpenAI proper, etc.)
-    llm_base_url: str = "http://host.docker.internal:8080/v1"
+    # OpenAI-compatible LLM endpoint. In compose, the api service reaches the
+    # `llama` container over the docker network; the .env file overrides this
+    # to localhost for host-side runs (pytest, scripts).
+    llm_base_url: str = "http://llama:8080/v1"
     llm_api_key: str | None = None  # ignored by local servers; required by OpenAI proper
     model_name: str = "qwen3-8b"
 

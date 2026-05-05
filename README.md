@@ -30,38 +30,41 @@ uv sync
 make test
 ```
 
-## LLM setup — `llama-server` on host
+## LLM setup — `llama-server` (compose service)
 
-The agents (Phase 6+) call an OpenAI-compatible local server. We use
-`llama.cpp`'s `llama-server` running on the **host** in its own GPU
-container; the api container reaches it via `host.docker.internal:8080`.
+The agents (Phase 6+) call an OpenAI-compatible local server. We run
+`llama.cpp`'s `llama-server` as a **compose service** named `llama`,
+with GPU passthrough. `make up` starts it alongside everything else.
 
 ### One-time: download the GGUF
 
 ```sh
 mkdir -p ~/models
-# Pick one (the second is much smaller for slow boxes):
-huggingface-cli download unsloth/Qwen3-8B-GGUF Qwen3-8B-Q4_K_M.gguf --local-dir ~/models
+huggingface-cli download unsloth/Qwen3-8B-GGUF Qwen3-8B-Q4_K_M.gguf \
+  --local-dir ~/models
 ```
 
 (If you don't have `huggingface-cli`: `pipx install -U "huggingface_hub[cli]"`.)
 
-### Run llama-server (GPU, OpenAI-compatible)
+By default, compose bind-mounts `~/models` read-only at `/models` and looks
+for `Qwen3-8B-Q4_K_M.gguf`. Override with `MODELS_DIR` / `MODEL_FILE` in
+`.env` if your file is elsewhere.
+
+### Prerequisites
+
+- Docker with the **NVIDIA Container Toolkit** installed (so `--gpus all`
+  works). On CachyOS / Arch: `pacman -S nvidia-container-toolkit` then
+  `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`.
+
+### Bring it up
 
 ```sh
-docker rm -f llama-server 2>/dev/null
-docker run -d --gpus all \
-  -v ~/models:/models \
-  -p 8080:8080 \
-  --name llama-server \
-  ghcr.io/ggml-org/llama.cpp:server-cuda \
-  -m /models/Qwen3-8B-Q4_K_M.gguf \
-  --host 0.0.0.0 --port 8080 \
-  --n-gpu-layers 99 \
-  --ctx-size 8192 \
-  --jinja \
-  --alias qwen3-8b
+make up   # starts db, llama, api, ui in dependency order
 ```
+
+Cold start: `llama-server` takes ~30–60s to load the GGUF onto the GPU.
+The `api` container starts in parallel; the *first* agent call may be
+slow while the model finishes loading. Subsequent calls are fast.
 
 Verify:
 
@@ -72,10 +75,12 @@ curl -s http://localhost:8080/v1/chat/completions \
   -d '{"model":"qwen3-8b","messages":[{"role":"user","content":"hi in 3 words"}]}'
 ```
 
-Settings come from `.env`:
-- `LLM_BASE_URL=http://localhost:8080/v1` (host runs); compose overrides to
-  `http://host.docker.internal:8080/v1` for the api container.
-- `MODEL_NAME=qwen3-8b` (matches `--alias` on the server).
+### Routing
+
+- **Inside compose:** the `api` container reaches the LLM at
+  `http://llama:8080/v1` (set in `docker-compose.yml`).
+- **From host** (pytest, scripts): the port is published, so `.env` uses
+  `http://localhost:8080/v1`.
 
 ### Quick LLM check from Python
 
