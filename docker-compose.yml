@@ -30,7 +30,7 @@ services:
       - "--n-gpu-layers"
       - "99"
       - "--ctx-size"
-      - "8192"
+      - "4096"
       - "--jinja"
       - "--alias"
       - "${MODEL_NAME:-qwen3-8b}"
