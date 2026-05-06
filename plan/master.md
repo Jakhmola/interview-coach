@@ -124,8 +124,8 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 6     | ProfileBuilder + JobAnalyzer agents  | ✅          |
 | 7     | CompanyResearcher agent              | ✅          |
 | 8     | QuestionGenerator + streaming        | ✅          |
-| 9     | Evaluator + answer loop              | 🚧          |
-| 10    | Supervisor graph                     | ⏳          |
+| 9     | Evaluator + answer loop              | ✅          |
+| 10    | Supervisor graph                     | 🚧          |
 | 11    | Observability (Langfuse)             | ⏳          |
 | 12    | Eval harness (deepeval)              | ⏳          |
 

@@ -9,7 +9,7 @@ import pytest
 
 from interview_coach.agents.streaming_json import (
     StreamingJsonError,
-    stream_question_json,
+    stream_json_object,
 )
 
 
@@ -19,9 +19,10 @@ async def _feed(chunks: list[str]) -> AsyncIterator[str]:
 
 
 async def _drive(chunks: list[str]) -> tuple[str, dict[str, Any] | None]:
+    """Drive the parser as Phase 8 does: stream `question`, ignore anchors."""
     streamed = ""
     parsed: dict[str, Any] | None = None
-    async for kind, data in stream_question_json(_feed(chunks)):
+    async for kind, data in stream_json_object(_feed(chunks), stream_string_fields=("question",)):
         if kind == "question_chunk":
             streamed += data
         elif kind == "done":
@@ -80,15 +81,13 @@ async def test_split_mid_simple_escape() -> None:
     assert parsed is not None
 
 
-async def test_anchors_first_is_not_streamed() -> None:
-    """If the model emits anchors before question, we don't stream from it.
-    The question value still flows through normally when its turn comes."""
+async def test_question_streams_even_if_anchors_came_first() -> None:
+    """The parser dispatches by key, so `question` still streams even if the
+    model misbehaves and emits anchors first. Prompts steer towards
+    question-first to maximise TTFT, but correctness doesn't depend on it."""
     raw = '{"anchors": ["a", "b"], "question": "later"}'
     streamed, parsed = await _drive([raw])
-    # The parser stops scanning once it sees `before_val` for a non-target key,
-    # so nothing further is streamed even when `question` shows up.
-    assert streamed == ""
-    # But the full buffer still parses at end-of-stream.
+    assert streamed == "later"
     assert parsed == {"anchors": ["a", "b"], "question": "later"}
 
 
@@ -111,3 +110,119 @@ async def test_leading_whitespace_ok() -> None:
 async def test_top_level_array_raises() -> None:
     with pytest.raises(StreamingJsonError):
         await _drive(['["question", "anchors"]'])
+
+
+# --- Phase 9 multi-field variant ---
+
+
+async def _drive_eval(chunks: list[str]) -> dict[str, Any]:
+    """Drive the parser the way the Phase 9 evaluator does: one int scalar
+    + two streamed string fields, then a final parsed dict.
+
+    Returns a dict capturing each event class for assertion convenience.
+    """
+    score: int | None = None
+    feedback = ""
+    feedback_done = False
+    model_answer = ""
+    model_answer_done = False
+    parsed: dict[str, Any] | None = None
+
+    async for kind, data in stream_json_object(
+        _feed(chunks),
+        stream_string_fields=("feedback", "model_answer"),
+        scalar_fields=("score",),
+    ):
+        if kind == "score":
+            score = data
+        elif kind == "feedback_chunk":
+            feedback += data
+        elif kind == "feedback_done":
+            feedback_done = True
+        elif kind == "model_answer_chunk":
+            model_answer += data
+        elif kind == "model_answer_done":
+            model_answer_done = True
+        elif kind == "done":
+            parsed = data
+
+    return {
+        "score": score,
+        "feedback": feedback,
+        "feedback_done": feedback_done,
+        "model_answer": model_answer,
+        "model_answer_done": model_answer_done,
+        "parsed": parsed,
+    }
+
+
+async def test_eval_score_arrives_before_feedback_chunks() -> None:
+    """Common case: model emits score first."""
+    raw = (
+        '{"score": 7, "feedback": "Strong on tradeoffs.", '
+        '"model_answer": "When I led the rewrite, I..."}'
+    )
+    out = await _drive_eval([raw])
+    assert out["score"] == 7
+    assert out["feedback"] == "Strong on tradeoffs."
+    assert out["feedback_done"] is True
+    assert out["model_answer"] == "When I led the rewrite, I..."
+    assert out["model_answer_done"] is True
+    assert out["parsed"] is not None
+    assert out["parsed"]["score"] == 7
+
+
+async def test_eval_chunked_streaming() -> None:
+    """Arbitrary chunk boundaries don't corrupt any field."""
+    full = (
+        '{"score": 9, "feedback": "Comprehensive answer with specifics.", '
+        '"model_answer": "I would design X by..."}'
+    )
+    chunks = [full[i : i + 4] for i in range(0, len(full), 4)]
+    out = await _drive_eval(chunks)
+    assert out["score"] == 9
+    assert out["feedback"] == "Comprehensive answer with specifics."
+    assert out["model_answer"] == "I would design X by..."
+
+
+async def test_eval_score_split_across_chunks() -> None:
+    """Multi-digit score split mid-number must parse correctly."""
+    chunks = ['{"score": 1', '0, "feedback": "x", "model_answer": "y"}']
+    out = await _drive_eval(chunks)
+    assert out["score"] == 10
+    assert out["feedback"] == "x"
+
+
+async def test_eval_unicode_in_feedback() -> None:
+    raw = '{"score": 5, "feedback": "café \\u263a", "model_answer": "x"}'
+    out = await _drive_eval([raw])
+    assert out["feedback"] == "café ☺"
+
+
+async def test_eval_field_order_swapped() -> None:
+    """If the model puts feedback before score, both still get captured."""
+    raw = '{"feedback": "ok", "score": 6, "model_answer": "x"}'
+    out = await _drive_eval([raw])
+    assert out["score"] == 6
+    assert out["feedback"] == "ok"
+    assert out["model_answer"] == "x"
+
+
+async def test_eval_extra_unrelated_field_skipped() -> None:
+    """Unknown top-level keys with primitive / array / object values are skipped."""
+    raw = (
+        '{"score": 4, "extra_int": 99, "extra_str": "skip", '
+        '"extra_arr": [1, 2, 3], "extra_obj": {"k": "v"}, '
+        '"feedback": "f", "model_answer": "m"}'
+    )
+    out = await _drive_eval([raw])
+    assert out["score"] == 4
+    assert out["feedback"] == "f"
+    assert out["model_answer"] == "m"
+    assert out["parsed"]["extra_int"] == 99
+
+
+async def test_eval_quote_in_feedback() -> None:
+    raw = '{"score": 7, "feedback": "She said \\"go\\".", "model_answer": "x"}'
+    out = await _drive_eval([raw])
+    assert out["feedback"] == 'She said "go".'

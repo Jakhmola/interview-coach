@@ -23,6 +23,7 @@ import pytest
 from reportlab.pdfgen import canvas
 
 from interview_coach.agents.nodes.company_researcher import research_company
+from interview_coach.agents.nodes.evaluator import stream_evaluation
 from interview_coach.agents.nodes.job_analyzer import analyze_job
 from interview_coach.agents.nodes.profile_builder import build_profile
 from interview_coach.agents.nodes.question_generator import stream_question
@@ -194,3 +195,85 @@ async def test_question_generator_real() -> None:
     assert len(turns) == 1
     assert turns[0].question == streamed, "streamed text and persisted text must match"
     assert turns[0].anchors_json, "expected non-empty anchors"
+
+
+async def test_full_loop_real() -> None:
+    """End-to-end Phase 6→9: profile → analyze → research → 1 question →
+    submit answer → evaluator stream → assert persisted score/feedback/model_answer
+    and the session flips to 'complete' (since n_questions=1)."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from interview_coach.config import settings
+    from interview_coach.db import repos
+
+    user_id, job_id = await _setup(JD_TEXT_REAL_COMPANY)
+
+    await build_profile(user_id)
+    await analyze_job(job_id, user_id)
+    await research_company(job_id, user_id)
+
+    engine = create_async_engine(settings.database_url)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as s:
+        sess = await repos.create_session(
+            s,
+            user_id=user_id,
+            job_id=job_id,
+            round_type="resume_walkthrough",
+            n_questions=1,
+        )
+    session_id = sess.id
+
+    streamed_question = ""
+    question_done: dict[str, Any] | None = None
+    async for kind, data in stream_question(session_id=session_id, user_id=user_id):
+        if kind == "token":
+            streamed_question += data
+        elif kind == "done":
+            question_done = data
+    assert question_done is not None
+    turn_id = uuid.UUID(question_done["question_id"])
+
+    canned_answer = (
+        "I'd start by clarifying the requirements with stakeholders, then "
+        "split the work into deliverable milestones. Specifically, I'd "
+        "prototype the core path first to de-risk the unknowns, measure "
+        "performance against an explicit budget, and iterate from there. "
+        "I've done this on async refactors before and it kept us on time."
+    )
+    async with factory() as s:
+        await repos.update_turn_answer(s, turn_id, canned_answer)
+
+    score: int | None = None
+    feedback = ""
+    model_answer = ""
+    final: dict[str, Any] | None = None
+    async for kind, data in stream_evaluation(
+        session_id=session_id, user_id=user_id, turn_id=turn_id
+    ):
+        if kind == "score":
+            score = data
+        elif kind == "feedback_token":
+            feedback += data
+        elif kind == "model_answer_token":
+            model_answer += data
+        elif kind == "done":
+            final = data
+
+    assert score is not None and 1 <= score <= 10
+    assert feedback.strip(), "expected non-empty feedback"
+    assert model_answer.strip(), "expected non-empty model answer"
+    assert final is not None
+    assert final["session_status"] == "complete"
+
+    async with factory() as s:
+        turn = await repos.get_turn(s, turn_id)
+        sess_fresh = await repos.get_session(s, session_id, user_id)
+    await engine.dispose()
+
+    assert turn is not None
+    assert turn.score == score
+    assert turn.feedback == feedback
+    assert turn.model_answer == model_answer
+    assert sess_fresh is not None
+    assert sess_fresh.status == "complete"

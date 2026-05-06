@@ -53,3 +53,7 @@ class TurnOut(BaseModel):
 
 class SessionDetail(SessionOut):
     turns: list[TurnOut]
+
+
+class AnswerSubmitRequest(BaseModel):
+    answer: str

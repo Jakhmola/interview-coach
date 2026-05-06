@@ -60,7 +60,6 @@ if "interview_session_id" not in st.session_state:
             st.session_state["interview_round_type"] = sess["round_type"]
             st.rerun()
         except api_client.ApiError as e:
-            # Common 400 codes: profile_missing, job_not_analyzed, company_snapshot_missing.
             hints = {
                 "profile_missing": (
                     "Run ProfileBuilder first — your CV needs to be parsed into a profile. "
@@ -110,18 +109,47 @@ for t in detail.get("turns", []):
     if t.get("answer"):
         with st.chat_message("user"):
             st.write(t["answer"])
+    if t.get("score") is not None:
+        with st.chat_message("assistant"):
+            st.markdown(f"**Score: {t['score']}/10**")
+            if t.get("feedback"):
+                st.markdown(f"**Feedback.** {t['feedback']}")
+            if t.get("model_answer"):
+                with st.expander("Model answer"):
+                    st.write(t["model_answer"])
 
 
 turns = detail.get("turns", [])
 n_questions = detail["n_questions"]
 status = detail["status"]
-need_new_question = (
-    status == "active"
-    and len(turns) < n_questions
-    and (not turns or turns[-1].get("answer") is not None)
-)
 
-if need_new_question:
+
+def _need_new_question() -> bool:
+    if status != "active":
+        return False
+    if len(turns) >= n_questions:
+        return False
+    if not turns:
+        return True
+    last = turns[-1]
+    return last.get("answer") is not None and last.get("score") is not None
+
+
+def _need_answer() -> bool:
+    return bool(turns) and turns[-1].get("answer") is None and status == "active"
+
+
+def _need_evaluation_resume() -> bool:
+    """Answer was saved but evaluator didn't finish (e.g. user reloaded mid-stream)."""
+    return (
+        bool(turns)
+        and turns[-1].get("answer") is not None
+        and turns[-1].get("score") is None
+        and status == "active"
+    )
+
+
+if _need_new_question():
     if st.button("Next question", type="primary"):
         result = api_client.StreamResult()
         with st.chat_message("assistant"):
@@ -137,19 +165,78 @@ if need_new_question:
         st.rerun()
 
 
-# Phase 9 placeholder.
-if turns and turns[-1].get("answer") is None:
+if _need_answer():
     st.divider()
-    st.caption("Answer flow lands in Phase 9.")
-    st.text_area(
-        "Your answer (disabled until Phase 9)",
-        value="",
-        disabled=True,
-        height=120,
+    with st.form("answer_form", clear_on_submit=False):
+        answer = st.text_area("Your answer", height=180, key="answer_input")
+        submitted = st.form_submit_button("Submit answer", type="primary")
+    if submitted:
+        text = answer.strip()
+        if not text:
+            st.error("Type something before submitting.")
+        else:
+            try:
+                ev = api_client.submit_answer(token, session_id, text)
+            except api_client.ApiError as e:
+                st.error(e.detail)
+                st.stop()
+            try:
+                # Echo the user's answer in the chat history.
+                with st.chat_message("user"):
+                    st.write(text)
+                # Score badge appears as soon as feedback starts streaming.
+                with st.chat_message("assistant"):
+                    feedback_placeholder = st.empty()
+                    feedback_text = st.write_stream(ev.consume_feedback_tokens())
+                    score_label = f"**Score: {ev.score}/10**" if ev.score is not None else ""
+                    if score_label:
+                        feedback_placeholder.markdown(score_label)
+                    st.markdown(f"**Feedback.** {feedback_text}")
+                    with st.expander("Model answer", expanded=False):
+                        st.write_stream(ev.consume_model_answer_tokens())
+                ev.consume_remaining()
+            finally:
+                ev.finish()
+            if ev.error:
+                st.error(f"Evaluation failed: {ev.error.get('code', 'unknown')}")
+            elif ev.done and ev.done.get("session_status") == "complete":
+                st.success(f"Session complete — {n_questions} questions answered.")
+            st.rerun()
+
+
+if _need_evaluation_resume():
+    st.divider()
+    st.warning(
+        "An evaluation didn't finish on the last turn. Click below to retry — "
+        "your answer is already saved."
     )
-elif status != "active":
+    if st.button("Retry evaluation", type="primary"):
+        # Re-submit the same answer text; the route is idempotent on a turn
+        # whose answer is set but score is null.
+        last = turns[-1]
+        try:
+            ev = api_client.submit_answer(token, session_id, last["answer"])
+        except api_client.ApiError as e:
+            st.error(e.detail)
+            st.stop()
+        try:
+            with st.chat_message("assistant"):
+                feedback_placeholder = st.empty()
+                feedback_text = st.write_stream(ev.consume_feedback_tokens())
+                if ev.score is not None:
+                    feedback_placeholder.markdown(f"**Score: {ev.score}/10**")
+                st.markdown(f"**Feedback.** {feedback_text}")
+                with st.expander("Model answer", expanded=False):
+                    st.write_stream(ev.consume_model_answer_tokens())
+            ev.consume_remaining()
+        finally:
+            ev.finish()
+        st.rerun()
+
+
+if status != "active":
     st.divider()
     st.info(f"Session **{status}**.")
-elif len(turns) >= n_questions:
+elif len(turns) >= n_questions and not _need_answer():
     st.divider()
-    st.success(f"Reached {n_questions} questions. Mark as complete on Phase 9.")
+    st.success(f"Reached {n_questions} questions.")

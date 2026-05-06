@@ -249,6 +249,38 @@ async def latest_turn(session: AsyncSession, session_id: uuid.UUID) -> TurnRow |
     return result.scalar_one_or_none()
 
 
+async def get_turn(session: AsyncSession, turn_id: uuid.UUID) -> TurnRow | None:
+    result = await session.execute(select(TurnRow).where(TurnRow.id == turn_id))
+    return result.scalar_one_or_none()
+
+
+async def update_turn_answer(session: AsyncSession, turn_id: uuid.UUID, answer: str) -> bool:
+    row = await get_turn(session, turn_id)
+    if row is None:
+        return False
+    row.answer = answer
+    await session.commit()
+    return True
+
+
+async def update_turn_evaluation(
+    session: AsyncSession,
+    turn_id: uuid.UUID,
+    *,
+    score: int,
+    feedback: str,
+    model_answer: str,
+) -> bool:
+    row = await get_turn(session, turn_id)
+    if row is None:
+        return False
+    row.score = score
+    row.feedback = feedback
+    row.model_answer = model_answer
+    await session.commit()
+    return True
+
+
 async def create_turn(
     session: AsyncSession,
     *,

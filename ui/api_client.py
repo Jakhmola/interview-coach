@@ -200,3 +200,127 @@ def stream_next_question(token: str, session_id: str, result: StreamResult) -> I
                         result.done = data
                     elif event == "error" and isinstance(data, dict):
                         result.error = data
+
+
+class EvaluationStreamResult:
+    """Captures structured side-channel events from the evaluator SSE stream.
+
+    The Streamlit page consumes this in three passes:
+
+    1. ``feedback_tokens()`` — generator yielding strings until ``feedback_done``.
+       Pass it to ``st.write_stream``.
+    2. ``model_answer_tokens()`` — same shape, yields until ``model_answer_done``.
+    3. After the full stream completes, ``score`` and ``done`` are populated.
+
+    Internally we open one HTTP request and feed all three iterators from the
+    same underlying line stream (so we don't issue three separate POSTs).
+    """
+
+    def __init__(self) -> None:
+        self.score: int | None = None
+        self.done: dict[str, Any] | None = None
+        self.error: dict[str, Any] | None = None
+        self._raw_lines: Iterator[str] | None = None
+        self._client: httpx.Client | None = None
+        self._response: Any = None
+        self._stream_cm: Any = None
+
+    def _open(self, token: str, session_id: str, answer: str) -> None:
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "text/event-stream",
+        }
+        self._client = httpx.Client(base_url=API_BASE_URL, headers=headers, timeout=300.0)
+        cm = self._client.stream("POST", f"/sessions/{session_id}/answer", json={"answer": answer})
+        self._response = cm.__enter__()
+        self._stream_cm = cm
+        if not self._response.is_success:
+            body = b"".join(self._response.iter_bytes()).decode("utf-8", errors="replace")
+            self._stream_cm.__exit__(None, None, None)
+            self._client.close()
+            try:
+                detail = json.loads(body).get("detail", body)
+            except Exception:
+                detail = body
+            raise ApiError(self._response.status_code, detail)
+        self._raw_lines = (
+            (raw if isinstance(raw, str) else raw.decode("utf-8"))
+            for raw in self._response.iter_lines()
+        )
+
+    def finish(self) -> None:
+        """Close the underlying HTTP connection. Safe to call multiple times."""
+        if self._stream_cm is not None:
+            self._stream_cm.__exit__(None, None, None)
+            self._stream_cm = None
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def _events(self) -> Iterator[tuple[str, Any]]:
+        """Decode the raw SSE line stream into (event, data) tuples."""
+        if self._raw_lines is None:
+            return
+        event = "message"
+        for line in self._raw_lines:
+            if line == "":
+                event = "message"
+                continue
+            if line.startswith(":"):
+                continue
+            if line.startswith("event:"):
+                event = line[len("event:") :].strip()
+                continue
+            if line.startswith("data:"):
+                payload = line[len("data:") :].strip()
+                try:
+                    data = json.loads(payload)
+                except json.JSONDecodeError:
+                    data = payload
+                yield (event, data)
+
+    def consume_feedback_tokens(self) -> Iterator[str]:
+        """Yields feedback chunks until `feedback_done`. Captures `score`
+        events that arrive interleaved (score is emitted before feedback in
+        practice but we don't depend on order)."""
+        for event, data in self._events():
+            if event == "score" and isinstance(data, dict):
+                self.score = data.get("score")
+            elif event == "feedback_token" and isinstance(data, str):
+                yield data
+            elif event == "feedback_done":
+                return
+            elif event == "error" and isinstance(data, dict):
+                self.error = data
+                return
+
+    def consume_model_answer_tokens(self) -> Iterator[str]:
+        for event, data in self._events():
+            if event == "model_answer_token" and isinstance(data, str):
+                yield data
+            elif event == "model_answer_done":
+                return
+            elif event == "done" and isinstance(data, dict):
+                self.done = data
+                return
+            elif event == "error" and isinstance(data, dict):
+                self.error = data
+                return
+
+    def consume_remaining(self) -> None:
+        """Drain anything after model_answer_done (typically just `done`)."""
+        for event, data in self._events():
+            if event == "done" and isinstance(data, dict):
+                self.done = data
+            elif event == "error" and isinstance(data, dict):
+                self.error = data
+
+
+def submit_answer(token: str, session_id: str, answer: str) -> EvaluationStreamResult:
+    """Open the SSE stream for `POST /sessions/{id}/answer`. The caller drives
+    the three consume_* methods on the result; remember to call .finish() to
+    close the underlying connection (or use it as a context manager).
+    """
+    result = EvaluationStreamResult()
+    result._open(token, session_id, answer)
+    return result

@@ -29,7 +29,7 @@ from interview_coach.agents.schemas import Question
 from interview_coach.agents.state import RoundType
 from interview_coach.agents.streaming_json import (
     StreamingJsonError,
-    stream_question_json,
+    stream_json_object,
 )
 from interview_coach.db import repos
 from interview_coach.db.models import SessionRow
@@ -192,7 +192,9 @@ async def stream_question(
                             yield text
 
     parsed: dict[str, Any] | None = None
-    async for event, data in stream_question_json(_model_deltas()):
+    async for event, data in stream_json_object(
+        _model_deltas(), stream_string_fields=("question",)
+    ):
         if event == "question_chunk":
             yield ("token", data)
         elif event == "done":

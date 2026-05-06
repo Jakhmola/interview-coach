@@ -86,6 +86,19 @@ class Question(BaseModel):
     )
 
 
+class Evaluation(BaseModel):
+    """Evaluator output for a single turn (Phase 9)."""
+
+    score: int = Field(ge=1, le=10, description="Single overall 1–10 score.")
+    feedback: str = Field(description="Concise paragraph explaining the score.")
+    model_answer: str = Field(
+        description=(
+            "A strong reference answer written in first person, in the "
+            "candidate's voice, grounded in their profile."
+        ),
+    )
+
+
 class CompanySnapshot(BaseModel):
     """LLM-compressed view of a company, used by Phase 8 question generation."""
 

@@ -11,7 +11,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from interview_coach.agents.nodes import question_generator
+from interview_coach.agents.nodes import evaluator, question_generator
 from interview_coach.db import repos
 
 
@@ -187,20 +187,30 @@ async def test_abandon(client: AsyncClient, auth_token: str, db_session: AsyncSe
 
 
 def _patch_node_session_factory(monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession) -> None:
-    """Point question_generator.AsyncSessionLocal at the test's in-memory engine.
+    """Point both agent nodes' AsyncSessionLocal at the test's in-memory engine.
 
-    The SSE route passes through `stream_question`, which calls
-    `AsyncSessionLocal()` directly (not via `get_db`), so the FastAPI
-    `dependency_overrides` we set up in conftest don't reach it.
+    The SSE routes pass through `stream_question` / `stream_evaluation`, which
+    open `AsyncSessionLocal()` directly (not via `get_db`), so the FastAPI
+    `dependency_overrides` we set up in conftest don't reach them.
     """
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     bind = db_session.bind
     factory = async_sessionmaker(bind, expire_on_commit=False)
     monkeypatch.setattr(question_generator, "AsyncSessionLocal", factory)
+    monkeypatch.setattr(evaluator, "AsyncSessionLocal", factory)
 
 
-def _patch_streaming_llm(monkeypatch: pytest.MonkeyPatch, deltas: list[str]) -> None:
+def _patch_streaming_llm(
+    monkeypatch: pytest.MonkeyPatch, deltas: list[str], *, target: Any = None
+) -> None:
+    """Patch ``chat_model`` on the given target (default: question_generator).
+
+    Pass ``target=evaluator`` for the answer-route tests.
+    """
+    if target is None:
+        target = question_generator
+
     class _FakeChunk:
         def __init__(self, content: str) -> None:
             self.content = content
@@ -215,7 +225,7 @@ def _patch_streaming_llm(monkeypatch: pytest.MonkeyPatch, deltas: list[str]) -> 
         m.bind = lambda **_kwargs: _FakeBound()
         return m
 
-    monkeypatch.setattr(question_generator, "chat_model", fake_chat_model)
+    monkeypatch.setattr(target, "chat_model", fake_chat_model)
 
 
 async def _read_sse(client: AsyncClient, url: str, token: str) -> list[tuple[str, Any]]:
@@ -360,3 +370,273 @@ async def test_next_question_session_complete(
     )
     assert r.status_code == 409
     assert r.json()["detail"] == "session_complete"
+
+
+# --- Phase 9: answer / evaluator ---
+
+
+async def _start_session_with_one_unanswered_turn(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    n_questions: int = 3,
+) -> str:
+    """Helper: seed prereqs, create session, stream one question. Returns
+    the session id. The latest turn has a question but no answer."""
+    seeds = await _seed_prereqs(db_session, auth_token, client)
+    sid = (
+        await client.post(
+            "/sessions",
+            headers=_auth(auth_token),
+            json={
+                "job_id": seeds["job_id"],
+                "round_type": "resume_walkthrough",
+                "n_questions": n_questions,
+            },
+        )
+    ).json()["id"]
+    _patch_node_session_factory(monkeypatch, db_session)
+    _patch_streaming_llm(
+        monkeypatch,
+        ['{"question": "Walk me through your last project.", "anchors": ["a", "b", "c"]}'],
+        target=question_generator,
+    )
+    await _read_sse(client, f"/sessions/{sid}/next_question", auth_token)
+    return sid
+
+
+async def test_answer_streams_evaluation_and_persists(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sid = await _start_session_with_one_unanswered_turn(client, auth_token, db_session, monkeypatch)
+    _patch_streaming_llm(
+        monkeypatch,
+        [
+            '{"score": 7, "feedback": "Strong on tradeoffs',
+            ' but missed metrics.", "model_answer": "When I led..."}',
+        ],
+        target=evaluator,
+    )
+
+    events: list[tuple[str, Any]] = []
+    async with client.stream(
+        "POST",
+        f"/sessions/{sid}/answer",
+        headers=_auth(auth_token),
+        json={"answer": "I'd start by clarifying requirements."},
+    ) as r:
+        assert r.status_code == 200, await r.aread()
+        assert r.headers["content-type"].startswith("text/event-stream")
+        event = "message"
+        async for line in r.aiter_lines():
+            if line == "":
+                event = "message"
+                continue
+            if line.startswith("event:"):
+                event = line[len("event:") :].strip()
+                continue
+            if line.startswith("data:"):
+                payload = line[len("data:") :].strip()
+                try:
+                    data = json.loads(payload)
+                except json.JSONDecodeError:
+                    data = payload
+                events.append((event, data))
+
+    score_events = [d for ev, d in events if ev == "score"]
+    feedback_tokens = [d for ev, d in events if ev == "feedback_token"]
+    model_answer_tokens = [d for ev, d in events if ev == "model_answer_token"]
+    done = next(d for ev, d in events if ev == "done")
+
+    assert len(score_events) == 1
+    assert score_events[0]["score"] == 7
+    assert "".join(feedback_tokens) == "Strong on tradeoffs but missed metrics."
+    assert "".join(model_answer_tokens) == "When I led..."
+    assert done["session_status"] == "active"
+    assert done["n_remaining"] == 2
+
+    # Persistence check.
+    detail = (await client.get(f"/sessions/{sid}", headers=_auth(auth_token))).json()
+    turn = detail["turns"][0]
+    assert turn["answer"] == "I'd start by clarifying requirements."
+    assert turn["score"] == 7
+    assert turn["feedback"] == "Strong on tradeoffs but missed metrics."
+    assert turn["model_answer"] == "When I led..."
+
+
+async def test_answer_completes_session_on_last_turn(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """1-question session — answering it flips status to complete."""
+    sid = await _start_session_with_one_unanswered_turn(
+        client, auth_token, db_session, monkeypatch, n_questions=1
+    )
+    _patch_streaming_llm(
+        monkeypatch,
+        ['{"score": 5, "feedback": "ok", "model_answer": "x"}'],
+        target=evaluator,
+    )
+
+    events: list[tuple[str, Any]] = []
+    async with client.stream(
+        "POST",
+        f"/sessions/{sid}/answer",
+        headers=_auth(auth_token),
+        json={"answer": "my answer"},
+    ) as r:
+        assert r.status_code == 200
+        event = "message"
+        async for line in r.aiter_lines():
+            if line == "":
+                event = "message"
+                continue
+            if line.startswith("event:"):
+                event = line[len("event:") :].strip()
+                continue
+            if line.startswith("data:"):
+                payload = line[len("data:") :].strip()
+                try:
+                    data = json.loads(payload)
+                except json.JSONDecodeError:
+                    data = payload
+                events.append((event, data))
+
+    done = next(d for ev, d in events if ev == "done")
+    assert done["session_status"] == "complete"
+    assert done["n_remaining"] == 0
+
+    detail = (await client.get(f"/sessions/{sid}", headers=_auth(auth_token))).json()
+    assert detail["status"] == "complete"
+
+
+async def test_answer_empty_400(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sid = await _start_session_with_one_unanswered_turn(client, auth_token, db_session, monkeypatch)
+    r = await client.post(
+        f"/sessions/{sid}/answer",
+        headers=_auth(auth_token),
+        json={"answer": "   "},
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"] == "empty_answer"
+
+
+async def test_answer_no_active_turn_409(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Submitting before any question has been generated → 409."""
+    seeds = await _seed_prereqs(db_session, auth_token, client)
+    sid = (
+        await client.post(
+            "/sessions",
+            headers=_auth(auth_token),
+            json={"job_id": seeds["job_id"], "round_type": "resume_walkthrough"},
+        )
+    ).json()["id"]
+
+    r = await client.post(
+        f"/sessions/{sid}/answer",
+        headers=_auth(auth_token),
+        json={"answer": "hi"},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "no_active_turn"
+
+
+async def test_answer_already_evaluated_409(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-submitting on an already-evaluated turn → 409."""
+    sid = await _start_session_with_one_unanswered_turn(client, auth_token, db_session, monkeypatch)
+    _patch_streaming_llm(
+        monkeypatch,
+        ['{"score": 6, "feedback": "ok", "model_answer": "x"}'],
+        target=evaluator,
+    )
+    # First submit succeeds.
+    async with client.stream(
+        "POST",
+        f"/sessions/{sid}/answer",
+        headers=_auth(auth_token),
+        json={"answer": "first"},
+    ) as r:
+        assert r.status_code == 200
+        async for _line in r.aiter_lines():
+            pass
+
+    # Second submit on same turn rejected.
+    r = await client.post(
+        f"/sessions/{sid}/answer",
+        headers=_auth(auth_token),
+        json={"answer": "second"},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == "turn_already_evaluated"
+
+
+async def test_answer_session_404(client: AsyncClient, auth_token: str) -> None:
+    r = await client.post(
+        "/sessions/00000000-0000-0000-0000-000000000000/answer",
+        headers=_auth(auth_token),
+        json={"answer": "hi"},
+    )
+    assert r.status_code == 404
+
+
+async def test_answer_resume_after_partial_evaluation(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Idempotent submit when the answer was saved but eval didn't finish.
+
+    Simulates a client reload mid-stream — the turn has answer != None and
+    score == None. A retry should re-run evaluation, not 409.
+    """
+    sid = await _start_session_with_one_unanswered_turn(client, auth_token, db_session, monkeypatch)
+    # Manually save an answer without evaluation.
+    detail = (await client.get(f"/sessions/{sid}", headers=_auth(auth_token))).json()
+    turn_id = detail["turns"][0]["id"]
+    import uuid as _uuid
+
+    await repos.update_turn_answer(db_session, _uuid.UUID(turn_id), "saved earlier")
+
+    _patch_streaming_llm(
+        monkeypatch,
+        ['{"score": 8, "feedback": "ok", "model_answer": "x"}'],
+        target=evaluator,
+    )
+
+    async with client.stream(
+        "POST",
+        f"/sessions/{sid}/answer",
+        headers=_auth(auth_token),
+        json={"answer": "ignored — server uses saved one"},
+    ) as r:
+        assert r.status_code == 200
+        async for _line in r.aiter_lines():
+            pass
+
+    detail = (await client.get(f"/sessions/{sid}", headers=_auth(auth_token))).json()
+    turn = detail["turns"][0]
+    assert turn["answer"] == "saved earlier"
+    assert turn["score"] == 8

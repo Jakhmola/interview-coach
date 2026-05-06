@@ -11,6 +11,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from interview_coach.agents.nodes.evaluator import (
+    TurnNotAnswered,
+    TurnNotFound,
+    stream_evaluation,
+)
 from interview_coach.agents.nodes.question_generator import (
     GenerationPrereqsMissing,
     stream_question,
@@ -18,6 +23,7 @@ from interview_coach.agents.nodes.question_generator import (
 from interview_coach.agents.streaming_json import StreamingJsonError
 from interview_coach.api.auth.deps import get_current_user
 from interview_coach.api.sessions.schemas import (
+    AnswerSubmitRequest,
     RoundType,
     SessionCreateRequest,
     SessionDetail,
@@ -141,6 +147,67 @@ async def next_question(
             yield sse_event("error", {"code": str(e)})
         except StreamingJsonError as e:
             logger.exception("Streaming JSON failed for session=%s", session_id)
+            yield sse_event("error", {"code": "streaming_json_error", "detail": str(e)})
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
+
+
+@router.post("/{session_id}/answer")
+async def submit_answer(
+    session_id: uuid.UUID,
+    body: AnswerSubmitRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> StreamingResponse:
+    """Save the answer on the latest turn, then stream the evaluator output."""
+    answer = body.answer.strip()
+    if not answer:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty_answer")
+
+    sess = await repos.get_session(session, session_id, user.id)
+    if sess is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "session_not_found")
+    if sess.status != "active":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"session_status_{sess.status}")
+
+    turns = await repos.list_turns_for_session(session, session_id)
+    if not turns:
+        raise HTTPException(status.HTTP_409_CONFLICT, "no_active_turn")
+    latest = turns[-1]
+    if latest.answer is not None and latest.score is None:
+        # Answer was saved already but evaluation didn't finish — allow re-streaming
+        # by treating as the active turn (idempotent submit).
+        pass
+    elif latest.score is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "turn_already_evaluated")
+
+    if latest.answer is None:
+        await repos.update_turn_answer(session, latest.id, answer)
+
+    turn_id = latest.id
+
+    async def event_stream() -> AsyncIterator[bytes]:
+        try:
+            async for kind, data in stream_evaluation(
+                session_id=session_id, user_id=user.id, turn_id=turn_id
+            ):
+                # Wrap the bare int score in an object for the wire format
+                # documented in the phase 9 plan: `data: {"score": 7}`. Other
+                # events (string deltas, dict payloads) pass through.
+                if kind == "score":
+                    yield sse_event(kind, {"score": data})
+                elif kind == "feedback_done" or kind == "model_answer_done":
+                    yield sse_event(kind, {})
+                else:
+                    yield sse_event(kind, data)
+        except (TurnNotFound, TurnNotAnswered) as e:
+            yield sse_event("error", {"code": type(e).__name__, "detail": str(e)})
+        except StreamingJsonError as e:
+            logger.exception("Evaluator streaming failed for turn=%s", turn_id)
             yield sse_event("error", {"code": "streaming_json_error", "detail": str(e)})
 
     return StreamingResponse(
