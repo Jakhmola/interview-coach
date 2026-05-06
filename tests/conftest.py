@@ -1,4 +1,5 @@
 import io
+import os
 from collections.abc import AsyncIterator
 
 import pytest
@@ -15,7 +16,13 @@ from interview_coach.db.session import get_db
 @pytest.fixture(autouse=True)
 def _scrub_tavily_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """Tests must not pick up a real Tavily key from the developer's `.env`.
-    Any test that wants a key must monkeypatch it explicitly."""
+    Any test that wants a key must monkeypatch it explicitly.
+
+    Bypassed when INTEGRATION=1 — those tests are explicitly opt-in and want
+    the real external services (Tavily, llama-server) wired up.
+    """
+    if os.environ.get("INTEGRATION") == "1":
+        return
     from interview_coach.config import settings
 
     monkeypatch.setattr(settings, "tavily_api_key", None)

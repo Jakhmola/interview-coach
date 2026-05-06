@@ -1,8 +1,15 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Project root = two levels above this file (src/interview_coach/config.py).
+# Anchoring the env_file path here keeps Settings() consistent regardless of CWD
+# (pytest from subdirs, IDE runners, scripts run from /tmp, etc.).
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_PROJECT_ROOT / ".env", extra="ignore")
 
     log_level: str = "INFO"
     api_port: int = 8000
