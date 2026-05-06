@@ -5,7 +5,15 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from interview_coach.db.models import CompanySnapshotRow, Document, Job, ProfileRow, User
+from interview_coach.db.models import (
+    CompanySnapshotRow,
+    Document,
+    Job,
+    ProfileRow,
+    SessionRow,
+    TurnRow,
+    User,
+)
 
 # --- users ---
 
@@ -166,6 +174,98 @@ async def upsert_profile(
         existing.source_doc_ids = source_doc_ids
         existing.model_name = model_name
         row = existing
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
+# --- sessions & turns ---
+
+
+async def create_session(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    round_type: str,
+    n_questions: int,
+) -> SessionRow:
+    row = SessionRow(
+        user_id=user_id,
+        job_id=job_id,
+        round_type=round_type,
+        n_questions=n_questions,
+        status="active",
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
+async def get_session(
+    session: AsyncSession, session_id: uuid.UUID, user_id: uuid.UUID
+) -> SessionRow | None:
+    result = await session.execute(
+        select(SessionRow).where(SessionRow.id == session_id, SessionRow.user_id == user_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_sessions_for_user(session: AsyncSession, user_id: uuid.UUID) -> Sequence[SessionRow]:
+    result = await session.execute(
+        select(SessionRow)
+        .where(SessionRow.user_id == user_id)
+        .order_by(SessionRow.created_at.desc())
+    )
+    return result.scalars().all()
+
+
+async def update_session_status(
+    session: AsyncSession, session_id: uuid.UUID, user_id: uuid.UUID, status: str
+) -> bool:
+    row = await get_session(session, session_id, user_id)
+    if row is None:
+        return False
+    row.status = status
+    await session.commit()
+    return True
+
+
+async def list_turns_for_session(session: AsyncSession, session_id: uuid.UUID) -> Sequence[TurnRow]:
+    result = await session.execute(
+        select(TurnRow).where(TurnRow.session_id == session_id).order_by(TurnRow.turn_index.asc())
+    )
+    return result.scalars().all()
+
+
+async def latest_turn(session: AsyncSession, session_id: uuid.UUID) -> TurnRow | None:
+    result = await session.execute(
+        select(TurnRow)
+        .where(TurnRow.session_id == session_id)
+        .order_by(TurnRow.turn_index.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_turn(
+    session: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    turn_index: int,
+    question: str,
+    anchors: list[str],
+    metadata: dict[str, Any] | None = None,
+) -> TurnRow:
+    row = TurnRow(
+        session_id=session_id,
+        turn_index=turn_index,
+        question=question,
+        anchors_json=anchors,
+        metadata_json=metadata,
+    )
+    session.add(row)
     await session.commit()
     await session.refresh(row)
     return row

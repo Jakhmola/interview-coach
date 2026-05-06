@@ -74,6 +74,18 @@ class JobAnalysis(BaseModel):
     company_name: str | None = None
 
 
+class Question(BaseModel):
+    """One interview question + the rubric anchors Phase 9 will score against."""
+
+    question: str = Field(description="The question text in interviewer's voice.")
+    anchors: list[str] = Field(
+        description=(
+            "3–5 evaluation anchors: concrete things a strong answer would cover. "
+            "Used by the Phase 9 evaluator as scoring rubric."
+        ),
+    )
+
+
 class CompanySnapshot(BaseModel):
     """LLM-compressed view of a company, used by Phase 8 question generation."""
 

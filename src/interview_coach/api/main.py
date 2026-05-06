@@ -9,6 +9,7 @@ from interview_coach import __version__
 from interview_coach.api.auth import router as auth_router
 from interview_coach.api.documents import router as documents_router
 from interview_coach.api.jobs import router as jobs_router
+from interview_coach.api.sessions import router as sessions_router
 from interview_coach.config import settings
 
 logging.basicConfig(
@@ -38,6 +39,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(jobs_router)
+app.include_router(sessions_router)
 
 
 @app.get("/healthz")

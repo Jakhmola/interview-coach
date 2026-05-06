@@ -127,6 +127,80 @@ class ProfileRow(Base):
     )
 
 
+class SessionRow(Base):
+    """Interview session: user × job × round_type, holds N turns."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    round_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    n_questions: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "round_type in ('resume_walkthrough','behavioral_star')",
+            name="ck_sessions_round_type",
+        ),
+        CheckConstraint(
+            "status in ('active','complete','abandoned')",
+            name="ck_sessions_status",
+        ),
+    )
+
+
+class TurnRow(Base):
+    """One Q&A round inside a session.
+
+    Phase 8 fills `question`, `anchors_json`, `metadata_json`.
+    Phase 9 fills `answer`, `score`, `feedback`, `model_answer`.
+    """
+
+    __tablename__ = "turns"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    turn_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    anchors_json: Mapped[list[Any]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), nullable=False
+    )
+    answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index(
+            "uq_turns_session_turn",
+            "session_id",
+            "turn_index",
+            unique=True,
+        ),
+    )
+
+
 class CompanySnapshotRow(Base):
     """LLM-compressed company research, scoped to a single job.
 

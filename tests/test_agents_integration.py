@@ -16,6 +16,7 @@ from __future__ import annotations
 import io
 import os
 import uuid
+from typing import Any
 
 import httpx
 import pytest
@@ -24,6 +25,7 @@ from reportlab.pdfgen import canvas
 from interview_coach.agents.nodes.company_researcher import research_company
 from interview_coach.agents.nodes.job_analyzer import analyze_job
 from interview_coach.agents.nodes.profile_builder import build_profile
+from interview_coach.agents.nodes.question_generator import stream_question
 
 API_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 
@@ -144,3 +146,51 @@ async def test_company_researcher_real() -> None:
     await engine.dispose()
     assert row is not None
     assert row.source_urls, "expected at least one source URL on the persisted snapshot"
+
+
+async def test_question_generator_real() -> None:
+    """End-to-end: real ProfileBuilder + JobAnalyzer + CompanyResearcher → real
+    streaming question. Asserts the streamed text matches what was persisted
+    and that anchors are non-empty."""
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from interview_coach.config import settings
+    from interview_coach.db import repos
+
+    user_id, job_id = await _setup(JD_TEXT_REAL_COMPANY)
+
+    await build_profile(user_id)
+    await analyze_job(job_id, user_id)
+    await research_company(job_id, user_id)
+
+    engine = create_async_engine(settings.database_url)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as s:
+        sess = await repos.create_session(
+            s,
+            user_id=user_id,
+            job_id=job_id,
+            round_type="resume_walkthrough",
+            n_questions=3,
+        )
+    session_id = sess.id
+
+    streamed = ""
+    final: dict[str, Any] | None = None
+    async for kind, data in stream_question(session_id=session_id, user_id=user_id):
+        if kind == "token":
+            streamed += data
+        elif kind == "done":
+            final = data
+
+    assert streamed.strip(), "expected non-empty streamed question"
+    assert final is not None
+    assert final["turn_index"] == 0
+
+    async with factory() as s:
+        turns = await repos.list_turns_for_session(s, session_id)
+    await engine.dispose()
+
+    assert len(turns) == 1
+    assert turns[0].question == streamed, "streamed text and persisted text must match"
+    assert turns[0].anchors_json, "expected non-empty anchors"
