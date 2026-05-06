@@ -121,8 +121,8 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 3     | Job description ingestion            | ✅          |
 | 4     | MCP wiring                           | ✅          |
 | 5     | LLM layer                            | ✅          |
-| 6     | ProfileBuilder + JobAnalyzer agents  | ⏳          |
-| 7     | CompanyResearcher agent              | ⏳          |
+| 6     | ProfileBuilder + JobAnalyzer agents  | ✅          |
+| 7     | CompanyResearcher agent              | 🚧          |
 | 8     | QuestionGenerator + streaming        | ⏳          |
 | 9     | Evaluator + answer loop              | ⏳          |
 | 10    | Supervisor graph                     | ⏳          |
