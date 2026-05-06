@@ -125,3 +125,40 @@ class ProfileRow(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class CompanySnapshotRow(Base):
+    """LLM-compressed company research, scoped to a single job.
+
+    `Profile` and `JobAnalysis` have Pydantic counterparts in `agents/schemas.py`;
+    `CompanySnapshot` is the Pydantic model and `CompanySnapshotRow` is the table.
+    """
+
+    __tablename__ = "company_snapshots"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    company_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    snapshot_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), nullable=False
+    )
+    source_urls: Mapped[list[Any]] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), nullable=False
+    )
+    model_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )

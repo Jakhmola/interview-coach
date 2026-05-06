@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from interview_coach.db.models import Document, Job, ProfileRow, User
+from interview_coach.db.models import CompanySnapshotRow, Document, Job, ProfileRow, User
 
 # --- users ---
 
@@ -164,6 +164,49 @@ async def upsert_profile(
     else:
         existing.profile_json = profile_json
         existing.source_doc_ids = source_doc_ids
+        existing.model_name = model_name
+        row = existing
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
+# --- company snapshots ---
+
+
+async def get_company_snapshot_by_job(
+    session: AsyncSession, job_id: uuid.UUID
+) -> CompanySnapshotRow | None:
+    result = await session.execute(
+        select(CompanySnapshotRow).where(CompanySnapshotRow.job_id == job_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def upsert_company_snapshot(
+    session: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    company_name: str,
+    snapshot_json: dict[str, Any],
+    source_urls: list[str],
+    model_name: str,
+) -> CompanySnapshotRow:
+    """One snapshot per job; refresh replaces."""
+    existing = await get_company_snapshot_by_job(session, job_id)
+    if existing is None:
+        row = CompanySnapshotRow(
+            job_id=job_id,
+            company_name=company_name,
+            snapshot_json=snapshot_json,
+            source_urls=source_urls,
+            model_name=model_name,
+        )
+        session.add(row)
+    else:
+        existing.company_name = company_name
+        existing.snapshot_json = snapshot_json
+        existing.source_urls = source_urls
         existing.model_name = model_name
         row = existing
     await session.commit()

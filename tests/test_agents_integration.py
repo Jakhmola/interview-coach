@@ -21,6 +21,7 @@ import httpx
 import pytest
 from reportlab.pdfgen import canvas
 
+from interview_coach.agents.nodes.company_researcher import research_company
 from interview_coach.agents.nodes.job_analyzer import analyze_job
 from interview_coach.agents.nodes.profile_builder import build_profile
 
@@ -57,8 +58,16 @@ You will: design and own backend services, mentor mid-level engineers,
 collaborate with product, write production-grade code.
 We value ownership, clear written communication, and pragmatism."""
 
+# A JD that names a real, well-indexed public company so the CompanyResearcher
+# loop has something to find. Used only by the company-research integration test.
+JD_TEXT_REAL_COMPANY = """Member of Technical Staff at Anthropic.
+You will help build safe, beneficial AI systems alongside the research team.
+Required: strong Python, distributed systems experience, ML familiarity.
+Nice to have: experience with LLMs, evaluations, or applied research.
+We value clear written communication, technical rigor, and a focus on safety."""
 
-async def _setup() -> tuple[uuid.UUID, uuid.UUID]:
+
+async def _setup(jd_text: str = JD_TEXT) -> tuple[uuid.UUID, uuid.UUID]:
     """Returns (user_id, job_id) after seeding via the live API."""
     async with httpx.AsyncClient(timeout=30.0) as http:
         email = f"agent-int-{uuid.uuid4()}@test.com"
@@ -82,7 +91,7 @@ async def _setup() -> tuple[uuid.UUID, uuid.UUID]:
         r = await http.post(
             f"{API_URL}/jobs",
             headers={"Authorization": f"Bearer {token}"},
-            json={"text": JD_TEXT},
+            json={"text": jd_text},
         )
         r.raise_for_status()
         job_id = uuid.UUID(r.json()["id"])
@@ -102,3 +111,36 @@ async def test_job_analyzer_real_ollama() -> None:
     analysis = await analyze_job(job_id, user_id)
     assert analysis.title
     assert analysis.must_have_skills, f"expected must_have_skills, got {analysis!r}"
+
+
+async def test_company_researcher_real() -> None:
+    """End-to-end CompanyResearcher: real JobAnalyzer → real Tavily → real LLM.
+
+    Requires TAVILY_API_KEY in the api environment + a recognizable company
+    in the JD. Asserts non-empty mission and at least one product, plus a
+    persisted row.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from interview_coach.config import settings
+    from interview_coach.db import repos
+
+    user_id, job_id = await _setup(JD_TEXT_REAL_COMPANY)
+
+    analysis = await analyze_job(job_id, user_id)
+    assert analysis.company_name, (
+        f"phase 6 must populate company_name for this JD; got {analysis!r}"
+    )
+
+    snapshot = await research_company(job_id, user_id)
+    assert snapshot.mission, f"empty mission, got {snapshot!r}"
+    assert snapshot.products, f"expected at least one product, got {snapshot!r}"
+
+    # Verify the row landed.
+    engine = create_async_engine(settings.database_url)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as s:
+        row = await repos.get_company_snapshot_by_job(s, job_id)
+    await engine.dispose()
+    assert row is not None
+    assert row.source_urls, "expected at least one source URL on the persisted snapshot"

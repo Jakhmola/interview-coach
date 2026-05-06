@@ -72,3 +72,25 @@ class JobAnalysis(BaseModel):
         ),
     )
     company_name: str | None = None
+
+
+class CompanySnapshot(BaseModel):
+    """LLM-compressed view of a company, used by Phase 8 question generation."""
+
+    mission: str = Field(description="One-paragraph company mission / what they do.")
+    products: list[str] = Field(
+        default_factory=list,
+        description="Main products / business lines, short phrases.",
+    )
+    recent_news: list[str] = Field(
+        default_factory=list,
+        description="Notable recent news items, each one sentence; max 5.",
+    )
+    values_and_signals: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Cultural values + interview signals candidates should be ready for "
+            "(e.g. 'customer obsession', 'high autonomy', 'written-doc culture'). "
+            "Drives behavioral question selection downstream."
+        ),
+    )

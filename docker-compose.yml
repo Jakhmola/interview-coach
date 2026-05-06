@@ -22,7 +22,7 @@ services:
       - ${MODELS_DIR:-${HOME}/models}:/models:ro
     command:
       - "-m"
-      - "/models/${MODEL_FILE:-Qwen3-8B-Q4_K_M.gguf}"
+      - "/models/${MODEL_FILE:-Qwen3-8B-IQ4_XS.gguf}"
       - "--host"
       - "0.0.0.0"
       - "--port"
@@ -30,7 +30,7 @@ services:
       - "--n-gpu-layers"
       - "99"
       - "--ctx-size"
-      - "4096"
+      - "8192"
       - "--jinja"
       - "--alias"
       - "${MODEL_NAME:-qwen3-8b}"
