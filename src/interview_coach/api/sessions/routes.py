@@ -1,29 +1,40 @@
-"""Sessions + interview streaming endpoints (Phase 8)."""
+"""Sessions + interview streaming endpoints (Phase 8/9, rewritten Phase 10).
+
+Phase 10 routes the per-session interview lifecycle through a LangGraph
+``StateGraph`` (compiled once at lifespan startup, stashed on
+``app.state``). The on-the-wire SSE format is unchanged from Phase 9 —
+the route is a thin translator from the graph's custom-stream writer
+events to SSE events.
+"""
 
 from __future__ import annotations
 
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from interview_coach.agents.nodes.company_researcher import (
+    CompanyNameMissing,
+    NoSearchHits,
+    NoUsablePages,
+)
 from interview_coach.agents.nodes.evaluator import (
     TurnNotAnswered,
     TurnNotFound,
-    stream_evaluation,
 )
-from interview_coach.agents.nodes.question_generator import (
-    GenerationPrereqsMissing,
-    stream_question,
-)
+from interview_coach.agents.nodes.profile_builder import NoDocumentsError
+from interview_coach.agents.nodes.question_generator import GenerationPrereqsMissing
 from interview_coach.agents.streaming_json import StreamingJsonError
 from interview_coach.api.auth.deps import get_current_user
 from interview_coach.api.sessions.schemas import (
     AnswerSubmitRequest,
+    PrepareRequest,
     RoundType,
     SessionCreateRequest,
     SessionDetail,
@@ -116,13 +127,77 @@ async def abandon_session(
     return SessionOut.model_validate(row)
 
 
-@router.post("/{session_id}/next_question")
-async def next_question(
-    session_id: uuid.UUID,
+# --- Phase 10: prepare endpoint -------------------------------------
+
+
+@router.post("/prepare")
+async def prepare_session(
+    body: PrepareRequest,
+    request: Request,
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> StreamingResponse:
-    """SSE stream of the next question's tokens."""
+    """Run profile_builder → job_analyzer → company_researcher.
+
+    SSE stream of node lifecycle events. Node-level errors come back as
+    ``event: error`` mid-stream; pre-stream input errors come back as
+    HTTP 4xx.
+    """
+    job = await repos.get_job(session, body.job_id, user.id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "job_not_found")
+    docs = await repos.list_documents_for_user(session, user.id)
+    if not docs:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "no_documents")
+
+    prep_graph = request.app.state.prep_graph
+    initial_state: dict[str, Any] = {
+        "user_id": str(user.id),
+        "job_id": str(body.job_id),
+        "force_refresh": body.force_refresh,
+    }
+
+    async def event_stream() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in prep_graph.astream(initial_state, stream_mode="custom"):
+                # `chunk` is the dict our nodes wrote via get_stream_writer.
+                event = chunk.get("event")
+                if event in ("node_started", "node_done", "node_skipped"):
+                    yield sse_event(event, {k: v for k, v in chunk.items() if k != "event"})
+                elif event == "error":
+                    yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
+                    return
+            yield sse_event("done", {"job_id": str(body.job_id), "ready": True})
+        except (NoDocumentsError, NoSearchHits, NoUsablePages, CompanyNameMissing) as e:
+            yield sse_event("error", {"code": type(e).__name__, "detail": str(e)})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+# --- Phase 8/9 routes, rewritten to drive interview_graph -----------
+
+
+def _thread_config(session_id: uuid.UUID, turn_index: int) -> dict[str, Any]:
+    """One graph thread per (session, turn_index).
+
+    Each turn is its own pipeline (question_generator → interrupt →
+    evaluator → END). Per-turn thread_ids let a session walk forward
+    cleanly without colliding with prior turn checkpoints.
+    """
+    return {"configurable": {"thread_id": f"{session_id}:turn_{turn_index}"}}
+
+
+@router.post("/{session_id}/next_question")
+async def next_question(
+    session_id: uuid.UUID,
+    request: Request,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> StreamingResponse:
+    """SSE stream of the next question's tokens.
+
+    Drives ``interview_graph`` until it interrupts on the answer gate.
+    """
     row = await repos.get_session(session, session_id, user.id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "session_not_found")
@@ -135,13 +210,30 @@ async def next_question(
     if len(turns) >= row.n_questions:
         raise HTTPException(status.HTTP_409_CONFLICT, "session_complete")
 
+    turn_index = len(turns)
+    interview_graph = request.app.state.interview_graph
+    config = _thread_config(session_id, turn_index)
+    initial_state: dict[str, Any] = {
+        "user_id": str(user.id),
+        "session_id": str(session_id),
+        "round_type": row.round_type,
+        "n_questions": row.n_questions,
+        "turn_index": turn_index,
+    }
+
     async def event_stream() -> AsyncIterator[bytes]:
         try:
-            async for kind, data in stream_question(session_id=session_id, user_id=user.id):
-                if kind == "token":
-                    yield sse_event("token", data)
-                elif kind == "done":
-                    yield sse_event("done", data)
+            async for chunk in interview_graph.astream(
+                initial_state, config=config, stream_mode="custom"
+            ):
+                event = chunk.get("event")
+                if event == "token":
+                    yield sse_event("token", chunk.get("data", ""))
+                elif event == "done":
+                    yield sse_event("done", chunk.get("data", {}))
+                elif event == "error":
+                    yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
+                    return
         except GenerationPrereqsMissing as e:
             logger.warning("Generation prereqs missing for session=%s: %s", session_id, e)
             yield sse_event("error", {"code": str(e)})
@@ -160,10 +252,11 @@ async def next_question(
 async def submit_answer(
     session_id: uuid.UUID,
     body: AnswerSubmitRequest,
+    request: Request,
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> StreamingResponse:
-    """Save the answer on the latest turn, then stream the evaluator output."""
+    """Save the answer, resume the graph, and stream the evaluator output."""
     answer = body.answer.strip()
     if not answer:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty_answer")
@@ -178,36 +271,40 @@ async def submit_answer(
     if not turns:
         raise HTTPException(status.HTTP_409_CONFLICT, "no_active_turn")
     latest = turns[-1]
-    if latest.answer is not None and latest.score is None:
-        # Answer was saved already but evaluation didn't finish — allow re-streaming
-        # by treating as the active turn (idempotent submit).
-        pass
-    elif latest.score is not None:
+    if latest.answer is not None and latest.score is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "turn_already_evaluated")
 
     if latest.answer is None:
         await repos.update_turn_answer(session, latest.id, answer)
 
-    turn_id = latest.id
+    interview_graph = request.app.state.interview_graph
+    config = _thread_config(session_id, latest.turn_index)
 
     async def event_stream() -> AsyncIterator[bytes]:
         try:
-            async for kind, data in stream_evaluation(
-                session_id=session_id, user_id=user.id, turn_id=turn_id
+            async for chunk in interview_graph.astream(
+                Command(resume={"answer": answer}),
+                config=config,
+                stream_mode="custom",
             ):
-                # Wrap the bare int score in an object for the wire format
-                # documented in the phase 9 plan: `data: {"score": 7}`. Other
-                # events (string deltas, dict payloads) pass through.
-                if kind == "score":
-                    yield sse_event(kind, {"score": data})
-                elif kind == "feedback_done" or kind == "model_answer_done":
-                    yield sse_event(kind, {})
-                else:
-                    yield sse_event(kind, data)
+                event = chunk.get("event")
+                if event == "score":
+                    score_data = chunk.get("data")
+                    payload = score_data if isinstance(score_data, dict) else {"score": score_data}
+                    yield sse_event("score", payload)
+                elif event in ("feedback_token", "model_answer_token"):
+                    yield sse_event(event, chunk.get("data", ""))
+                elif event in ("feedback_done", "model_answer_done"):
+                    yield sse_event(event, {})
+                elif event == "done":
+                    yield sse_event("done", chunk.get("data", {}))
+                elif event == "error":
+                    yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
+                    return
         except (TurnNotFound, TurnNotAnswered) as e:
             yield sse_event("error", {"code": type(e).__name__, "detail": str(e)})
         except StreamingJsonError as e:
-            logger.exception("Evaluator streaming failed for turn=%s", turn_id)
+            logger.exception("Evaluator streaming failed for session=%s", session_id)
             yield sse_event("error", {"code": "streaming_json_error", "detail": str(e)})
 
     return StreamingResponse(

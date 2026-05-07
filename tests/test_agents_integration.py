@@ -277,3 +277,99 @@ async def test_full_loop_real() -> None:
     assert turn.model_answer == model_answer
     assert sess_fresh is not None
     assert sess_fresh.status == "complete"
+
+
+async def test_resumability_real(tmp_path: Any) -> None:
+    """Phase 10: drive interview_graph against an AsyncSqliteSaver backed
+    by a real SQLite file, interrupt at the answer gate, **close + reopen
+    the saver** (simulating an api restart), then resume with an answer
+    and assert evaluation completes against the persisted checkpoint.
+    """
+    from langgraph.types import Command
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from interview_coach.agents.graph import build_interview_graph, open_checkpointer
+    from interview_coach.config import settings
+    from interview_coach.db import repos
+
+    user_id, job_id = await _setup(JD_TEXT_REAL_COMPANY)
+
+    await build_profile(user_id)
+    await analyze_job(job_id, user_id)
+    await research_company(job_id, user_id)
+
+    engine = create_async_engine(settings.database_url)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as s:
+        sess = await repos.create_session(
+            s,
+            user_id=user_id,
+            job_id=job_id,
+            round_type="resume_walkthrough",
+            n_questions=1,
+        )
+    session_id = sess.id
+
+    db_path = str(tmp_path / "graph.sqlite")
+    thread_cfg = {"configurable": {"thread_id": f"{session_id}:turn_0"}}
+    initial_state = {
+        "user_id": str(user_id),
+        "session_id": str(session_id),
+        "round_type": "resume_walkthrough",
+        "n_questions": 1,
+        "turn_index": 0,
+    }
+
+    # First "process": run question_generator → interrupt at await_answer.
+    streamed_question = ""
+    async with open_checkpointer(db_path) as saver:
+        graph = build_interview_graph(saver)
+        async for chunk in graph.astream(initial_state, config=thread_cfg, stream_mode="custom"):
+            if chunk.get("event") == "token":
+                streamed_question += chunk["data"]
+    assert streamed_question.strip(), "question must stream out before we 'restart'"
+
+    # The Turn row was persisted by the question_generator.
+    async with factory() as s:
+        turns = await repos.list_turns_for_session(s, session_id)
+    assert len(turns) == 1
+    turn_id = turns[0].id
+
+    canned_answer = (
+        "I'd clarify scope, prototype the riskiest path, measure against an "
+        "explicit budget, then iterate. I've done this on async refactors "
+        "before — kept us on time and surfaced an issue early."
+    )
+    # Simulate the route persisting the answer (the route does this in
+    # production before resuming the graph).
+    async with factory() as s:
+        await repos.update_turn_answer(s, turn_id, canned_answer)
+
+    # Second "process": fresh saver from the same file, resume to evaluator.
+    score: int | None = None
+    final: dict[str, Any] | None = None
+    async with open_checkpointer(db_path) as saver:
+        graph = build_interview_graph(saver)
+        async for chunk in graph.astream(
+            Command(resume={"answer": canned_answer}),
+            config=thread_cfg,
+            stream_mode="custom",
+        ):
+            event = chunk.get("event")
+            if event == "score":
+                score = chunk["data"]
+            elif event == "done":
+                final = chunk["data"]
+
+    async with factory() as s:
+        turn = await repos.get_turn(s, turn_id)
+        sess_fresh = await repos.get_session(s, session_id, user_id)
+    await engine.dispose()
+
+    assert score is not None and 1 <= score <= 10
+    assert final is not None
+    assert final["session_status"] == "complete"
+    assert turn is not None
+    assert turn.score == score
+    assert sess_fresh is not None
+    assert sess_fresh.status == "complete"

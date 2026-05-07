@@ -1,7 +1,17 @@
-"""Placeholder for the LangGraph state graph (Phase 10).
+"""Shared TypedDict state for the LangGraph supervisor (Phase 10).
 
-Defined here in Phase 6 so node code and downstream agents can reference a
-single shared type. Phase 10 wires this into a `StateGraph` and the supervisor.
+Two compiled graphs share this same state:
+
+* ``prep_graph`` — runs ProfileBuilder → JobAnalyzer → CompanyResearcher.
+  Reads ``user_id``, ``job_id``, ``force_refresh``; sets ``profile``,
+  ``job``, ``company``, ``prep_done``.
+* ``interview_graph`` — runs QuestionGenerator → (interrupt) → Evaluator,
+  looping until the session completes. Reads ``user_id``, ``session_id``,
+  ``round_type``, ``n_questions``; mutates ``current_question``,
+  ``current_answer``, ``evaluation``, ``turn_index``, ``session_status``.
+
+Both graphs use ``next_step`` for observability (Langfuse Phase 11) and
+to make the conditional-edge routing self-documenting.
 """
 
 from __future__ import annotations
@@ -9,28 +19,33 @@ from __future__ import annotations
 from typing import Any, Literal, TypedDict
 
 RoundType = Literal["resume_walkthrough", "behavioral_star"]
+SessionStatus = Literal["active", "complete", "abandoned"]
 
 
 class InterviewState(TypedDict, total=False):
+    # --- identity ---
     user_id: str
-    session_id: str
+    session_id: str  # only set on interview_graph runs
+    job_id: str  # only set on prep_graph runs
     round_type: RoundType
+    n_questions: int
 
-    # Built by ProfileBuilder + JobAnalyzer (Phase 6)
+    # --- prep outputs ---
     profile: dict[str, Any] | None
     job: dict[str, Any] | None
-
-    # Built by CompanyResearcher (Phase 7)
     company: dict[str, Any] | None
+    prep_done: bool
+    force_refresh: bool
 
-    # Per-turn fields (Phase 8/9)
+    # --- per-turn fields ---
     current_question: dict[str, Any] | None
     current_answer: str | None
     evaluation: dict[str, Any] | None
     turn_index: int
+    session_status: SessionStatus
 
-    # Supervisor routing (Phase 10)
+    # --- supervisor routing / observability ---
     next_step: str
 
-    # LangGraph chat history (Phase 10)
+    # --- LangGraph chat history (reserved; unused in v1) ---
     messages: list[Any]

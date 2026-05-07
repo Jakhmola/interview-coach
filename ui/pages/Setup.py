@@ -145,6 +145,51 @@ except api_client.ApiError as e:
     st.error(e.detail)
     jobs = []
 
+NODE_LABELS = {
+    "profile_builder": "Profile builder",
+    "job_analyzer": "Job analyzer",
+    "company_researcher": "Company researcher",
+}
+
+
+def _run_prep(token: str, job_id: str, force_refresh: bool = False) -> None:
+    """Drive the /sessions/prepare SSE stream and render per-node progress."""
+    has_cv = any(d["kind"] == "cv" for d in docs)
+    if not has_cv:
+        st.error("Upload a CV first — profile_builder needs a document to read.")
+        return
+
+    with st.status("Preparing for interview…", expanded=True) as status:
+        rows: dict[str, st.delta_generator.DeltaGenerator] = {n: st.empty() for n in NODE_LABELS}
+        for n, label in NODE_LABELS.items():
+            rows[n].markdown(f"⚪ **{label}** — pending")
+        try:
+            for frame in api_client.prepare_session(token, job_id, force_refresh=force_refresh):
+                ev = frame["event"]
+                data = frame["data"]
+                node = data.get("node")
+                if ev == "node_started" and node in rows:
+                    rows[node].markdown(f"🟡 **{NODE_LABELS[node]}** — running…")
+                elif ev == "node_done" and node in rows:
+                    rows[node].markdown(f"🟢 **{NODE_LABELS[node]}** — done")
+                elif ev == "node_skipped" and node in rows:
+                    reason = data.get("reason", "cached")
+                    rows[node].markdown(f"🔵 **{NODE_LABELS[node]}** — skipped ({reason})")
+                elif ev == "error":
+                    code = data.get("code", "error")
+                    detail = data.get("detail", "")
+                    if node in rows:
+                        rows[node].markdown(f"🔴 **{NODE_LABELS[node]}** — {code}")
+                    status.update(label=f"Failed: {code} — {detail}", state="error")
+                    return
+                elif ev == "done":
+                    status.update(label="Ready — start interview", state="complete")
+                    st.page_link("pages/Interview.py", label="Go to Interview →")
+                    return
+        except api_client.ApiError as e:
+            status.update(label=f"Prep failed: {e.detail}", state="error")
+
+
 if not jobs:
     st.info("No JDs yet.")
 else:
@@ -167,3 +212,14 @@ else:
                 st.text(preview if preview else "(empty)")
                 if j["char_count"] > len(preview):
                     st.caption(f"... preview only; full text is {j['char_count']:,} chars")
+
+            # Phase 10: prepare button — runs the prep graph end-to-end.
+            prep_cols = st.columns([2, 2, 4])
+            if prep_cols[0].button("Prepare for interview", key=f"prep-{j['id']}"):
+                _run_prep(token, j["id"], force_refresh=False)
+            if prep_cols[1].button(
+                "Re-research",
+                key=f"reprep-{j['id']}",
+                help="Force company_researcher to re-run",
+            ):
+                _run_prep(token, j["id"], force_refresh=True)

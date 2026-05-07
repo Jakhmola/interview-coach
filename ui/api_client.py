@@ -324,3 +324,47 @@ def submit_answer(token: str, session_id: str, answer: str) -> EvaluationStreamR
     result = EvaluationStreamResult()
     result._open(token, session_id, answer)
     return result
+
+
+# --- prepare ---
+
+
+def prepare_session(token: str, job_id: str, force_refresh: bool = False) -> Iterator[dict]:
+    """Consume the SSE stream from POST /sessions/prepare.
+
+    Yields ``{"event": <name>, "data": <dict>}`` per SSE frame. The page
+    can render a per-node progress table from these. Pre-stream errors
+    raise ApiError.
+    """
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "text/event-stream",
+    }
+    body = {"job_id": job_id, "force_refresh": force_refresh}
+    with httpx.Client(base_url=API_BASE_URL, headers=headers, timeout=600.0) as c:
+        with c.stream("POST", "/sessions/prepare", json=body) as r:
+            if not r.is_success:
+                payload = b"".join(r.iter_bytes()).decode("utf-8", errors="replace")
+                try:
+                    detail = json.loads(payload).get("detail", payload)
+                except Exception:
+                    detail = payload
+                raise ApiError(r.status_code, detail)
+            event = "message"
+            for raw in r.iter_lines():
+                line = raw if isinstance(raw, str) else raw.decode("utf-8")
+                if line == "":
+                    event = "message"
+                    continue
+                if line.startswith(":"):
+                    continue
+                if line.startswith("event:"):
+                    event = line[len("event:") :].strip()
+                    continue
+                if line.startswith("data:"):
+                    payload_str = line[len("data:") :].strip()
+                    try:
+                        data = json.loads(payload_str)
+                    except json.JSONDecodeError:
+                        data = {"raw": payload_str}
+                    yield {"event": event, "data": data}

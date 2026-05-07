@@ -55,6 +55,9 @@ services:
       # Talk to the llama service over the docker network (NOT host.docker.internal).
       LLM_BASE_URL: http://llama:8080/v1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      GRAPH_DB_PATH: /data/graph_checkpoints.sqlite
+    volumes:
+      - graph_data:/data
     ports:
       - "8000:8000"
     depends_on:
@@ -88,3 +91,4 @@ services:
 
 volumes:
   pg_data:
+  graph_data:

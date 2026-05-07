@@ -47,6 +47,17 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+
+    # Phase 10: routes read compiled graphs off `app.state`. The FastAPI
+    # lifespan (which builds them in production) doesn't run under
+    # ASGITransport, so we install in-memory equivalents here.
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from interview_coach.agents.graph import build_interview_graph, build_prep_graph
+
+    app.state.prep_graph = build_prep_graph()
+    app.state.interview_graph = build_interview_graph(MemorySaver())
+
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac

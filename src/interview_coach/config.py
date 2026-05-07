@@ -30,5 +30,11 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None  # ignored by local servers; required by OpenAI proper
     model_name: str = "qwen3-8b"
 
+    # SQLite file holding the LangGraph checkpointer state for the
+    # interview_graph. In compose, this lives on the `graph_data` named
+    # volume mounted at /data; on the host (pytest, scripts) it can be
+    # overridden via .env to a workspace path or `:memory:`.
+    graph_db_path: str = "/data/graph_checkpoints.sqlite"
+
 
 settings = Settings()

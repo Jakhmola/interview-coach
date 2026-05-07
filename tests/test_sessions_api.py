@@ -187,18 +187,22 @@ async def test_abandon(client: AsyncClient, auth_token: str, db_session: AsyncSe
 
 
 def _patch_node_session_factory(monkeypatch: pytest.MonkeyPatch, db_session: AsyncSession) -> None:
-    """Point both agent nodes' AsyncSessionLocal at the test's in-memory engine.
+    """Point all agent layers' AsyncSessionLocal at the test's in-memory engine.
 
-    The SSE routes pass through `stream_question` / `stream_evaluation`, which
-    open `AsyncSessionLocal()` directly (not via `get_db`), so the FastAPI
-    `dependency_overrides` we set up in conftest don't reach them.
+    The SSE routes pass through `stream_question` / `stream_evaluation` and
+    Phase 10's `graph_nodes`, all of which open `AsyncSessionLocal()`
+    directly (not via `get_db`). FastAPI `dependency_overrides` from
+    conftest don't reach them.
     """
     from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from interview_coach.agents import graph_nodes
 
     bind = db_session.bind
     factory = async_sessionmaker(bind, expire_on_commit=False)
     monkeypatch.setattr(question_generator, "AsyncSessionLocal", factory)
     monkeypatch.setattr(evaluator, "AsyncSessionLocal", factory)
+    monkeypatch.setattr(graph_nodes, "AsyncSessionLocal", factory)
 
 
 def _patch_streaming_llm(
@@ -640,3 +644,219 @@ async def test_answer_resume_after_partial_evaluation(
     turn = detail["turns"][0]
     assert turn["answer"] == "saved earlier"
     assert turn["score"] == 8
+
+
+# --- Phase 10: /sessions/prepare ---
+
+
+async def _seed_user_and_job(
+    client: AsyncClient, auth_token: str, db_session: AsyncSession, *, with_doc: bool = True
+) -> dict[str, str]:
+    me = await client.get("/auth/me", headers=_auth(auth_token))
+    user_id = me.json()["id"]
+    if with_doc:
+        # The prep route insists on at least one doc for profile_builder.
+        from interview_coach.db.models import Document
+
+        doc = Document(
+            user_id=__import__("uuid").UUID(user_id),
+            kind="cv",
+            filename="alice.pdf",
+            content_type="application/pdf",
+            byte_size=10,
+            raw_text="Alice Engineer",
+        )
+        db_session.add(doc)
+        await db_session.commit()
+    r = await client.post(
+        "/jobs",
+        headers=_auth(auth_token),
+        json={"text": "Senior backend engineer at Acme."},
+    )
+    return {"user_id": user_id, "job_id": r.json()["id"]}
+
+
+async def test_prepare_runs_all_three_nodes(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty caches → 3× node_started + node_done + final done."""
+    seeds = await _seed_user_and_job(client, auth_token, db_session)
+    _patch_node_session_factory(monkeypatch, db_session)
+
+    # Stub out the underlying agent functions so we don't hit LLM/Tavily.
+    from interview_coach.agents import graph_nodes
+
+    class _P:
+        def model_dump(self) -> dict[str, Any]:
+            return {
+                "summary": "x",
+                "skills": [],
+                "experiences": [],
+                "projects": [],
+                "education": [],
+            }
+
+    class _A:
+        def model_dump(self) -> dict[str, Any]:
+            return {
+                "title": "x",
+                "seniority": "senior",
+                "must_have_skills": [],
+                "nice_to_have_skills": [],
+                "responsibilities": [],
+                "behavioral_signals": [],
+                "company_name": "Acme",
+            }
+
+    class _S:
+        def model_dump(self) -> dict[str, Any]:
+            return {"mission": "x", "products": [], "recent_news": [], "values_and_signals": []}
+
+    async def fbp(*_a: Any, **_k: Any) -> _P:
+        return _P()
+
+    async def faj(*_a: Any, **_k: Any) -> _A:
+        return _A()
+
+    async def frc(*_a: Any, **_k: Any) -> _S:
+        return _S()
+
+    monkeypatch.setattr(graph_nodes, "build_profile", fbp)
+    monkeypatch.setattr(graph_nodes, "analyze_job", faj)
+    monkeypatch.setattr(graph_nodes, "research_company", frc)
+
+    events = await _read_sse_with_body(
+        client, "/sessions/prepare", auth_token, body={"job_id": seeds["job_id"]}
+    )
+
+    started = [d for ev, d in events if ev == "node_started"]
+    done = [d for ev, d in events if ev == "node_done"]
+    assert [d["node"] for d in started] == [
+        "profile_builder",
+        "job_analyzer",
+        "company_researcher",
+    ]
+    assert [d["node"] for d in done] == [
+        "profile_builder",
+        "job_analyzer",
+        "company_researcher",
+    ]
+    final = next(d for ev, d in events if ev == "done")
+    assert final == {"job_id": seeds["job_id"], "ready": True}
+
+
+async def test_prepare_skips_when_all_cached(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pre-populated profile / parsed_json / snapshot → 3× node_skipped."""
+    import uuid as _uuid
+
+    seeds = await _seed_user_and_job(client, auth_token, db_session)
+    _patch_node_session_factory(monkeypatch, db_session)
+    user_id = _uuid.UUID(seeds["user_id"])
+    job_id = _uuid.UUID(seeds["job_id"])
+
+    # Cache the user's profile keyed off the actual doc list.
+    docs = await repos.list_documents_for_user(db_session, user_id)
+    await repos.upsert_profile(
+        db_session,
+        user_id=user_id,
+        profile_json={
+            "summary": "x",
+            "skills": [],
+            "experiences": [],
+            "projects": [],
+            "education": [],
+        },
+        source_doc_ids=[str(d.id) for d in docs],
+        model_name="qwen3-8b",
+    )
+    await repos.update_job_parsed_json(
+        db_session,
+        job_id,
+        user_id,
+        {
+            "title": "x",
+            "seniority": "senior",
+            "must_have_skills": [],
+            "nice_to_have_skills": [],
+            "responsibilities": [],
+            "behavioral_signals": [],
+            "company_name": "Acme",
+        },
+    )
+    await repos.upsert_company_snapshot(
+        db_session,
+        job_id=job_id,
+        company_name="Acme",
+        snapshot_json={"mission": "x", "products": [], "recent_news": [], "values_and_signals": []},
+        source_urls=[],
+        model_name="qwen3-8b",
+    )
+
+    events = await _read_sse_with_body(
+        client, "/sessions/prepare", auth_token, body={"job_id": seeds["job_id"]}
+    )
+
+    skipped = [d for ev, d in events if ev == "node_skipped"]
+    assert [d["node"] for d in skipped] == [
+        "profile_builder",
+        "job_analyzer",
+        "company_researcher",
+    ]
+    assert any(ev == "done" for ev, _ in events)
+
+
+async def test_prepare_404_unknown_job(
+    client: AsyncClient, auth_token: str, db_session: AsyncSession
+) -> None:
+    r = await client.post(
+        "/sessions/prepare",
+        headers=_auth(auth_token),
+        json={"job_id": "00000000-0000-0000-0000-000000000000"},
+    )
+    assert r.status_code == 404
+    assert r.json()["detail"] == "job_not_found"
+
+
+async def test_prepare_400_no_documents(
+    client: AsyncClient, auth_token: str, db_session: AsyncSession
+) -> None:
+    seeds = await _seed_user_and_job(client, auth_token, db_session, with_doc=False)
+    r = await client.post(
+        "/sessions/prepare",
+        headers=_auth(auth_token),
+        json={"job_id": seeds["job_id"]},
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"] == "no_documents"
+
+
+async def _read_sse_with_body(
+    client: AsyncClient, url: str, token: str, body: dict[str, Any]
+) -> list[tuple[str, Any]]:
+    events: list[tuple[str, Any]] = []
+    async with client.stream("POST", url, headers=_auth(token), json=body) as r:
+        assert r.status_code == 200, await r.aread()
+        event = "message"
+        async for line in r.aiter_lines():
+            if line == "":
+                event = "message"
+                continue
+            if line.startswith("event:"):
+                event = line[len("event:") :].strip()
+                continue
+            if line.startswith("data:"):
+                payload = line[len("data:") :].strip()
+                try:
+                    data = json.loads(payload)
+                except json.JSONDecodeError:
+                    data = payload
+                events.append((event, data))
+    return events

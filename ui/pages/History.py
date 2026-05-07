@@ -75,7 +75,9 @@ for sess in sessions:
                         st.markdown("**Feedback.**")
                         st.write(t["feedback"])
                     if t.get("model_answer"):
-                        with st.expander("Model answer", expanded=False):
+                        # Streamlit forbids nested expanders. Use a popover
+                        # (which is allowed inside an expander) instead.
+                        with st.popover("Show model answer"):
                             st.write(t["model_answer"])
                 else:
                     st.caption("_no evaluation_")

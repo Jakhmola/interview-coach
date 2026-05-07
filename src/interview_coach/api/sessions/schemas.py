@@ -57,3 +57,8 @@ class SessionDetail(SessionOut):
 
 class AnswerSubmitRequest(BaseModel):
     answer: str
+
+
+class PrepareRequest(BaseModel):
+    job_id: uuid.UUID
+    force_refresh: bool = False

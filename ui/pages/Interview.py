@@ -21,6 +21,40 @@ ROUND_LABELS = {
 # --- Session picker / starter ---
 
 if "interview_session_id" not in st.session_state:
+    # Resume offer: any active server-side sessions for this user?
+    try:
+        all_sessions = api_client.list_sessions(token)
+    except api_client.ApiError as e:
+        st.error(e.detail)
+        all_sessions = []
+    active_sessions = [s for s in all_sessions if s.get("status") == "active"]
+
+    if active_sessions:
+        st.subheader("Resume an active session")
+        st.caption(
+            "You have unfinished interview(s). Pick one to continue, or start a new round below."
+        )
+        for s in active_sessions:
+            sid = s["id"]
+            label = (
+                f"**{ROUND_LABELS.get(s['round_type'], s['round_type'])}** — "
+                f"{s['created_at'][:19].replace('T', ' ')} — "
+                f"{s['n_questions']} question(s)"
+            )
+            cols = st.columns([5, 2, 2])
+            cols[0].markdown(label)
+            if cols[1].button("Resume", key=f"resume-{sid}", type="primary"):
+                st.session_state["interview_session_id"] = sid
+                st.session_state["interview_round_type"] = s["round_type"]
+                st.rerun()
+            if cols[2].button("Abandon", key=f"abandon-{sid}"):
+                try:
+                    api_client.abandon_session(token, sid)
+                    st.rerun()
+                except api_client.ApiError as e:
+                    st.error(e.detail)
+        st.divider()
+
     st.subheader("Start a new round")
 
     try:
@@ -60,18 +94,11 @@ if "interview_session_id" not in st.session_state:
             st.session_state["interview_round_type"] = sess["round_type"]
             st.rerun()
         except api_client.ApiError as e:
+            prep_hint = "Go to Setup and click 'Prepare for interview' on this JD."
             hints = {
-                "profile_missing": (
-                    "Run ProfileBuilder first — your CV needs to be parsed into a profile. "
-                    "(Phase 6 wires this from the Setup page; for now it's a backend step.)"
-                ),
-                "job_not_analyzed": (
-                    "Run JobAnalyzer on this JD first. (Phase 6 wires this; backend step for now.)"
-                ),
-                "company_snapshot_missing": (
-                    "Run CompanyResearcher for this JD first. "
-                    "(Phase 7 wires this; backend step for now.)"
-                ),
+                "profile_missing": f"No profile yet — {prep_hint}",
+                "job_not_analyzed": f"JD not analyzed yet — {prep_hint}",
+                "company_snapshot_missing": f"No company snapshot yet — {prep_hint}",
             }
             st.error(hints.get(e.detail, e.detail))
 
