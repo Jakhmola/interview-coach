@@ -187,13 +187,15 @@ async def test_generate_resume_walkthrough_streams_and_persists(
         "candidate vs team",
     ]
 
-    # User message includes profile context (the project name) and round_type.
+    # User message includes profile context (the project name), round_type,
+    # and the deterministic picker's chosen focus_target.
     [system_msg, user_msg] = captured[0]
     assert "AsyncAPI" in user_msg.content
     assert '"round_type": "resume_walkthrough"' in user_msg.content
+    assert '"focus_target":' in user_msg.content
 
 
-async def test_generate_behavioral_threads_focus_signal(
+async def test_generate_behavioral_threads_focus_target(
     agent_session: AsyncSession,
     alice: User,
     seeded_job: Job,
@@ -202,7 +204,12 @@ async def test_generate_behavioral_threads_focus_signal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sess = await _make_session(agent_session, alice, seeded_job, round_type="behavioral_star")
-    monkeypatch.setattr("random.choice", lambda xs: xs[0])  # deterministic: "ownership"
+    # Force the weighted-sample to pick the first candidate ("ownership").
+    monkeypatch.setattr(
+        question_generator.random.Random,
+        "choices",
+        lambda self, population, weights=None, k=1: [population[0]],
+    )
     captured = _patch_streaming_llm(
         monkeypatch,
         [
@@ -220,13 +227,13 @@ async def test_generate_behavioral_threads_focus_signal(
 
     assert streamed == "Tell me about a time you took ownership."
     [_sys, user_msg] = captured[0]
-    assert '"focus_signal": "ownership"' in user_msg.content
+    assert '"focus_target": "ownership"' in user_msg.content
 
-    # Metadata records the chosen signal.
+    # Metadata records the chosen focus key.
     factory = question_generator.AsyncSessionLocal
     async with factory() as fresh:
         turns = await repos.list_turns_for_session(fresh, sess.id)
-    assert turns[0].metadata_json == {"focus_signal": "ownership"}
+    assert turns[0].metadata_json == {"focus_key": "ownership"}
 
 
 async def test_behavioral_falls_back_to_company_signals(
@@ -266,7 +273,11 @@ async def test_behavioral_falls_back_to_company_signals(
         model_name="qwen3-8b",
     )
     sess = await _make_session(agent_session, alice, seeded_job, round_type="behavioral_star")
-    monkeypatch.setattr("random.choice", lambda xs: xs[0])
+    monkeypatch.setattr(
+        question_generator.random.Random,
+        "choices",
+        lambda self, population, weights=None, k=1: [population[0]],
+    )
     captured = _patch_streaming_llm(
         monkeypatch,
         ['{"question": "X", "anchors": ["a", "b", "c"]}'],
@@ -276,7 +287,7 @@ async def test_behavioral_falls_back_to_company_signals(
         pass
 
     [_sys, user_msg] = captured[0]
-    assert '"focus_signal": "written-doc culture"' in user_msg.content
+    assert '"focus_target": "written-doc culture"' in user_msg.content
 
 
 async def test_prereqs_missing_profile(
@@ -338,6 +349,79 @@ async def test_session_not_found(
             session_id=uuid.uuid4(), user_id=alice.id
         ):
             pass
+
+
+async def test_picker_sees_prior_focus_keys_across_calls(
+    agent_session: AsyncSession,
+    alice: User,
+    seeded_job: Job,
+    seeded_profile: None,
+    seeded_snapshot: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two consecutive stream_question calls in the same session: the second
+    call's picker must see the first call's focus_key in prior_focus_counts."""
+    # Add a second behavioral signal so the picker has somewhere to rotate to.
+    await repos.update_job_parsed_json(
+        agent_session,
+        seeded_job.id,
+        alice.id,
+        {
+            "title": "Senior Backend Engineer",
+            "seniority": "senior",
+            "must_have_skills": ["python"],
+            "nice_to_have_skills": [],
+            "responsibilities": [],
+            "behavioral_signals": ["ownership", "mentorship"],
+            "company_name": "Acme",
+        },
+    )
+    sess = await _make_session(agent_session, alice, seeded_job, round_type="behavioral_star")
+
+    observed_counts: list[dict[str, int]] = []
+    real_pick = question_generator._pick_focus_target
+
+    def capturing_pick(**kwargs: Any) -> Any:
+        observed_counts.append(dict(kwargs["prior_focus_counts"]))
+        return real_pick(**kwargs)
+
+    monkeypatch.setattr(question_generator, "_pick_focus_target", capturing_pick)
+    # First call picks index 0, second call picks index 1 deterministically.
+    call_count = {"n": 0}
+
+    def fake_choices(
+        self: Any, population: list[Any], weights: Any = None, k: int = 1
+    ) -> list[Any]:
+        idx = call_count["n"] % len(population)
+        call_count["n"] += 1
+        return [population[idx]]
+
+    monkeypatch.setattr(question_generator.random.Random, "choices", fake_choices)
+    _patch_streaming_llm(
+        monkeypatch,
+        ['{"question": "Q1", "anchors": ["a", "b", "c"]}'],
+    )
+
+    async for _ in question_generator.stream_question(session_id=sess.id, user_id=alice.id):
+        pass
+
+    # Second call: re-patch the LLM stream (the previous _FakeBound is exhausted)
+    # but keep the same fake_choices counter so we exercise the rotation.
+    _patch_streaming_llm(
+        monkeypatch,
+        ['{"question": "Q2", "anchors": ["a", "b", "c"]}'],
+    )
+    async for _ in question_generator.stream_question(session_id=sess.id, user_id=alice.id):
+        pass
+
+    assert observed_counts[0] == {}
+    assert observed_counts[1] == {"ownership": 1}
+
+    factory = question_generator.AsyncSessionLocal
+    async with factory() as fresh:
+        turns = await repos.list_turns_for_session(fresh, sess.id)
+    keys = [t.metadata_json["focus_key"] for t in turns]
+    assert keys == ["ownership", "mentorship"]
 
 
 async def test_prior_turns_threaded_into_prompt(

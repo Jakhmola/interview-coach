@@ -239,6 +239,51 @@ async def list_turns_for_session(session: AsyncSession, session_id: uuid.UUID) -
     return result.scalars().all()
 
 
+async def list_prior_focus_keys_for_user_job(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    round_type: str,
+    limit: int = 50,
+) -> list[str]:
+    """Return focus_keys from this user's prior turns for this job+round, newest first.
+
+    Joins turns → sessions to scope by (user_id, job_id, round_type). Drops rows
+    whose metadata_json is NULL or missing a `focus_key`. The picker uses this
+    to compute inverse-frequency weights across sessions, so a single user
+    grinding the same JD over and over rotates through their experiences and
+    competencies rather than re-drilling the most prominent one each time.
+    """
+    result = await session.execute(
+        select(TurnRow.metadata_json)
+        .join(SessionRow, TurnRow.session_id == SessionRow.id)
+        .where(
+            SessionRow.user_id == user_id,
+            SessionRow.job_id == job_id,
+            SessionRow.round_type == round_type,
+            TurnRow.metadata_json.is_not(None),
+        )
+        .order_by(TurnRow.created_at.desc())
+        .limit(limit)
+    )
+    keys: list[str] = []
+    for (metadata,) in result.all():
+        if isinstance(metadata, dict):
+            key = metadata.get("focus_key")
+            if isinstance(key, str) and key:
+                keys.append(key)
+    return keys
+
+
+def count_focus_keys(focus_keys: list[str]) -> dict[str, int]:
+    """Pure helper: turn an ordered list of focus_keys into a {key: count} map."""
+    counts: dict[str, int] = {}
+    for key in focus_keys:
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 async def latest_turn(session: AsyncSession, session_id: uuid.UUID) -> TurnRow | None:
     result = await session.execute(
         select(TurnRow)

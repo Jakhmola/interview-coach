@@ -15,8 +15,9 @@ from __future__ import annotations
 import json
 import logging
 import random
+import re
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -73,23 +74,128 @@ async def _load_context(session_row: SessionRow) -> dict[str, Any]:
     }
 
 
-def _pick_focus_signal(
-    job_analysis: dict[str, Any], company_snapshot: dict[str, Any]
-) -> str | None:
-    """For behavioral_star: pick one signal to anchor the question on."""
-    candidates: Sequence[str] = job_analysis.get("behavioral_signals") or []
-    if not candidates:
-        candidates = company_snapshot.get("values_and_signals") or []
+_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+.#]*")
+
+
+def _tokens(text: str) -> set[str]:
+    return set(_TOKEN_RE.findall(text.lower()))
+
+
+def _experience_focus_key(exp: dict[str, Any], idx: int) -> str:
+    company = (exp.get("company") or "").strip()
+    role = (exp.get("role") or "").strip()
+    if company or role:
+        return f"experience:{company}/{role}".strip("/")
+    return f"experience:idx_{idx}"
+
+
+def _project_focus_key(proj: dict[str, Any], idx: int) -> str:
+    name = (proj.get("name") or "").strip()
+    if name:
+        return f"project:{name}"
+    return f"project:idx_{idx}"
+
+
+def _experience_label(exp: dict[str, Any]) -> str:
+    role = (exp.get("role") or "").strip()
+    company = (exp.get("company") or "").strip()
+    if role and company:
+        return f"{role} @ {company}"
+    return role or company or "(unnamed experience)"
+
+
+def _project_label(proj: dict[str, Any]) -> str:
+    name = (proj.get("name") or "").strip()
+    description = (proj.get("description") or "").strip()
+    if name and description:
+        return f"{name} — {description}"
+    return name or description or "(unnamed project)"
+
+
+def _resume_candidate_corpus(item_kind: str, item: dict[str, Any]) -> set[str]:
+    """Token bag used to score JD overlap for a resume candidate."""
+    if item_kind == "experience":
+        parts: list[str] = [
+            str(item.get("role") or ""),
+            str(item.get("company") or ""),
+            *[str(h) for h in (item.get("highlights") or [])],
+        ]
+    else:  # project
+        parts = [
+            str(item.get("name") or ""),
+            str(item.get("description") or ""),
+            *[str(t) for t in (item.get("tech") or [])],
+            str(item.get("role") or ""),
+        ]
+    return _tokens(" ".join(parts))
+
+
+def _pick_focus_target(
+    *,
+    round_type: str,
+    profile: dict[str, Any],
+    job_analysis: dict[str, Any],
+    company_snapshot: dict[str, Any],
+    prior_focus_counts: dict[str, int],
+    rng: random.Random,
+) -> tuple[str, str] | None:
+    """Pre-pick which experience / project / signal the question must drill into.
+
+    Returns (focus_key, focus_label) or None if no candidates are available.
+
+    Scoring:
+      inv_freq(k) = 1 / (1 + prior_focus_counts.get(k, 0))
+      resume_walkthrough: weight = (1 + jd_overlap_count) * inv_freq
+      behavioral_star:    weight = inv_freq
+    Then weighted-sample with `rng` so ties don't always pick the first.
+    """
+    candidates: list[tuple[str, str, float]] = []  # (key, label, weight)
+
+    if round_type == "resume_walkthrough":
+        must_have = _tokens(" ".join(str(s) for s in (job_analysis.get("must_have_skills") or [])))
+        for i, exp in enumerate(profile.get("experiences") or []):
+            if not isinstance(exp, dict):
+                continue
+            key = _experience_focus_key(exp, i)
+            label = _experience_label(exp)
+            overlap = len(_resume_candidate_corpus("experience", exp) & must_have)
+            inv_freq = 1.0 / (1.0 + prior_focus_counts.get(key, 0))
+            candidates.append((key, label, (1.0 + overlap) * inv_freq))
+        for i, proj in enumerate(profile.get("projects") or []):
+            if not isinstance(proj, dict):
+                continue
+            key = _project_focus_key(proj, i)
+            label = _project_label(proj)
+            overlap = len(_resume_candidate_corpus("project", proj) & must_have)
+            inv_freq = 1.0 / (1.0 + prior_focus_counts.get(key, 0))
+            candidates.append((key, label, (1.0 + overlap) * inv_freq))
+    elif round_type == "behavioral_star":
+        signals: list[str] = list(job_analysis.get("behavioral_signals") or [])
+        if not signals:
+            signals = list(company_snapshot.get("values_and_signals") or [])
+        for sig in signals:
+            sig_str = str(sig).strip()
+            if not sig_str:
+                continue
+            inv_freq = 1.0 / (1.0 + prior_focus_counts.get(sig_str, 0))
+            candidates.append((sig_str, sig_str, inv_freq))
+    else:
+        raise ValueError(f"unknown round_type: {round_type!r}")
+
     if not candidates:
         return None
-    return random.choice(list(candidates))
+
+    weights = [w for _, _, w in candidates]
+    keys_labels = [(k, lbl) for k, lbl, _ in candidates]
+    chosen_key, chosen_label = rng.choices(keys_labels, weights=weights, k=1)[0]
+    return chosen_key, chosen_label
 
 
 def _build_user_message(
     *,
     round_type: RoundType,
     context: dict[str, Any],
-    focus_signal: str | None,
+    focus_label: str | None,
     turn_index: int,
 ) -> str:
     """JSON payload of the structured context we hand to the LLM.
@@ -105,8 +211,8 @@ def _build_user_message(
         "company_snapshot": context["company_snapshot"],
         "prior_turns": context["prior_turns"],
     }
-    if focus_signal is not None:
-        payload["focus_signal"] = focus_signal
+    if focus_label is not None:
+        payload["focus_target"] = focus_label
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
@@ -150,23 +256,45 @@ async def stream_question(
     context = await _load_context(session_row)
 
     round_type: RoundType = session_row.round_type  # type: ignore[assignment]
-    focus_signal: str | None = None
-    if round_type == "behavioral_star":
-        focus_signal = _pick_focus_signal(context["job_analysis"], context["company_snapshot"])
+
+    async with AsyncSessionLocal() as s:
+        prior_keys = await repos.list_prior_focus_keys_for_user_job(
+            s,
+            user_id=session_row.user_id,
+            job_id=session_row.job_id,
+            round_type=round_type,
+        )
+    prior_counts = repos.count_focus_keys(prior_keys)
+
+    picked = _pick_focus_target(
+        round_type=round_type,
+        profile=context["profile"],
+        job_analysis=context["job_analysis"],
+        company_snapshot=context["company_snapshot"],
+        prior_focus_counts=prior_counts,
+        rng=random.Random(),
+    )
+    focus_key: str | None
+    focus_label: str | None
+    if picked is None:
+        focus_key, focus_label = None, None
+    else:
+        focus_key, focus_label = picked
 
     user_msg = _build_user_message(
         round_type=round_type,
         context=context,
-        focus_signal=focus_signal,
+        focus_label=focus_label,
         turn_index=turn_index,
     )
 
     logger.info(
-        "QuestionGenerator: session=%s turn=%d round=%s signal=%r",
+        "QuestionGenerator: session=%s turn=%d round=%s focus_key=%r prior_counts=%s",
         session_id,
         turn_index,
         round_type,
-        focus_signal,
+        focus_key,
+        prior_counts,
     )
 
     llm = chat_model(temperature=temperature).bind(response_format={"type": "json_object"})
@@ -209,8 +337,21 @@ async def stream_question(
         raise StreamingJsonError(f"final JSON failed schema validation: {e}") from e
 
     metadata: dict[str, Any] = {}
-    if focus_signal is not None:
-        metadata["focus_signal"] = focus_signal
+    if focus_key is not None:
+        metadata["focus_key"] = focus_key
+
+    if focus_label is not None:
+        label_tokens = _tokens(focus_label)
+        question_tokens = _tokens(question_obj.question)
+        # Heuristic: if no informative token from the focus label survives in
+        # the question, the LLM probably drifted. Warning only — qwen3 isn't
+        # perfectly steerable and substring matching misses paraphrases.
+        if label_tokens and not (label_tokens & question_tokens):
+            logger.warning(
+                "focus drift suspected: target=%r question=%r",
+                focus_label,
+                question_obj.question,
+            )
 
     async with AsyncSessionLocal() as s:
         turn = await repos.create_turn(
