@@ -1,0 +1,24 @@
+Daniel Okafor
+Senior Machine Learning Engineer
+
+Summary
+7 years of applied ML — search ranking, recommendations, and lately retrieval-augmented LLM systems. I like sitting at the boundary between modeling and serving; an offline win that doesn't survive contact with prod is not a win.
+
+Experience
+
+Vandelay AI — Senior ML Engineer (2022 – present)
+- Built SupportRAG: a retrieval-augmented chat assistant for the support team. Used bge-base embeddings into a FAISS HNSW index over ~200k docs; ColBERT-style reranker on top-50; small vLLM cluster for the generator. Cut median ticket resolution time 35% in the launch quarter.
+- Stood up vLLM serving behind an OpenAI-compatible API; tuned KV-cache settings and continuous batching to hit our cost-per-call target.
+- Owned the eval harness. Combined pairwise human ratings (collected through Label Studio) with an LLM-judge that we calibrated against the human set every two weeks. Caught two retrieval regressions that purely-offline metrics missed.
+
+Pied Piper — ML Engineer (2018 – 2022)
+- RankerV3: learned-to-rank model on top of the existing search candidate generator. LightGBM, ~80 features, trained nightly. CTR went up 8%; revenue-per-search went up 5%.
+- Migrated the feature store off cron + flat-file dumps onto Airflow + an online Redis layer; killed our 4 a.m. on-call pages.
+
+Projects
+- SupportRAG: Python, vLLM, FAISS, transformers, FastAPI. Tech lead.
+- RankerV3: Python, LightGBM, feature stores.
+
+Education
+MS Computer Science (ML focus), Carnegie Tech, 2015–2017.
+BS Computer Science, Carnegie Tech, 2011–2015.

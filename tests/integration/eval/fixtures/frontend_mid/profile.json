@@ -1,0 +1,44 @@
+{
+  "summary": "Mid-level frontend engineer with 4 years of React + TypeScript experience. Strong on accessibility and on the boundary between design systems and product code.",
+  "skills": ["typescript", "react", "next.js", "css", "accessibility", "vite", "playwright", "graphql"],
+  "experiences": [
+    {
+      "company": "Initech",
+      "role": "Frontend Engineer",
+      "start": "2022",
+      "end": "present",
+      "highlights": [
+        "Owned the migration from CRA to Vite; CI build time fell from 12m to 2m.",
+        "Drove the design system rewrite to a token-based architecture used across 4 products.",
+        "Led an accessibility audit; brought the marketing site from 67 to 98 on Lighthouse a11y."
+      ]
+    },
+    {
+      "company": "Hooli",
+      "role": "Junior Frontend Engineer",
+      "start": "2020",
+      "end": "2022",
+      "highlights": [
+        "Built the customer onboarding wizard with React Hook Form + Zod.",
+        "Wrote the first Playwright e2e suite, cutting flaky checkout-test reruns ~80%."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "DesignSystemV2",
+      "description": "Token-based design system on top of Radix primitives, distributed as a private npm package consumed by four product surfaces.",
+      "tech": ["typescript", "react", "radix", "stitches"],
+      "role": "lead engineer"
+    },
+    {
+      "name": "OnboardingWizard",
+      "description": "Multi-step onboarding form with conditional branches; used by 100% of new signups.",
+      "tech": ["react", "react-hook-form", "zod"],
+      "role": "implementer"
+    }
+  ],
+  "education": [
+    {"school": "Polytechnic", "degree": "BSc Software Engineering", "start": "2016", "end": "2020"}
+  ]
+}

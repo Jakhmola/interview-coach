@@ -100,6 +100,29 @@ INTEGRATION=1 uv run pytest tests/test_llm.py::test_real_llm_streaming -v
 `make db-ui` prints the Adminer login fields for the local DB.
 `make sh-db` opens psql in the db container.
 
+## Eval harness (Phase 12a)
+
+A question-quality baseline harness lives under `tests/integration/eval/`.
+It drives the real `stream_question` against the local LLM for each
+fixture × round-type, computes three metrics (distinctness, profile
+groundedness, JD relevance), and appends a row per case to a gitignored
+`results.csv`. Subsequent phases (variety, RAG) refresh the CSV with
+their own `phase` tag for cross-phase comparison.
+
+```sh
+# Make sure the local LLM is reachable (e.g., `make up`).
+INTEGRATION=1 uv run pytest tests/integration/eval -k quality -v
+
+# Print the comparison table.
+uv run python -m tests.integration.eval.report
+
+# Iterate on a single fixture × round (~50–90s):
+INTEGRATION=1 uv run pytest tests/integration/eval \
+  -k 'backend_senior and resume_walkthrough' -v
+```
+
+`make test` (the default) skips the harness — it never touches the LLM.
+
 ## Observability (optional)
 
 Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (and optionally

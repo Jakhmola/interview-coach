@@ -1,0 +1,14 @@
+{
+  "title": "Senior Backend Engineer",
+  "seniority": "senior",
+  "must_have_skills": ["python", "fastapi", "postgres", "async programming"],
+  "nice_to_have_skills": ["kubernetes", "kafka"],
+  "responsibilities": [
+    "Design and own backend services end-to-end.",
+    "Mentor mid-level engineers.",
+    "Collaborate with product on API contracts.",
+    "Write production-grade, observable code."
+  ],
+  "behavioral_signals": ["ownership", "clear written communication", "pragmatism", "mentorship"],
+  "company_name": "Globex"
+}

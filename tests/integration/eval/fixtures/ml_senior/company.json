@@ -1,0 +1,9 @@
+{
+  "mission": "Anthropic builds reliable, interpretable, and steerable AI systems. The applied team turns research into safe products.",
+  "products": ["Claude (chat)", "Claude API", "Claude Code"],
+  "recent_news": [
+    "Released Claude Opus 4.7 and Sonnet 4.6.",
+    "Published interpretability research on circuits in production-scale models."
+  ],
+  "values_and_signals": ["safety", "rigor", "clear written communication", "intellectual honesty"]
+}

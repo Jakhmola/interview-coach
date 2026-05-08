@@ -1,0 +1,24 @@
+Alice Engineer
+Senior Backend Engineer
+
+Summary
+6 years building high-throughput async Python services. Comfortable owning a service end-to-end from design through on-call. I like writing things down and mentoring engineers earlier in their careers.
+
+Experience
+
+Acme — Senior Backend Engineer (2021 – present)
+- Rewrote the request-handling stack from sync Flask to asyncio + FastAPI; p99 latency dropped 40%, error rate halved.
+- Designed and shipped Billing-Events, our at-least-once delivery service. Idempotency keys keyed off (tenant_id, event_id); reconciliation team adopted it as the source of truth for invoice state.
+- Mentored two mid-level engineers through promotion; ran a weekly office hour and reviewed every doc they wrote.
+
+Globex — Backend Engineer (2018 – 2021)
+- Built a fan-out notifications pipeline on Redis Streams handling 50k events/min at peak.
+- Resolved a hot migration that was deadlocking under contention by switching to advisory locks scoped per-tenant; cut deadlock retries from ~5k/day to <10/day.
+- Owned the on-call rotation handbook for two quarters.
+
+Projects
+- AsyncAPI: internal high-throughput API gateway, 8k req/s on 3 nodes. Tech: Python, FastAPI, Postgres, Redis. Tech lead.
+- Billing-Events: at-least-once event delivery with idempotency. Tech: Python, Kafka, Postgres.
+
+Education
+BS Computer Science, State University, 2014–2018.

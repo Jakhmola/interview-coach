@@ -1,0 +1,9 @@
+{
+  "mission": "Linear builds the issue tracker software teams actually want to use, with a relentless focus on performance and craft.",
+  "products": ["Linear app (issue tracking)", "Linear Insights", "Linear API"],
+  "recent_news": [
+    "Public roadmap and changelog cadence weekly; recent releases focused on offline-first UX.",
+    "Launched Linear for Agents, an API surface for AI assistants."
+  ],
+  "values_and_signals": ["craftsmanship", "speed", "high taste bar", "minimalism"]
+}

@@ -1,0 +1,23 @@
+Maya Patel
+Frontend Engineer
+
+Summary
+4 years building accessible, fast React apps. I like the seam between design systems and product code — building primitives that survive contact with PMs.
+
+Experience
+
+Initech — Frontend Engineer (2022 – present)
+- Owned the migration from CRA to Vite. CI build dropped from 12m to 2m; HMR went from 4s to <500ms; team velocity went up noticeably in retros.
+- Drove the rewrite of our design system to a token-based architecture (Radix + Stitches). Now consumed by four product surfaces and the marketing site. Wrote the migration guide and ran two pairing sessions per week for two months.
+- Led the marketing-site accessibility audit using axe + manual screen-reader passes. Lighthouse a11y score went from 67 to 98; fixed focus traps in three modals and a missed aria-live region in the toast system.
+
+Hooli — Junior Frontend Engineer (2020 – 2022)
+- Built the customer onboarding wizard (React Hook Form + Zod). Multi-step with conditional branches; 100% of new signups go through it.
+- Wrote the first Playwright e2e suite for the checkout flow; flaky reruns dropped ~80% when we moved off Cypress.
+
+Projects
+- DesignSystemV2: TypeScript, React, Radix, Stitches. Lead engineer.
+- OnboardingWizard: React, React Hook Form, Zod.
+
+Education
+BSc Software Engineering, Polytechnic, 2016–2020.

@@ -1,0 +1,44 @@
+{
+  "summary": "Senior backend engineer with 6 years of Python, FastAPI, and Postgres experience. Comfortable owning async services end-to-end and mentoring mid-level engineers.",
+  "skills": ["python", "fastapi", "postgres", "asyncio", "redis", "docker", "kubernetes"],
+  "experiences": [
+    {
+      "company": "Acme",
+      "role": "Senior Backend Engineer",
+      "start": "2021",
+      "end": "present",
+      "highlights": [
+        "Rewrote sync request stack to asyncio, achieved 40% p99 latency drop.",
+        "Owned the billing-events service from design through SLO ramp.",
+        "Mentored two mid-level engineers through promotion."
+      ]
+    },
+    {
+      "company": "Globex",
+      "role": "Backend Engineer",
+      "start": "2018",
+      "end": "2021",
+      "highlights": [
+        "Built a fan-out notifications pipeline on Redis Streams.",
+        "Cut Postgres write contention with advisory locks during a hot migration."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "AsyncAPI",
+      "description": "Internal high-throughput API gateway sitting in front of legacy services; routes 8k req/s on a 3-node cluster.",
+      "tech": ["python", "fastapi", "postgres", "redis"],
+      "role": "tech lead"
+    },
+    {
+      "name": "Billing-Events",
+      "description": "At-least-once event delivery service with idempotency keys, used by the finance team to reconcile invoices.",
+      "tech": ["python", "kafka", "postgres"],
+      "role": "owner"
+    }
+  ],
+  "education": [
+    {"school": "State University", "degree": "BS Computer Science", "start": "2014", "end": "2018"}
+  ]
+}

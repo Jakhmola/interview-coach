@@ -1,0 +1,14 @@
+{
+  "title": "Senior Machine Learning Engineer, Applied",
+  "seniority": "senior",
+  "must_have_skills": ["python", "pytorch", "llm fine-tuning or rag", "model serving", "evaluation"],
+  "nice_to_have_skills": ["vllm", "ray", "feature stores"],
+  "responsibilities": [
+    "Own a production LLM-backed feature from data through serving.",
+    "Design evaluations that catch regressions before they ship.",
+    "Partner with product on tradeoffs between latency, cost, and quality.",
+    "Mentor junior ML engineers on engineering rigor."
+  ],
+  "behavioral_signals": ["rigor", "product judgment", "evaluation discipline", "cross-functional collaboration"],
+  "company_name": "Anthropic"
+}

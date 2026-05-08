@@ -1,0 +1,14 @@
+{
+  "title": "Frontend Engineer",
+  "seniority": "mid",
+  "must_have_skills": ["typescript", "react", "css", "accessibility"],
+  "nice_to_have_skills": ["next.js", "graphql", "design systems"],
+  "responsibilities": [
+    "Ship product features end-to-end against a shared design system.",
+    "Improve performance and Core Web Vitals on the public marketing surface.",
+    "Partner with design on accessible, token-driven components.",
+    "Write component-level tests and contribute to the e2e suite."
+  ],
+  "behavioral_signals": ["craftsmanship", "design partnership", "user empathy", "iteration speed"],
+  "company_name": "Linear"
+}

@@ -1,0 +1,9 @@
+{
+  "mission": "Cloudflare's mission is to help build a better internet — secure, fast, and reliable for everyone.",
+  "products": ["CDN", "DDoS protection", "Workers (edge compute)", "Zero Trust"],
+  "recent_news": [
+    "Major edge-compute platform expansions; Durable Objects general availability follow-ups.",
+    "Public post-mortems published for recent control-plane incidents."
+  ],
+  "values_and_signals": ["transparency", "writing", "calm under pressure", "principled engineering"]
+}

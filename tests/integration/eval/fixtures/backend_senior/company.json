@@ -1,0 +1,9 @@
+{
+  "mission": "Globex builds payment infrastructure for small businesses, taking them from spreadsheet bookkeeping to fully reconciled books in a day.",
+  "products": ["Payments API", "Reconciliation dashboard", "Invoice automation"],
+  "recent_news": [
+    "Series C announced last quarter; expanding into European markets.",
+    "Launched a developer-first SDK with self-serve onboarding."
+  ],
+  "values_and_signals": ["customer obsession", "clear written communication", "ownership", "pragmatism"]
+}

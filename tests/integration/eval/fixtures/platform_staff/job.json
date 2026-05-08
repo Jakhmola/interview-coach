@@ -1,0 +1,14 @@
+{
+  "title": "Staff Platform / SRE",
+  "seniority": "staff",
+  "must_have_skills": ["kubernetes", "terraform", "go or python", "incident command", "slo design"],
+  "nice_to_have_skills": ["envoy", "prometheus", "postgres operations"],
+  "responsibilities": [
+    "Set the technical direction for the platform org's reliability program.",
+    "Lead incident response for tier-1 incidents.",
+    "Design multi-region availability strategy for customer-facing services.",
+    "Mentor senior SREs and partner with product engineering on SLOs."
+  ],
+  "behavioral_signals": ["technical leadership", "calm under pressure", "cross-team influence", "writing"],
+  "company_name": "Cloudflare"
+}

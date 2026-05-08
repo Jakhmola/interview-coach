@@ -1,0 +1,45 @@
+{
+  "summary": "Senior ML engineer with 7 years of applied work spanning ranking, recommendations, and lately retrieval-augmented LLM pipelines. Comfortable owning the model-serving boundary.",
+  "skills": ["python", "pytorch", "transformers", "vllm", "faiss", "ray", "feature stores", "airflow", "sql"],
+  "experiences": [
+    {
+      "company": "Vandelay AI",
+      "role": "Senior ML Engineer",
+      "start": "2022",
+      "end": "present",
+      "highlights": [
+        "Built a retrieval-augmented chat assistant for the support team; reduced ticket resolution time 35%.",
+        "Stood up vLLM serving for an internal 13B model behind an OpenAI-compatible API.",
+        "Owned the eval harness — pairwise human comparisons + LLM-judge with calibration."
+      ]
+    },
+    {
+      "company": "Pied Piper",
+      "role": "ML Engineer",
+      "start": "2018",
+      "end": "2022",
+      "highlights": [
+        "Re-ranked the top-100 search results with a learned-to-rank model; CTR up 8%.",
+        "Migrated the feature store from cron-driven to Airflow + an online Redis layer."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "SupportRAG",
+      "description": "RAG pipeline over 200k internal docs; uses bge-base embeddings, FAISS HNSW index, and a reranker; serves through a small vLLM cluster.",
+      "tech": ["python", "vllm", "faiss", "transformers", "fastapi"],
+      "role": "tech lead"
+    },
+    {
+      "name": "RankerV3",
+      "description": "Learned-to-rank model on top of search candidate generation; trained with LightGBM.",
+      "tech": ["python", "lightgbm", "feature stores"],
+      "role": "implementer"
+    }
+  ],
+  "education": [
+    {"school": "Carnegie Tech", "degree": "MS Computer Science (ML focus)", "start": "2015", "end": "2017"},
+    {"school": "Carnegie Tech", "degree": "BS Computer Science", "start": "2011", "end": "2015"}
+  ]
+}

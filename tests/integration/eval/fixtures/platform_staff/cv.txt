@@ -1,0 +1,26 @@
+Priya Iyer
+Staff Platform / SRE Engineer
+
+Summary
+10 years across infra and reliability. I've taken three orgs from heroic on-call to error-budgeted SLOs. I write things down — the post-mortem, the playbook, the policy.
+
+Experience
+
+Massive Dynamic — Staff Platform Engineer (2020 – present)
+- Drove the first company-wide SLO program. Wrote the policy doc, ran the rollout for the top 12 services, and chaired the weekly error-budget review. Customer-facing minor incidents dropped 60% YoY two years running.
+- Designed GatewayFailover, our active-active multi-region API gateway. Envoy at the edge, a Go-based external-authz service for tenant routing, all provisioned via Terraform. RTO target is 4 minutes; we validate it every quarter as a scheduled GameDay and have hit it 11 of 12 times since launch.
+- Authored the incident-command playbook now used org-wide. Includes the comms protocol, the IC vs. SME split, and the post-mortem template.
+
+Tyrell — Senior SRE (2016 – 2020)
+- Led the monolith migration off VMs to Kubernetes with no measurable customer-facing outage. Rolled traffic over a full quarter using header-based shadowing and a slow ramp.
+- Built the load-aware autoscaler signal — a Prometheus rule that fed an Envoy Lua filter — that kept us within p99 budget through Black Friday two years in a row.
+
+Soylent — Systems Engineer (2014 – 2016)
+- Postgres on-call lead. Tuned autovacuum, set up bloat monitoring + alerting; reduced bloat-driven failovers to zero over two years.
+
+Projects
+- GatewayFailover: Go, Envoy, Terraform, Kubernetes. Owner.
+- SLOProgram: Prometheus, Grafana, policy + culture work. Program lead.
+
+Education
+BS Computer Engineering, Old University, 2010–2014.

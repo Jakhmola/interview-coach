@@ -1,0 +1,53 @@
+{
+  "summary": "Staff platform / SRE engineer. 10 years across infra, on-call, and reliability programs. Pulled three orgs from heroic on-call to error-budgeted SLOs.",
+  "skills": ["go", "kubernetes", "terraform", "prometheus", "envoy", "linux", "postgres operations", "incident command"],
+  "experiences": [
+    {
+      "company": "Massive Dynamic",
+      "role": "Staff Platform Engineer",
+      "start": "2020",
+      "end": "present",
+      "highlights": [
+        "Drove the company's first SLO program; cut customer-facing minor incidents 60% YoY.",
+        "Designed and shipped the multi-region failover for the API gateway with a 4-minute RTO target, validated quarterly.",
+        "Wrote the incident-command playbook now used org-wide; ran two GameDays each quarter."
+      ]
+    },
+    {
+      "company": "Tyrell",
+      "role": "Senior SRE",
+      "start": "2016",
+      "end": "2020",
+      "highlights": [
+        "Migrated the monolith from VMs to k8s without an outage; rolled traffic over a quarter using header-based shadowing.",
+        "Built the autoscaler signal — a Prometheus rule + Lua filter in Envoy — that kept p99 within budget under flash sales."
+      ]
+    },
+    {
+      "company": "Soylent",
+      "role": "Systems Engineer",
+      "start": "2014",
+      "end": "2016",
+      "highlights": [
+        "Owned the Postgres on-call. Tuned vacuum and bloat-monitoring; reduced unplanned bloat-driven failover events to zero in two years."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "GatewayFailover",
+      "description": "Active-active multi-region API gateway built on Envoy + a custom external-authz service in Go. RTO target 4 minutes; quarterly DR validated.",
+      "tech": ["go", "envoy", "terraform", "kubernetes"],
+      "role": "owner"
+    },
+    {
+      "name": "SLOProgram",
+      "description": "End-to-end SLO program — definitions, error-budget policy, weekly review ritual, and the dashboards behind them.",
+      "tech": ["prometheus", "grafana", "policy"],
+      "role": "program lead"
+    }
+  ],
+  "education": [
+    {"school": "Old University", "degree": "BS Computer Engineering", "start": "2010", "end": "2014"}
+  ]
+}
