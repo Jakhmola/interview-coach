@@ -128,7 +128,7 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 10    | Supervisor graph                               | ✅          |
 | 11    | Observability (Langfuse)                       | ✅          |
 | 12a   | Eval harness — question-quality baseline       | ✅          |
-| 13    | Variety — deterministic focus picker           | ⏳          |
+| 13    | Variety — deterministic focus picker           | ✅          |
 | 14    | RAG grounding — user-doc chunks (Jina + pgvector) | ⏳        |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
