@@ -113,21 +113,26 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 
 **Status legend:** ✅ merged · 🚧 in progress · ⏳ pending
 
-| Phase | Title                                | Status     |
-| ----- | ------------------------------------ | ---------- |
-| 0     | Skeleton & infra                     | ✅          |
-| 1     | Auth + persistence                   | ✅          |
-| 2     | Document ingestion (PDF + DOCX)      | ✅          |
-| 3     | Job description ingestion            | ✅          |
-| 4     | MCP wiring                           | ✅          |
-| 5     | LLM layer                            | ✅          |
-| 6     | ProfileBuilder + JobAnalyzer agents  | ✅          |
-| 7     | CompanyResearcher agent              | ✅          |
-| 8     | QuestionGenerator + streaming        | ✅          |
-| 9     | Evaluator + answer loop              | ✅          |
-| 10    | Supervisor graph                     | ✅          |
-| 11    | Observability (Langfuse)             | 🚧          |
-| 12    | Eval harness (deepeval)              | ⏳          |
+| Phase | Title                                          | Status     |
+| ----- | ---------------------------------------------- | ---------- |
+| 0     | Skeleton & infra                               | ✅          |
+| 1     | Auth + persistence                             | ✅          |
+| 2     | Document ingestion (PDF + DOCX)                | ✅          |
+| 3     | Job description ingestion                      | ✅          |
+| 4     | MCP wiring                                     | ✅          |
+| 5     | LLM layer                                      | ✅          |
+| 6     | ProfileBuilder + JobAnalyzer agents            | ✅          |
+| 7     | CompanyResearcher agent                        | ✅          |
+| 8     | QuestionGenerator + streaming                  | ✅          |
+| 9     | Evaluator + answer loop                        | ✅          |
+| 10    | Supervisor graph                               | ✅          |
+| 11    | Observability (Langfuse)                       | ✅          |
+| 12a   | Eval harness — question-quality baseline       | ⏳          |
+| 13    | Variety — deterministic focus picker           | ⏳          |
+| 14    | RAG grounding — user-doc chunks (Jina + pgvector) | ⏳        |
+| 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
+| 12b   | Eval harness — evaluator quality (full)        | ⏳          |
+| 15    | GitHub ingestion                               | ⏳          |
 
 ### Phase 0 — Skeleton & infra
 - Convert `requirements.txt` → `pyproject.toml` (uv).
@@ -214,10 +219,59 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 - Tag traces with `user_id`, `session_id`, `round_type`, `node`.
 - **Smoke test:** complete a session with Langfuse env set; trace tree visible in dashboard.
 
-### Phase 12 — Eval harness (deepeval)
-- `tests/integration/test_evaluator_quality.py` — fixture set of (question, good_answer, bad_answer); deepeval metrics (G-Eval) assert score ordering and feedback faithfulness.
-- `tests/integration/test_question_quality.py` — assert generated questions are grounded in profile + JD (faithfulness metric).
-- **Smoke test:** `pytest tests/integration -k quality` runs and reports.
+### Phase 12a — Eval harness (question-quality baseline)
+The original Phase 12 was split: 12a lands a **thin** harness *before* any
+quality-improvement work, so Phases 13/14 have an objective baseline to
+move. The full evaluator-quality eval is now Phase 12b, after RAG.
+- `tests/integration/eval/test_question_quality.py` — 10 (profile, JD, raw_cv) fixtures; for each, generates 5 questions and computes 3 metrics:
+  - **distinctness** — mean pairwise cosine distance between same-session questions (variety signal).
+  - **profile groundedness** — G-Eval over (question, profile_json + raw_cv) (RAG signal).
+  - **JD relevance** — G-Eval over (question, job_analysis).
+- `tests/integration/eval/report.py` — prints a `metric × phase` comparison table; appends to a CSV that 13/14/14b refresh.
+- Soft thresholds (informational, non-failing) in 12a; later phases assert deltas.
+- **Smoke test:** `pytest tests/integration -k quality` runs and prints baseline numbers.
+
+### Phase 13 — Variety: deterministic focus picker
+- Pre-pick the focus *before* the LLM sees the prompt; remove the LLM's freedom to keep returning to the same prominent bullets.
+- `agents/nodes/question_generator.py`:
+  - `_pick_focus_target()` — for `resume_walkthrough`, build candidates from `profile.experiences` + `profile.projects`; score each by inverse-frequency over the user's prior `turns.metadata_json.focus_key` *for this `(user_id, job_id)`* and JD-skill overlap; weighted-sample.
+  - For `behavioral_star`: replace `random.choice` over signals with the same inverse-frequency picker.
+  - Persist the chosen `focus_key` into `turns.metadata_json` so subsequent picks see history.
+- `db/repos.py` — new `list_prior_questions_for_user_job(user_id, job_id, limit=30)` and `count_focus_keys(user_id, job_id)`. Cross-session prior-question dedup replaces the per-session `prior_turns` field.
+- `agents/prompts.py` — extend resume + behavioral system prompts with `focus_target` constraint language ("drill into this; do not pick a different topic").
+- **No schema change** — `turns.metadata_json` already exists.
+- **Smoke test:** two 5-question sessions on the same (user, JD); union of `focus_key`s ≥ 6 distinct values; rerun 12a harness — distinctness metric improves measurably; groundedness holds.
+
+### Phase 14 — RAG grounding (user-doc chunks)
+- The parsed Profile is a summary; the LLM never sees the paragraphs the candidate actually wrote. This phase chunks `documents.raw_text`, embeds with **Jina v3 + late chunking** on CPU, stores in **pgvector**, retrieves at question time.
+- New table `grounding_chunks(id, user_id, document_id, corpus_kind='user_doc', chunk_index, chunk_text, source_metadata, embedding VECTOR(1024), created_at)` + ivfflat index on `embedding`. `corpus_kind` left denormalized so 14b/15 reuse the table.
+- `ingestion/embeddings.py` (new) — lazy-loads `jinaai/jina-embeddings-v3` once via `sentence-transformers` (`trust_remote_code=True`); `late_chunk_document()` runs one forward pass on the whole doc and mean-pools token embeddings per chunk so chunks carry document-level context.
+- Hooked into `documents/routes.py` (sync; ~2–5s per doc on CPU). One-shot `scripts/backfill_grounding.py` for pre-existing docs.
+- `agents/nodes/question_generator.py` — at retrieval time, embed `(focus_target.text + must_have_skills[:5])`, fetch top-5 chunks for this `user_id`, inject as `grounding` in the user message JSON. Prompts updated: "prefer a question whose strong answer would draw on a specific detail attested in `grounding`; do NOT invent details that contradict it."
+- `mcp/servers/documents_server.py` — bonus `search_grounding(user_id, query, k)` tool.
+- Compose: switch base image `postgres:16` → `pgvector/pgvector:pg16` (drop-in).
+- **Smoke test:** upload a real CV; chunks land with non-null embeddings; run a `resume_walkthrough` session; Langfuse trace shows `grounding` chunks semantically close to the picked `focus_target`. 12a harness — groundedness improves measurably.
+
+### Phase 14b — RAG grounding (Tavily tech-spec corpus, optional)
+Only if Phase 14 questions feel grounded in the candidate's voice but still technically vague.
+- New `tech_corpus_ingester` node in `prep_graph`, between `job_analyzer` and `company_researcher`.
+- Reads `job.parsed_json.must_have_skills`, picks top 5, runs Tavily search + extract for ~3 authoritative pages per skill.
+- Same chunker / embedder as Phase 14; rows inserted with `corpus_kind='tech_spec'`, scoped by `job_id` (not `user_id`).
+- Retrieval fetches top-3 user-attested + top-2 spec-attested separately; prompt distinguishes them ("user-attested = anchor your question here; spec-attested = sharpen technical specificity").
+- **Smoke test:** rerun 12a harness — JD-relevance improves, groundedness holds.
+
+### Phase 12b — Eval harness (evaluator quality, full)
+The rest of the original Phase 12. Lands after RAG so the eval set is stable.
+- `tests/integration/eval/test_evaluator_quality.py` — fixture (question, good/mediocre/bad answer) triples; assert score ordering.
+- Feedback faithfulness G-Eval — does feedback reference anchors actually present in the question's `anchors_json`?
+- model_answer faithfulness G-Eval — does `model_answer` use details from profile / grounding?
+- **Smoke test:** `pytest tests/integration -k quality` runs all metrics and reports.
+
+### Phase 15 — GitHub ingestion
+- `documents.kind = 'github_repo'`; resolve handles from CV (regex on raw_text + `links` if present).
+- GitHub REST API (no auth needed for public repos) → README + top-level `.md` + `package.json` / `pyproject.toml`.
+- Reuse Phase 14 chunker / embedder / table; `corpus_kind='github'`.
+- **Smoke test:** ingest a known repo; chunks searchable; question references attested code patterns.
 
 ---
 
@@ -225,7 +279,7 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 
 1. A2A wrapping of each specialized agent (`a2a-sdk` already in deps).
 2. STT (faster-whisper container or browser Web Speech API).
-3. GitHub URL ingestion (clone or REST API → README + structure as project doc).
+3. ~~GitHub URL ingestion~~ — promoted to Phase 15.
 4. Markdown / plain text doc ingestion.
 5. Technical / coding round (with code-execution sandbox) and System-design round.
 6. Multi-dimensional rubric (Correctness / Depth / Clarity / Structure).
