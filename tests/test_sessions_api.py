@@ -183,6 +183,28 @@ async def test_abandon(client: AsyncClient, auth_token: str, db_session: AsyncSe
     assert r.json()["status"] == "abandoned"
 
 
+async def test_abandon_does_not_downgrade_complete_session(
+    client: AsyncClient, auth_token: str, db_session: AsyncSession
+) -> None:
+    seeds = await _seed_prereqs(db_session, auth_token, client)
+    import uuid as _uuid
+
+    sid_str = (
+        await client.post(
+            "/sessions",
+            headers=_auth(auth_token),
+            json={"job_id": seeds["job_id"], "round_type": "resume_walkthrough"},
+        )
+    ).json()["id"]
+    await repos.update_session_status(
+        db_session, _uuid.UUID(sid_str), _uuid.UUID(seeds["user_id"]), "complete"
+    )
+
+    r = await client.post(f"/sessions/{sid_str}/abandon", headers=_auth(auth_token))
+    assert r.status_code == 200
+    assert r.json()["status"] == "complete"
+
+
 # --- streaming ---
 
 

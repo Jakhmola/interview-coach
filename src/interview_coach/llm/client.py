@@ -50,6 +50,7 @@ def chat_model(temperature: float = DEFAULT_TEMPERATURE, **overrides: Any) -> Ba
         api_key=settings.llm_api_key or "not-needed",
         model=settings.model_name,
         temperature=temperature,
+        stream_usage=True,
         **overrides,
     )
 

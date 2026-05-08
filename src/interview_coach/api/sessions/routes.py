@@ -46,6 +46,7 @@ from interview_coach.api.streaming import SSE_HEADERS, sse_event
 from interview_coach.db import repos
 from interview_coach.db.models import User
 from interview_coach.db.session import get_db
+from interview_coach.observability.langfuse import langfuse_callback, trace_attributes
 
 logger = logging.getLogger(__name__)
 
@@ -119,11 +120,13 @@ async def abandon_session(
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> SessionOut:
-    ok = await repos.update_session_status(session, session_id, user.id, "abandoned")
-    if not ok:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "session_not_found")
     row = await repos.get_session(session, session_id, user.id)
-    assert row is not None
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "session_not_found")
+    if row.status == "active":
+        await repos.update_session_status(session, session_id, user.id, "abandoned")
+        row = await repos.get_session(session, session_id, user.id)
+        assert row is not None
     return SessionOut.model_validate(row)
 
 
@@ -156,18 +159,32 @@ async def prepare_session(
         "job_id": str(body.job_id),
         "force_refresh": body.force_refresh,
     }
+    prep_config = _with_callbacks({})
+    trace_meta = {
+        "graph": "prep",
+        "user_id": str(user.id),
+        "job_id": str(body.job_id),
+        "force_refresh": body.force_refresh,
+    }
 
     async def event_stream() -> AsyncIterator[bytes]:
         try:
-            async for chunk in prep_graph.astream(initial_state, stream_mode="custom"):
-                # `chunk` is the dict our nodes wrote via get_stream_writer.
-                event = chunk.get("event")
-                if event in ("node_started", "node_done", "node_skipped"):
-                    yield sse_event(event, {k: v for k, v in chunk.items() if k != "event"})
-                elif event == "error":
-                    yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
-                    return
-            yield sse_event("done", {"job_id": str(body.job_id), "ready": True})
+            with trace_attributes(
+                user_id=str(user.id),
+                metadata=trace_meta,
+                tags=["graph:prep"],
+            ):
+                async for chunk in prep_graph.astream(
+                    initial_state, config=prep_config, stream_mode="custom"
+                ):
+                    # `chunk` is the dict our nodes wrote via get_stream_writer.
+                    event = chunk.get("event")
+                    if event in ("node_started", "node_done", "node_skipped"):
+                        yield sse_event(event, {k: v for k, v in chunk.items() if k != "event"})
+                    elif event == "error":
+                        yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
+                        return
+                yield sse_event("done", {"job_id": str(body.job_id), "ready": True})
         except (NoDocumentsError, NoSearchHits, NoUsablePages, CompanyNameMissing) as e:
             yield sse_event("error", {"code": type(e).__name__, "detail": str(e)})
 
@@ -185,6 +202,21 @@ def _thread_config(session_id: uuid.UUID, turn_index: int) -> dict[str, Any]:
     cleanly without colliding with prior turn checkpoints.
     """
     return {"configurable": {"thread_id": f"{session_id}:turn_{turn_index}"}}
+
+
+def _with_callbacks(config: dict[str, Any]) -> dict[str, Any]:
+    """Attach the Langfuse callback to a graph config when tracing is enabled.
+
+    No-op when Langfuse env is unset. Mutates a copy — never the input.
+    Trace-level attributes (user_id, session_id, metadata, tags) are
+    applied by the surrounding ``trace_attributes`` context manager.
+    """
+    cb = langfuse_callback()
+    if cb is None:
+        return config
+    new = dict(config)
+    new["callbacks"] = [*new.get("callbacks", []), cb]
+    return new
 
 
 @router.post("/{session_id}/next_question")
@@ -212,7 +244,7 @@ async def next_question(
 
     turn_index = len(turns)
     interview_graph = request.app.state.interview_graph
-    config = _thread_config(session_id, turn_index)
+    config = _with_callbacks(_thread_config(session_id, turn_index))
     initial_state: dict[str, Any] = {
         "user_id": str(user.id),
         "session_id": str(session_id),
@@ -220,20 +252,35 @@ async def next_question(
         "n_questions": row.n_questions,
         "turn_index": turn_index,
     }
+    trace_meta = {
+        "graph": "interview",
+        "phase": "next_question",
+        "user_id": str(user.id),
+        "session_id": str(session_id),
+        "round_type": row.round_type,
+        "turn_index": turn_index,
+    }
+    trace_tags = ["graph:interview", f"round:{row.round_type}", "phase:next_question"]
 
     async def event_stream() -> AsyncIterator[bytes]:
         try:
-            async for chunk in interview_graph.astream(
-                initial_state, config=config, stream_mode="custom"
+            with trace_attributes(
+                user_id=str(user.id),
+                session_id=str(session_id),
+                metadata=trace_meta,
+                tags=trace_tags,
             ):
-                event = chunk.get("event")
-                if event == "token":
-                    yield sse_event("token", chunk.get("data", ""))
-                elif event == "done":
-                    yield sse_event("done", chunk.get("data", {}))
-                elif event == "error":
-                    yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
-                    return
+                async for chunk in interview_graph.astream(
+                    initial_state, config=config, stream_mode="custom"
+                ):
+                    event = chunk.get("event")
+                    if event == "token":
+                        yield sse_event("token", chunk.get("data", ""))
+                    elif event == "done":
+                        yield sse_event("done", chunk.get("data", {}))
+                    elif event == "error":
+                        yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
+                        return
         except GenerationPrereqsMissing as e:
             logger.warning("Generation prereqs missing for session=%s: %s", session_id, e)
             yield sse_event("error", {"code": str(e)})
@@ -278,29 +325,46 @@ async def submit_answer(
         await repos.update_turn_answer(session, latest.id, answer)
 
     interview_graph = request.app.state.interview_graph
-    config = _thread_config(session_id, latest.turn_index)
+    config = _with_callbacks(_thread_config(session_id, latest.turn_index))
+    trace_meta = {
+        "graph": "interview",
+        "phase": "submit_answer",
+        "user_id": str(user.id),
+        "session_id": str(session_id),
+        "round_type": sess.round_type,
+        "turn_index": latest.turn_index,
+    }
+    trace_tags = ["graph:interview", f"round:{sess.round_type}", "phase:submit_answer"]
 
     async def event_stream() -> AsyncIterator[bytes]:
         try:
-            async for chunk in interview_graph.astream(
-                Command(resume={"answer": answer}),
-                config=config,
-                stream_mode="custom",
+            with trace_attributes(
+                user_id=str(user.id),
+                session_id=str(session_id),
+                metadata=trace_meta,
+                tags=trace_tags,
             ):
-                event = chunk.get("event")
-                if event == "score":
-                    score_data = chunk.get("data")
-                    payload = score_data if isinstance(score_data, dict) else {"score": score_data}
-                    yield sse_event("score", payload)
-                elif event in ("feedback_token", "model_answer_token"):
-                    yield sse_event(event, chunk.get("data", ""))
-                elif event in ("feedback_done", "model_answer_done"):
-                    yield sse_event(event, {})
-                elif event == "done":
-                    yield sse_event("done", chunk.get("data", {}))
-                elif event == "error":
-                    yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
-                    return
+                async for chunk in interview_graph.astream(
+                    Command(resume={"answer": answer}),
+                    config=config,
+                    stream_mode="custom",
+                ):
+                    event = chunk.get("event")
+                    if event == "score":
+                        score_data = chunk.get("data")
+                        payload = (
+                            score_data if isinstance(score_data, dict) else {"score": score_data}
+                        )
+                        yield sse_event("score", payload)
+                    elif event in ("feedback_token", "model_answer_token"):
+                        yield sse_event(event, chunk.get("data", ""))
+                    elif event in ("feedback_done", "model_answer_done"):
+                        yield sse_event(event, {})
+                    elif event == "done":
+                        yield sse_event("done", chunk.get("data", {}))
+                    elif event == "error":
+                        yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
+                        return
         except (TurnNotFound, TurnNotAnswered) as e:
             yield sse_event("error", {"code": type(e).__name__, "detail": str(e)})
         except StreamingJsonError as e:

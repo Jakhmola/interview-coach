@@ -1,4 +1,4 @@
-.PHONY: help up down logs build rebuild ps sh-api sh-ui sh-db test fmt lint lock sync
+.PHONY: help up down logs build rebuild ps sh-api sh-ui sh-db db-ui test fmt lint lock sync
 
 help:
 	@echo "make up        - docker compose up -d (build if needed)"
@@ -10,6 +10,7 @@ help:
 	@echo "make sh-api    - shell into api container"
 	@echo "make sh-ui     - shell into ui container"
 	@echo "make sh-db     - psql into db container"
+	@echo "make db-ui     - print Adminer URL + creds for the local DB"
 	@echo "make test      - run pytest on host via uv"
 	@echo "make fmt       - ruff format"
 	@echo "make lint      - ruff check"
@@ -42,6 +43,14 @@ sh-ui:
 
 sh-db:
 	docker compose exec db psql -U interview_coach -d interview_coach
+
+db-ui:
+	@echo "Adminer:  http://localhost:8090"
+	@echo "  System:   PostgreSQL"
+	@echo "  Server:   db"
+	@echo "  User:     interview_coach"
+	@echo "  Password: $${POSTGRES_PASSWORD:-interview_coach}"
+	@echo "  Database: interview_coach"
 
 test:
 	uv run pytest -q

@@ -88,10 +88,31 @@ curl -s http://localhost:8080/v1/chat/completions \
 INTEGRATION=1 uv run pytest tests/test_llm.py::test_real_llm_streaming -v
 ```
 
+## Useful URLs (with `make up`)
+
+| Service          | URL                          |
+| ---------------- | ---------------------------- |
+| Streamlit UI     | http://localhost:8501        |
+| FastAPI docs     | http://localhost:8000/docs   |
+| Adminer (DB UI)  | http://localhost:8090        |
+| llama.cpp server | http://localhost:8080        |
+
+`make db-ui` prints the Adminer login fields for the local DB.
+`make sh-db` opens psql in the db container.
+
+## Observability (optional)
+
+Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (and optionally
+`LANGFUSE_HOST`) in `.env` to send per-request LangGraph traces to
+Langfuse. Each `prepare`, `next_question`, or `submit_answer` call
+becomes one trace, tagged with `user_id`, `session_id`, `round_type`,
+and `turn_index`. With the env vars unset the app behaves identically:
+no SDK init, no callback, no network calls.
+
 ## Layout
 
 ```
-src/interview_coach/    # FastAPI app + (later) agents, MCP, db, llm, ingestion
+src/interview_coach/    # FastAPI app + agents, observability, MCP, db, llm
 ui/                     # Streamlit app
 tests/                  # pytest
 ```

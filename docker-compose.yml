@@ -56,6 +56,11 @@ services:
       LLM_BASE_URL: http://llama:8080/v1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       GRAPH_DB_PATH: /data/graph_checkpoints.sqlite
+      # Phase 11 — Langfuse tracing. Empty when not configured;
+      # observability code is a no-op in that case.
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-}
     volumes:
       - graph_data:/data
     ports:
@@ -88,6 +93,21 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  # Adminer — lightweight DB browser for dev. Loopback-only bind:
+  # nobody on the LAN gets a Postgres login form. Login with
+  # System=PostgreSQL, Server=db, User=interview_coach,
+  # Password=$POSTGRES_PASSWORD, Database=interview_coach.
+  adminer:
+    image: adminer:5
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    ports:
+      - "127.0.0.1:8090:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pg_data:

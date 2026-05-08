@@ -16,11 +16,13 @@ from interview_coach.api.documents import router as documents_router
 from interview_coach.api.jobs import router as jobs_router
 from interview_coach.api.sessions import router as sessions_router
 from interview_coach.config import settings
+from interview_coach.observability.langfuse import flush_langfuse, langfuse_enabled
 
 logging.basicConfig(
     level=settings.log_level,
     format='{"level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}',
 )
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -31,10 +33,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with open_checkpointer(settings.graph_db_path) as checkpointer:
         app.state.prep_graph = build_prep_graph()
         app.state.interview_graph = build_interview_graph(checkpointer)
+        if langfuse_enabled():
+            logger.info("Langfuse tracing is enabled for this api process")
         try:
             yield
         finally:
-            # Shutdown: drop cached MCP client (if any).
+            # Shutdown: flush Langfuse + drop cached MCP client (if any).
+            await flush_langfuse()
             from interview_coach.mcp.client import reset_client
 
             await reset_client()

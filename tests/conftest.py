@@ -14,6 +14,26 @@ from interview_coach.db.session import get_db
 
 
 @pytest.fixture(autouse=True)
+def _scrub_langfuse_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests must never pick up a real Langfuse key from the developer's `.env`.
+    Any test that wants tracing enabled must monkeypatch the vars explicitly.
+
+    Bypassed when INTEGRATION=1 — those runs are explicitly opt-in and want
+    the real external surface, so a developer with Langfuse configured can
+    confirm trace wiring against their dashboard.
+    """
+    if os.environ.get("INTEGRATION") == "1":
+        return
+    for k in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST"):
+        monkeypatch.delenv(k, raising=False)
+    # Reset the lazy-init flag so a previous test that enabled Langfuse
+    # doesn't leak its cached client into the next test.
+    from interview_coach.observability import langfuse as obs
+
+    monkeypatch.setattr(obs, "_client_initialized", False)
+
+
+@pytest.fixture(autouse=True)
 def _scrub_tavily_key(monkeypatch: pytest.MonkeyPatch) -> None:
     """Tests must not pick up a real Tavily key from the developer's `.env`.
     Any test that wants a key must monkeypatch it explicitly.
