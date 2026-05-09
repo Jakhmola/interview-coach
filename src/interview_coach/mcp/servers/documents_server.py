@@ -120,6 +120,44 @@ async def get_job(job_id: str, user_id: str) -> dict[str, Any] | None:
 
 
 @mcp.tool()
+async def search_grounding(
+    user_id: str,
+    query: str,
+    k: int = 4,
+    source_kind: str | None = None,
+) -> list[dict[str, Any]]:
+    """Retrieve top-k semantically similar chunks from a user's documents.
+
+    `source_kind` defaults to ``project_doc``. Pass ``cv`` to search the
+    candidate's resume chunks, or ``all`` to include both.
+    """
+    # Heavy import deferred so the MCP process doesn't pull sentence-transformers
+    # unless this tool is actually called.
+    from interview_coach.rag.retrieval import retrieve_grounding
+
+    uid = uuid.UUID(user_id)
+    if source_kind is None:
+        kinds: tuple[str, ...] = ("project_doc",)
+    elif source_kind == "all":
+        kinds = ("project_doc", "cv")
+    else:
+        kinds = (source_kind,)
+
+    hits = await retrieve_grounding(user_id=uid, query=query, k=k, source_kinds=kinds)
+    return [
+        {
+            "document_id": str(h.document_id),
+            "filename": h.filename,
+            "source_doc_kind": h.source_doc_kind,
+            "chunk_index": h.chunk_index,
+            "text": h.text,
+            "score": h.score,
+        }
+        for h in hits
+    ]
+
+
+@mcp.tool()
 async def fetch_url(url: str) -> str:
     """Fetch and extract readable text from a URL via Tavily.
 

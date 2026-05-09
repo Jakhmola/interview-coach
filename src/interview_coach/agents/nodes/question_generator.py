@@ -339,6 +339,8 @@ async def stream_question(
     metadata: dict[str, Any] = {}
     if focus_key is not None:
         metadata["focus_key"] = focus_key
+    if focus_label is not None:
+        metadata["focus_label"] = focus_label
 
     if focus_label is not None:
         label_tokens = _tokens(focus_label)

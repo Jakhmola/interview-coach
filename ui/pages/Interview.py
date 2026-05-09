@@ -213,14 +213,20 @@ if _need_answer():
                     st.write(text)
                 # Score badge appears as soon as feedback starts streaming.
                 with st.chat_message("assistant"):
+                    score_placeholder = st.empty()
                     feedback_placeholder = st.empty()
-                    feedback_text = st.write_stream(ev.consume_feedback_tokens())
+                    feedback_text = ""
+                    for chunk in ev.consume_feedback_tokens():
+                        feedback_text += chunk
+                        feedback_placeholder.markdown(feedback_text)
                     score_label = f"**Score: {ev.score}/10**" if ev.score is not None else ""
                     if score_label:
-                        feedback_placeholder.markdown(score_label)
-                    st.markdown(f"**Feedback.** {feedback_text}")
+                        score_placeholder.markdown(score_label)
+                    feedback_placeholder.markdown(f"**Feedback.** {feedback_text}")
                     with st.expander("Model answer", expanded=False):
                         st.write_stream(ev.consume_model_answer_tokens())
+                        if ev.model_answer_unavailable:
+                            st.info("Model answer unavailable for this turn.")
                 ev.consume_remaining()
             finally:
                 ev.finish()
@@ -248,13 +254,19 @@ if _need_evaluation_resume():
             st.stop()
         try:
             with st.chat_message("assistant"):
+                score_placeholder = st.empty()
                 feedback_placeholder = st.empty()
-                feedback_text = st.write_stream(ev.consume_feedback_tokens())
+                feedback_text = ""
+                for chunk in ev.consume_feedback_tokens():
+                    feedback_text += chunk
+                    feedback_placeholder.markdown(feedback_text)
                 if ev.score is not None:
-                    feedback_placeholder.markdown(f"**Score: {ev.score}/10**")
-                st.markdown(f"**Feedback.** {feedback_text}")
+                    score_placeholder.markdown(f"**Score: {ev.score}/10**")
+                feedback_placeholder.markdown(f"**Feedback.** {feedback_text}")
                 with st.expander("Model answer", expanded=False):
                     st.write_stream(ev.consume_model_answer_tokens())
+                    if ev.model_answer_unavailable:
+                        st.info("Model answer unavailable for this turn.")
             ev.consume_remaining()
         finally:
             ev.finish()

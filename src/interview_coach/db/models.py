@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
@@ -196,6 +197,53 @@ class TurnRow(Base):
             "uq_turns_session_turn",
             "session_id",
             "turn_index",
+            unique=True,
+        ),
+    )
+
+
+class GroundingChunk(Base):
+    """A single chunk of a user document with its Jina v3 embedding.
+
+    pgvector-only at runtime; on SQLite (tests) the `embedding` column
+    falls back to JSON so `Base.metadata.create_all` works. Vector
+    similarity search is exercised only against Postgres.
+    """
+
+    __tablename__ = "grounding_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
+    )
+    source_doc_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    n_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(
+        Vector(1024).with_variant(JSON(), "sqlite"), nullable=False
+    )
+    model_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "source_doc_kind in ('cv','project_doc')",
+            name="ck_grounding_chunks_source_doc_kind",
+        ),
+        Index("ix_grounding_chunks_user_kind", "user_id", "source_doc_kind"),
+        Index("ix_grounding_chunks_document_id", "document_id"),
+        Index(
+            "uq_grounding_chunks_document_chunk",
+            "document_id",
+            "chunk_index",
             unique=True,
         ),
     )

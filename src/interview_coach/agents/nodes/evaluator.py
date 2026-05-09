@@ -1,23 +1,28 @@
-"""Evaluator agent node.
+"""Evaluator agent node — Phase 14 split.
 
-Streams the evaluation of a single turn. The model emits one JSON object
-``{"score": int, "feedback": str, "model_answer": str}`` whose fields are
-emitted in that order. The streaming JSON parser routes:
+The evaluation is now split across two sequential LLM calls (single-GPU,
+qwen3:8b VRAM-bound; parallelism would queue or spill to CPU):
 
-- ``score`` → one ``("score", int)`` event as soon as the integer closes.
-- ``feedback`` → ``("feedback_token", str)`` per character, then
-  ``("feedback_done", None)`` when the value closes.
-- ``model_answer`` → ``("model_answer_token", str)`` per character, then
-  ``("model_answer_done", None)``.
+  1. **Judge call** — emits ``{score, feedback}``. No grounding injected,
+     so the rubric stays untouched by retrieval noise.
+  2. **Model-answer call** — emits ``{model_answer}``, with retrieval over
+     the candidate's own ``project_doc`` chunks injected so the reference
+     answer can speak with project-specific detail in the candidate's
+     first-person voice.
 
-At end-of-stream the full JSON is validated via Pydantic and the Turn row
-is updated with score, feedback, model_answer in a single transaction. If
-the just-evaluated turn is the last (`turn_index + 1 == n_questions`), the
-session row is flipped to ``status="complete"`` in the same DB write.
+Wire format to the SSE consumer is unchanged from Phase 9:
+    score → feedback_token* → feedback_done → model_answer_token* →
+    model_answer_done → done
+
+If the model-answer call fails, the orchestrator persists score+feedback
+only and emits ``("model_answer_error", {"reason": str})``. The session
+status flip on the last turn happens after both calls succeed (or after
+the partial-persist path on failure).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -25,8 +30,11 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from interview_coach.agents.prompts import EVALUATOR_SYSTEM
-from interview_coach.agents.schemas import Evaluation
+from interview_coach.agents.prompts import (
+    EVALUATOR_JUDGE_SYSTEM,
+    MODEL_ANSWER_SYSTEM,
+)
+from interview_coach.agents.schemas import Judgment, ModelAnswerOnly
 from interview_coach.agents.streaming_json import (
     StreamingJsonError,
     stream_json_object,
@@ -34,6 +42,7 @@ from interview_coach.agents.streaming_json import (
 from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
 from interview_coach.llm.client import chat_model
+from interview_coach.rag.retrieval import GroundingHit, retrieve_grounding
 
 logger = logging.getLogger(__name__)
 
@@ -67,9 +76,7 @@ async def _load_eval_inputs(
     }
 
 
-def _build_user_message(*, turn: Any, profile: dict[str, Any]) -> str:
-    import json
-
+def _build_judge_message(*, turn: Any, profile: dict[str, Any]) -> str:
     payload = {
         "question": turn.question,
         "evaluation_anchors": list(turn.anchors_json or []),
@@ -79,6 +86,125 @@ def _build_user_message(*, turn: Any, profile: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
+def _build_model_answer_message(
+    *,
+    turn: Any,
+    profile: dict[str, Any],
+    hits: list[GroundingHit],
+) -> str:
+    payload = {
+        "question": turn.question,
+        "evaluation_anchors": list(turn.anchors_json or []),
+        "candidate_answer": turn.answer or "",
+        "candidate_profile": profile,
+        "grounding": [{"source": h.filename, "text": h.text} for h in hits],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2)
+
+
+async def _model_deltas(llm, messages):  # noqa: ANN001
+    async for chunk in llm.astream(messages):
+        content = chunk.content
+        if isinstance(content, str):
+            if content:
+                yield content
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, str) and part:
+                    yield part
+                elif isinstance(part, dict) and "text" in part:
+                    text = str(part["text"])
+                    if text:
+                        yield text
+
+
+async def _run_judge_call(
+    *,
+    turn: Any,
+    profile: dict[str, Any],
+    temperature: float,
+) -> AsyncIterator[tuple[str, Any]]:
+    """Yields SSE events for the judge call AND finally yields
+    ``("__parsed__", Judgment)`` so the orchestrator can persist it.
+    Caller is expected to drop ``__parsed__`` before forwarding.
+    """
+    user_msg = _build_judge_message(turn=turn, profile=profile)
+    llm = chat_model(temperature=temperature).bind(response_format={"type": "json_object"})
+    messages = [
+        SystemMessage(content=EVALUATOR_JUDGE_SYSTEM),
+        HumanMessage(content=user_msg),
+    ]
+
+    parsed: dict[str, Any] | None = None
+    async for event, data in stream_json_object(
+        _model_deltas(llm, messages),
+        stream_string_fields=("feedback",),
+        scalar_fields=("score",),
+    ):
+        if event == "feedback_chunk":
+            yield ("feedback_token", data)
+        elif event in ("score", "feedback_done"):
+            yield (event, data)
+        elif event == "done":
+            parsed = data
+
+    if parsed is None:
+        raise StreamingJsonError("judge stream ended without a parsed object")
+    try:
+        judgment = Judgment.model_validate(parsed)
+    except Exception as e:
+        raise StreamingJsonError(f"judge JSON failed schema validation: {e}") from e
+    yield ("__parsed__", judgment)
+
+
+async def _run_model_answer_call(
+    *,
+    turn: Any,
+    profile: dict[str, Any],
+    hits: list[GroundingHit],
+    temperature: float,
+) -> AsyncIterator[tuple[str, Any]]:
+    user_msg = _build_model_answer_message(turn=turn, profile=profile, hits=hits)
+    llm = chat_model(temperature=temperature).bind(response_format={"type": "json_object"})
+    messages = [
+        SystemMessage(content=MODEL_ANSWER_SYSTEM),
+        HumanMessage(content=user_msg),
+    ]
+
+    parsed: dict[str, Any] | None = None
+    async for event, data in stream_json_object(
+        _model_deltas(llm, messages),
+        stream_string_fields=("model_answer",),
+    ):
+        if event == "model_answer_chunk":
+            yield ("model_answer_token", data)
+        elif event == "model_answer_done":
+            yield (event, data)
+        elif event == "done":
+            parsed = data
+
+    if parsed is None:
+        raise StreamingJsonError("model-answer stream ended without a parsed object")
+    try:
+        ma = ModelAnswerOnly.model_validate(parsed)
+    except Exception as e:
+        raise StreamingJsonError(f"model-answer JSON failed schema validation: {e}") from e
+    yield ("__parsed__", ma)
+
+
+async def _retrieve_for_turn(*, user_id: uuid.UUID, turn: Any) -> list[GroundingHit]:
+    metadata = turn.metadata_json or {}
+    focus_label = metadata.get("focus_label")
+    query = f"{turn.question} {focus_label or ''}".strip()
+    try:
+        return await retrieve_grounding(user_id=user_id, query=query, k=4)
+    except Exception:  # noqa: BLE001
+        # Retrieval failure should not derail the evaluation — fall back
+        # to profile-only model answer.
+        logger.exception("grounding retrieval failed; falling back to []")
+        return []
+
+
 async def stream_evaluation(
     *,
     session_id: uuid.UUID,
@@ -86,28 +212,14 @@ async def stream_evaluation(
     turn_id: uuid.UUID,
     temperature: float = 0.0,
 ) -> AsyncIterator[tuple[str, Any]]:
-    """Generate, stream, and persist the evaluation for `turn_id`.
-
-    Yields:
-        ("score", int)
-        ("feedback_token", str) ... ("feedback_done", None)
-        ("model_answer_token", str) ... ("model_answer_done", None)
-        ("done", {"turn_index": int, "session_status": str, "n_remaining": int})
-
-    Raises:
-        TurnNotFound, TurnNotAnswered: prereqs.
-        StreamingJsonError: model emitted invalid JSON / failed schema.
-    """
+    """Run judge call → model-answer call sequentially. See module docstring."""
     inputs = await _load_eval_inputs(session_id, user_id, turn_id)
     sess = inputs["session"]
     turn = inputs["turn"]
+    profile = inputs["profile"]
 
     if turn.score is not None:
-        # Re-evaluation isn't a v1 feature; the API guards against this too
-        # but we re-check here so the node is safe to call directly.
         raise TurnNotFound(f"turn {turn_id} already evaluated")
-
-    user_msg = _build_user_message(turn=turn, profile=inputs["profile"])
 
     logger.info(
         "Evaluator: session=%s turn=%s (turn_index=%d)",
@@ -116,66 +228,60 @@ async def stream_evaluation(
         turn.turn_index,
     )
 
-    llm = chat_model(temperature=temperature).bind(response_format={"type": "json_object"})
-
-    async def _model_deltas() -> AsyncIterator[str]:
-        async for chunk in llm.astream(
-            [
-                SystemMessage(content=EVALUATOR_SYSTEM),
-                HumanMessage(content=user_msg),
-            ]
-        ):
-            content = chunk.content
-            if isinstance(content, str):
-                if content:
-                    yield content
-            elif isinstance(content, list):
-                for part in content:
-                    if isinstance(part, str) and part:
-                        yield part
-                    elif isinstance(part, dict) and "text" in part:
-                        text = str(part["text"])
-                        if text:
-                            yield text
-
-    # Translate parser-internal `*_chunk` events to the SSE-facing `*_token`
-    # names that the Phase 9 wire format documents. This mirrors Phase 8's
-    # `question_chunk` → `token` rename in the question generator.
-    parsed: dict[str, Any] | None = None
-    async for event, data in stream_json_object(
-        _model_deltas(),
-        stream_string_fields=("feedback", "model_answer"),
-        scalar_fields=("score",),
-    ):
-        if event == "feedback_chunk":
-            yield ("feedback_token", data)
-        elif event == "model_answer_chunk":
-            yield ("model_answer_token", data)
-        elif event in ("score", "feedback_done", "model_answer_done"):
+    # --- Call 1: judge ---
+    judgment: Judgment | None = None
+    async for event, data in _run_judge_call(turn=turn, profile=profile, temperature=temperature):
+        if event == "__parsed__":
+            judgment = data
+        else:
             yield (event, data)
-        elif event == "done":
-            parsed = data
+    assert judgment is not None  # _run_judge_call raises otherwise
 
-    if parsed is None:
-        raise StreamingJsonError("evaluator stream ended without a parsed object")
-
-    try:
-        eval_obj = Evaluation.model_validate(parsed)
-    except Exception as e:
-        raise StreamingJsonError(f"final evaluation failed schema validation: {e}") from e
+    # --- Call 2: model answer (with grounding) ---
+    hits = await _retrieve_for_turn(user_id=user_id, turn=turn)
+    logger.info(
+        "Evaluator grounding: turn=%s hits=%d (kinds=%s)",
+        turn_id,
+        len(hits),
+        [h.source_doc_kind for h in hits],
+    )
 
     is_last = turn.turn_index + 1 >= sess.n_questions
     new_status = "complete" if is_last else "active"
     n_remaining = max(0, sess.n_questions - (turn.turn_index + 1))
 
+    model_answer: str | None = None
+    model_answer_failed_reason: str | None = None
+    try:
+        async for event, data in _run_model_answer_call(
+            turn=turn, profile=profile, hits=hits, temperature=temperature
+        ):
+            if event == "__parsed__":
+                model_answer = data.model_answer
+            else:
+                yield (event, data)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("model-answer call failed for turn %s", turn_id)
+        model_answer_failed_reason = str(e) or e.__class__.__name__
+        yield ("model_answer_error", {"reason": model_answer_failed_reason})
+
+    # --- Persist ---
     async with AsyncSessionLocal() as s:
-        await repos.update_turn_evaluation(
-            s,
-            turn_id,
-            score=eval_obj.score,
-            feedback=eval_obj.feedback,
-            model_answer=eval_obj.model_answer,
-        )
+        if model_answer is not None:
+            await repos.update_turn_evaluation(
+                s,
+                turn_id,
+                score=judgment.score,
+                feedback=judgment.feedback,
+                model_answer=model_answer,
+            )
+        else:
+            await repos.update_turn_evaluation_partial(
+                s,
+                turn_id,
+                score=judgment.score,
+                feedback=judgment.feedback,
+            )
         if is_last:
             await repos.update_session_status(s, session_id, user_id, "complete")
 

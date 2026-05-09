@@ -220,6 +220,7 @@ class EvaluationStreamResult:
         self.score: int | None = None
         self.done: dict[str, Any] | None = None
         self.error: dict[str, Any] | None = None
+        self.model_answer_unavailable: bool = False
         self._raw_lines: Iterator[str] | None = None
         self._client: httpx.Client | None = None
         self._response: Any = None
@@ -300,6 +301,11 @@ class EvaluationStreamResult:
                 yield data
             elif event == "model_answer_done":
                 return
+            elif event == "model_answer_error":
+                # Phase 14: judge succeeded but the model-answer call failed;
+                # the partial-persist path is taken server-side.
+                self.model_answer_unavailable = True
+                return
             elif event == "done" and isinstance(data, dict):
                 self.done = data
                 return
@@ -312,6 +318,8 @@ class EvaluationStreamResult:
         for event, data in self._events():
             if event == "done" and isinstance(data, dict):
                 self.done = data
+            elif event == "model_answer_error":
+                self.model_answer_unavailable = True
             elif event == "error" and isinstance(data, dict):
                 self.error = data
 

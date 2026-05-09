@@ -228,6 +228,8 @@ async def node_evaluator(state: InterviewState) -> dict[str, Any]:
             writer({"event": kind, "data": data})
         elif kind in ("feedback_done", "model_answer_done"):
             writer({"event": kind, "data": data})
+        elif kind == "model_answer_error":
+            writer({"event": kind, "data": data})
         elif kind == "done":
             done_payload = data
             writer({"event": "done", "data": data})

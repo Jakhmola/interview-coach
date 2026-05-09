@@ -360,6 +360,8 @@ async def submit_answer(
                         yield sse_event(event, chunk.get("data", ""))
                     elif event in ("feedback_done", "model_answer_done"):
                         yield sse_event(event, {})
+                    elif event == "model_answer_error":
+                        yield sse_event(event, chunk.get("data", {}))
                     elif event == "done":
                         yield sse_event("done", chunk.get("data", {}))
                     elif event == "error":

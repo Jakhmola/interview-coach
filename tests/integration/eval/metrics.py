@@ -59,6 +59,7 @@ def distinctness(questions: list[str]) -> float:
 
 _PROFILE_GROUNDEDNESS: GEval | None = None
 _JD_RELEVANCE: GEval | None = None
+_MODEL_ANSWER_FAITHFULNESS: GEval | None = None
 
 
 def _profile_groundedness_metric() -> GEval:
@@ -119,6 +120,52 @@ def profile_groundedness(question: str, profile: dict[str, Any], cv_text: str) -
         context=[
             "PROFILE_JSON:\n" + json.dumps(profile, ensure_ascii=False, indent=2),
             "RAW_CV:\n" + cv_text[:4000],
+        ],
+    )
+    metric.measure(test_case)
+    return float(metric.score) if metric.score is not None else 0.0
+
+
+def _model_answer_faithfulness_metric() -> GEval:
+    global _MODEL_ANSWER_FAITHFULNESS
+    if _MODEL_ANSWER_FAITHFULNESS is None:
+        _MODEL_ANSWER_FAITHFULNESS = GEval(
+            name="model_answer_faithfulness",
+            criteria=(
+                "Determine whether the MODEL ANSWER's specific factual "
+                "claims (system names, metrics, decisions, technologies) "
+                "are supported either by the candidate's profile or by "
+                "the grounding chunks (context). Hallucinated specifics — "
+                "concrete details not present in either source — score "
+                "low. Generic or stylistic content is neutral. Voice "
+                "(first person, natural speech, no document-style "
+                "citation) is implicitly part of being faithful without "
+                "quoting verbatim."
+            ),
+            evaluation_params=[
+                LLMTestCaseParams.ACTUAL_OUTPUT,
+                LLMTestCaseParams.CONTEXT,
+            ],
+            model=LocalChatLLM(),
+            async_mode=False,
+        )
+    return _MODEL_ANSWER_FAITHFULNESS
+
+
+def model_answer_faithfulness(
+    model_answer: str,
+    profile: dict[str, Any],
+    grounding_texts: list[str],
+) -> float:
+    """Returns the GEval score in [0.0, 1.0]. Phase 14 baseline only."""
+    metric = _model_answer_faithfulness_metric()
+    grounding_blob = "\n\n---\n\n".join(grounding_texts) if grounding_texts else "(no grounding)"
+    test_case = LLMTestCase(
+        input="(model-answer generation context)",
+        actual_output=model_answer,
+        context=[
+            "PROFILE_JSON:\n" + json.dumps(profile, ensure_ascii=False, indent=2),
+            "GROUNDING:\n" + grounding_blob,
         ],
     )
     metric.measure(test_case)

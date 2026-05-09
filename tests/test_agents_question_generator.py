@@ -233,7 +233,7 @@ async def test_generate_behavioral_threads_focus_target(
     factory = question_generator.AsyncSessionLocal
     async with factory() as fresh:
         turns = await repos.list_turns_for_session(fresh, sess.id)
-    assert turns[0].metadata_json == {"focus_key": "ownership"}
+    assert turns[0].metadata_json == {"focus_key": "ownership", "focus_label": "ownership"}
 
 
 async def test_behavioral_falls_back_to_company_signals(

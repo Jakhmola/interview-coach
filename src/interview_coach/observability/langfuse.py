@@ -91,6 +91,41 @@ def langfuse_callback() -> BaseCallbackHandler | None:
 
 
 @contextmanager
+def span(
+    name: str,
+    *,
+    input: Any | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> Iterator[Any]:
+    """Open a Langfuse observation as the current span for the duration of
+    the context. No-op (yields ``None``) when Langfuse is disabled.
+
+    Used to attach manual spans to non-LangChain work — embedding calls,
+    pgvector retrieval — so they appear nested under the surrounding graph
+    trace. Yield value is the underlying observation when enabled (so the
+    caller can attach output / metadata via ``.update()``), ``None``
+    otherwise.
+    """
+    if not _ensure_client_initialized():
+        yield None
+        return
+    try:
+        from langfuse import get_client
+
+        client = get_client()
+        with client.start_as_current_observation(
+            name=name,
+            as_type="span",
+            input=input,
+            metadata=metadata,
+        ) as obs:
+            yield obs
+    except Exception:
+        logger.exception("Langfuse span %r failed; running without trace", name)
+        yield None
+
+
+@contextmanager
 def trace_attributes(
     *,
     user_id: str | None = None,

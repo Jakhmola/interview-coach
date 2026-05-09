@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import uuid
 from typing import Annotated
 
@@ -12,7 +14,22 @@ from interview_coach.db.session import get_db
 from interview_coach.ingestion import extract_text
 from interview_coach.ingestion.errors import ExtractionFailed, UnsupportedFormat
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/documents", tags=["documents"])
+
+
+async def _embed_in_background(document_id: uuid.UUID) -> None:
+    """Best-effort: log and swallow any embedding failure so a flaky
+    embedder doesn't break document upload."""
+    try:
+        # Import here to keep heavy ML deps off the import path of routes.
+        from interview_coach.rag.ingest import embed_and_store_document
+
+        await embed_and_store_document(document_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("background embedding failed for document %s", document_id)
+
 
 MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
@@ -49,6 +66,10 @@ async def upload_document(
         byte_size=len(data),
         raw_text=text,
     )
+    # Phase 14: kick off RAG embedding in the background so the upload
+    # response stays snappy. The first call after a fresh boot pays the
+    # ~5–10s Jina v3 cold-load cost.
+    asyncio.create_task(_embed_in_background(doc.id))
     return DocumentOut.model_validate(doc)
 
 

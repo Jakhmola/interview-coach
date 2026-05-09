@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from interview_coach.db.models import (
     CompanySnapshotRow,
     Document,
+    GroundingChunk,
     Job,
     ProfileRow,
     SessionRow,
@@ -326,6 +327,23 @@ async def update_turn_evaluation(
     return True
 
 
+async def update_turn_evaluation_partial(
+    session: AsyncSession,
+    turn_id: uuid.UUID,
+    *,
+    score: int,
+    feedback: str,
+) -> bool:
+    """Persist score + feedback only — used when the model-answer call fails."""
+    row = await get_turn(session, turn_id)
+    if row is None:
+        return False
+    row.score = score
+    row.feedback = feedback
+    await session.commit()
+    return True
+
+
 async def create_turn(
     session: AsyncSession,
     *,
@@ -358,6 +376,50 @@ async def get_company_snapshot_by_job(
         select(CompanySnapshotRow).where(CompanySnapshotRow.job_id == job_id)
     )
     return result.scalar_one_or_none()
+
+
+# --- grounding chunks ---
+
+
+async def delete_grounding_chunks_for_document(
+    session: AsyncSession, document_id: uuid.UUID
+) -> int:
+    result = await session.execute(
+        delete(GroundingChunk).where(GroundingChunk.document_id == document_id)
+    )
+    await session.commit()
+    return result.rowcount or 0
+
+
+async def insert_grounding_chunks(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    document_id: uuid.UUID,
+    source_doc_kind: str,
+    chunks: list[dict[str, Any]],
+    model_name: str,
+) -> int:
+    """Bulk-insert chunks for a document. Each chunk dict needs:
+    `chunk_index`, `text`, `n_tokens`, `embedding` (list[float]).
+    Returns count inserted.
+    """
+    rows = [
+        GroundingChunk(
+            user_id=user_id,
+            document_id=document_id,
+            source_doc_kind=source_doc_kind,
+            chunk_index=c["chunk_index"],
+            text=c["text"],
+            n_tokens=c["n_tokens"],
+            embedding=c["embedding"],
+            model_name=model_name,
+        )
+        for c in chunks
+    ]
+    session.add_all(rows)
+    await session.commit()
+    return len(rows)
 
 
 async def upsert_company_snapshot(

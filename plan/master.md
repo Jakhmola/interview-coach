@@ -129,7 +129,8 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 11    | Observability (Langfuse)                       | ✅          |
 | 12a   | Eval harness — question-quality baseline       | ✅          |
 | 13    | Variety — deterministic focus picker           | ✅          |
-| 14    | RAG grounding — user-doc chunks (Jina + pgvector) | ⏳        |
+| 13.1  | Interviewer-voice / JD-relevance prompt rework | ⏳          |
+| 14    | Model-answer RAG grounding (user-doc chunks)   | ⏳          |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
 | 15    | GitHub ingestion                               | ⏳          |
@@ -242,15 +243,28 @@ move. The full evaluator-quality eval is now Phase 12b, after RAG.
 - **No schema change** — `turns.metadata_json` already exists.
 - **Smoke test:** two 5-question sessions on the same (user, JD); union of `focus_key`s ≥ 6 distinct values; rerun 12a harness — distinctness metric improves measurably; groundedness holds.
 
-### Phase 14 — RAG grounding (user-doc chunks)
-- The parsed Profile is a summary; the LLM never sees the paragraphs the candidate actually wrote. This phase chunks `documents.raw_text`, embeds with **Jina v3 + late chunking** on CPU, stores in **pgvector**, retrieves at question time.
-- New table `grounding_chunks(id, user_id, document_id, corpus_kind='user_doc', chunk_index, chunk_text, source_metadata, embedding VECTOR(1024), created_at)` + ivfflat index on `embedding`. `corpus_kind` left denormalized so 14b/15 reuse the table.
-- `ingestion/embeddings.py` (new) — lazy-loads `jinaai/jina-embeddings-v3` once via `sentence-transformers` (`trust_remote_code=True`); `late_chunk_document()` runs one forward pass on the whole doc and mean-pools token embeddings per chunk so chunks carry document-level context.
-- Hooked into `documents/routes.py` (sync; ~2–5s per doc on CPU). One-shot `scripts/backfill_grounding.py` for pre-existing docs.
-- `agents/nodes/question_generator.py` — at retrieval time, embed `(focus_target.text + must_have_skills[:5])`, fetch top-5 chunks for this `user_id`, inject as `grounding` in the user message JSON. Prompts updated: "prefer a question whose strong answer would draw on a specific detail attested in `grounding`; do NOT invent details that contradict it."
-- `mcp/servers/documents_server.py` — bonus `search_grounding(user_id, query, k)` tool.
-- Compose: switch base image `postgres:16` → `pgvector/pgvector:pg16` (drop-in).
-- **Smoke test:** upload a real CV; chunks land with non-null embeddings; run a `resume_walkthrough` session; Langfuse trace shows `grounding` chunks semantically close to the picked `focus_target`. 12a harness — groundedness improves measurably.
+### Phase 13.1 — Interviewer-voice / JD-relevance prompt rework
+- Pure prompt rework on `agents/prompts.py` + a small reshape of the question-generator user-message JSON. No infra, no schema, no retrieval.
+- System prompts become small templates rendering `{company_name}`, `{role_title}`, `{seniority}`, `{mission}`, `{values_and_signals}` into a "You are a hiring manager at $COMPANY for $ROLE…" preamble.
+- Add an explicit "phrase the question in second person; reference the role's responsibility or the company's domain when natural" instruction.
+- For `resume_walkthrough`: connect `focus_target` to one of the role's `must_have_skills` or `responsibilities`. For `behavioral_star`: tie the competency back to the company's stated values when present.
+- `agents/nodes/question_generator.py` — reshape user-message JSON to `{focus_target, role: {...}, company: {...}, profile, prior_turns}`, promoting role+company up the attention hierarchy.
+- **Smoke test:** rerun 12a harness — `jd_relevance` recovers; `profile_groundedness` and `distinctness` hold within a small delta.
+
+### Phase 14 — Model-answer RAG grounding (user-doc corpus)
+- Information asymmetry: the **interviewer** only knows the resume / Profile JSON, while the **candidate** knows their own deeper write-ups. Phase 14 wires those write-ups into the **evaluator's model-answer call only**, so the reference answer can speak with project-specific detail in the candidate's first-person voice. The question generator stays untouched; question-side grounding lands in 14b (Tavily tech specs) and 15 (GitHub).
+- New table `grounding_chunks(id, user_id, document_id, source_doc_kind, chunk_index, text, n_tokens, embedding vector(1024), model_name, created_at)` (pgvector). `source_doc_kind` is a free-form `varchar(32)` with a check constraint listing `{cv, project_doc}` today; Phase 15 widens the constraint to add `'github'` (no schema migration). `hnsw` index on `embedding` for cosine ANN.
+- `rag/embeddings.py` — lazy `jinaai/jina-embeddings-v3` singleton via `sentence-transformers` (`trust_remote_code=True`); `rag/chunking.py` — pure-text 400-token windows with 50-token overlap (the safe path; late-chunking is an optimization target).
+- `rag/ingest.py` — `embed_and_store_document(document_id)` is idempotent (delete-then-insert). Wired as a fire-and-forget background task in `documents/routes.py` so the upload response stays snappy. One-shot `scripts/backfill_grounding.py` for pre-existing dev DBs.
+- **Evaluator split into two sequential LLM calls** (single GPU, qwen3:8b VRAM-bound — parallelism would queue or spill to CPU):
+  - **Judge call** — `EVALUATOR_JUDGE_SYSTEM`, emits `{score, feedback}`, NO grounding injected.
+  - **Model-answer call** — `MODEL_ANSWER_SYSTEM`, emits `{model_answer}`, with retrieval over `('project_doc',)` chunks injected. Voice-contamination guard in the prompt: never quote the documents verbatim; never cite ("as stated in my notes"); render specifics in natural first-person speech.
+  - Wire format unchanged: `score → feedback_token* → feedback_done → model_answer_token* → model_answer_done → done`. New `model_answer_error` event covers the partial-failure path (judge succeeded, model-answer flaked); `repos.update_turn_evaluation_partial` persists score+feedback only.
+- `question_generator.py` — one-line addition: persist `focus_label` alongside existing `focus_key` in `turns.metadata_json` so the evaluator can use it as part of the retrieval query.
+- `mcp/servers/documents_server.py` — bonus `search_grounding(user_id, query, k, source_kind=None)` tool.
+- `tests/integration/eval/test_model_answer_quality.py` + `model_answer_faithfulness` G-Eval (informational, no failing threshold) — Phase 14 baselines only.
+- Compose: switch base image `postgres:16` → `pgvector/pgvector:pg16`.
+- **Smoke test:** upload a real CV + project_doc; `grounding_chunks` populates within ~5s/doc; run a session and inspect a model_answer for first-person voice + grounded specifics + no document-style citation; eval baseline numbers print.
 
 ### Phase 14b — RAG grounding (Tavily tech-spec corpus, optional)
 Only if Phase 14 questions feel grounded in the candidate's voice but still technically vague.
@@ -270,8 +284,8 @@ The rest of the original Phase 12. Lands after RAG so the eval set is stable.
 ### Phase 15 — GitHub ingestion
 - `documents.kind = 'github_repo'`; resolve handles from CV (regex on raw_text + `links` if present).
 - GitHub REST API (no auth needed for public repos) → README + top-level `.md` + `package.json` / `pyproject.toml`.
-- Reuse Phase 14 chunker / embedder / table; `corpus_kind='github'`.
-- **Smoke test:** ingest a known repo; chunks searchable; question references attested code patterns.
+- Reuse Phase 14 chunker / embedder / table — adding GitHub is a one-line widening of the `source_doc_kind` check constraint to include `'github'` plus changing the `retrieve_grounding` default `source_kinds` to `('project_doc', 'github')`. No new migration.
+- **Smoke test:** ingest a known repo; chunks searchable; model_answer references attested code patterns.
 
 ---
 

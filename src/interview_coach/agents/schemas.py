@@ -87,7 +87,12 @@ class Question(BaseModel):
 
 
 class Evaluation(BaseModel):
-    """Evaluator output for a single turn (Phase 9)."""
+    """Combined evaluator output for a single turn (Phase 9).
+
+    Phase 14 splits the LLM call into two — `Judgment` and `ModelAnswer` —
+    but the persisted shape and external API still match this combined
+    schema, so we keep it.
+    """
 
     score: int = Field(ge=1, le=10, description="Single overall 1–10 score.")
     feedback: str = Field(description="Concise paragraph explaining the score.")
@@ -97,6 +102,19 @@ class Evaluation(BaseModel):
             "candidate's voice, grounded in their profile."
         ),
     )
+
+
+class Judgment(BaseModel):
+    """Phase 14 judge-call output: score + feedback only."""
+
+    score: int = Field(ge=1, le=10)
+    feedback: str
+
+
+class ModelAnswerOnly(BaseModel):
+    """Phase 14 model-answer call output."""
+
+    model_answer: str
 
 
 class CompanySnapshot(BaseModel):
