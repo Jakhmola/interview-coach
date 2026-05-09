@@ -1,5 +1,5 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Mic2, Play, RotateCcw, Square } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, Play, RotateCcw, Square } from "lucide-react";
 
 import {
   ApiError,
@@ -35,8 +35,11 @@ export function InterviewPage() {
   const [streamFeedback, setStreamFeedback] = useState("");
   const [streamModelAnswer, setStreamModelAnswer] = useState("");
   const [streamScore, setStreamScore] = useState<number | null>(null);
+  const [streamPhase, setStreamPhase] = useState<"idle" | "evaluating" | "feedback" | "model_answer">("idle");
+  const [pendingAnswer, setPendingAnswer] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
 
   const activeSessions = useMemo(
     () => sessions.filter((session) => session.status === "active"),
@@ -44,9 +47,7 @@ export function InterviewPage() {
   );
 
   const refresh = async () => {
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     const [nextJobs, nextSessions] = await Promise.all([api.listJobs(token), api.listSessions(token)]);
     setJobs(nextJobs);
     setSessions(nextSessions);
@@ -62,35 +63,58 @@ export function InterviewPage() {
     });
   }, [token, activeId]);
 
+  // Scroll to bottom whenever chat content changes
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [detail?.turns, streamQuestion, streamFeedback, streamModelAnswer, pendingAnswer]);
+
   const loadSession = async (id: string) => {
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     setActiveId(id);
     setDetail(await api.getSession(token, id));
     setError(null);
   };
 
+  const askNext = async (sessionId: string, sessionToken: string) => {
+    setIsBusy(true);
+    setStreamQuestion("");
+    setError(null);
+    try {
+      await nextQuestionStream(sessionToken, sessionId, (frame: SseFrame) => {
+        if (frame.event === "token" && typeof frame.data === "string") {
+          setStreamQuestion((current) => current + frame.data);
+        }
+        if (frame.event === "error") {
+          setError(extractStreamError(frame.data));
+        }
+      });
+      setStreamQuestion("");
+      setDetail(await api.getSession(sessionToken, sessionId));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : "Question generation failed.");
+    } finally {
+      setIsBusy(false);
+    }
+  };
+
   const startSession = async (event: FormEvent) => {
     event.preventDefault();
-    if (!token || !jobId) {
-      return;
-    }
+    if (!token || !jobId) return;
     setError(null);
     try {
       const session = await api.createSession(token, jobId, roundType, nQuestions);
       setActiveId(session.id);
       setDetail(await api.getSession(token, session.id));
       await refresh();
+      // Auto-ask the first question immediately
+      await askNext(session.id, token);
     } catch (err) {
       setError(err instanceof ApiError ? prereqHint(err.detail) : "Could not start the interview.");
     }
   };
 
   const abandon = async (id: string) => {
-    if (!token) {
-      return;
-    }
+    if (!token) return;
     await api.abandonSession(token, id);
     setActiveId(null);
     setDetail(null);
@@ -106,55 +130,35 @@ export function InterviewPage() {
   const needsRetry =
     detail?.status === "active" && latest && latest.answer && latest.score === null;
 
-  const askNext = async () => {
-    if (!token || !detail) {
-      return;
-    }
-    setIsBusy(true);
-    setStreamQuestion("");
-    setError(null);
-    try {
-      await nextQuestionStream(token, detail.id, (frame: SseFrame) => {
-        if (frame.event === "token" && typeof frame.data === "string") {
-          setStreamQuestion((current) => current + frame.data);
-        }
-        if (frame.event === "error") {
-          setError(extractStreamError(frame.data));
-        }
-      });
-      setStreamQuestion("");
-      setDetail(await api.getSession(token, detail.id));
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Question generation failed.");
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
   const submitAnswer = async (event?: FormEvent) => {
     event?.preventDefault();
-    if (!token || !detail || !latest) {
-      return;
-    }
+    if (!token || !detail || !latest) return;
     const text = needsRetry ? latest.answer || "" : answer.trim();
     if (!text) {
       setError("Type an answer before submitting.");
       return;
     }
+    // Show the user's answer bubble immediately
+    setPendingAnswer(text);
+    setAnswer("");
     setIsBusy(true);
     setStreamFeedback("");
     setStreamModelAnswer("");
     setStreamScore(null);
+    setStreamPhase("evaluating");
     setError(null);
     try {
       await answerStream(token, detail.id, text, (frame: SseFrame) => {
         if (frame.event === "score" && typeof frame.data === "object" && frame.data !== null) {
           setStreamScore(Number((frame.data as { score?: number }).score));
+          setStreamPhase("feedback");
         }
         if (frame.event === "feedback_token" && typeof frame.data === "string") {
+          setStreamPhase("feedback");
           setStreamFeedback((current) => current + frame.data);
         }
         if (frame.event === "model_answer_token" && typeof frame.data === "string") {
+          setStreamPhase("model_answer");
           setStreamModelAnswer((current) => current + frame.data);
         }
         if (frame.event === "model_answer_error") {
@@ -164,13 +168,24 @@ export function InterviewPage() {
           setError(extractStreamError(frame.data));
         }
       });
-      setAnswer("");
       setDetail(await api.getSession(token, detail.id));
+      setPendingAnswer(null);
+      setStreamFeedback("");
+      setStreamModelAnswer("");
+      setStreamScore(null);
+      setStreamPhase("idle");
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Evaluation failed.");
+      setPendingAnswer(null);
+      setStreamPhase("idle");
     } finally {
       setIsBusy(false);
     }
+  };
+
+  const handleAskNext = () => {
+    if (!token || !detail) return;
+    askNext(detail.id, token);
   };
 
   if (!activeId || !detail) {
@@ -218,9 +233,9 @@ export function InterviewPage() {
                   onChange={(event) => setNQuestions(Number(event.target.value))}
                 />
               </label>
-              <button className="primary-button" type="submit">
-                <Play size={18} />
-                Start interview
+              <button className="primary-button" type="submit" disabled={isBusy}>
+                {isBusy ? <Loader2 size={18} className="spin" /> : <Play size={18} />}
+                {isBusy ? "Preparing your first question..." : "Start interview"}
               </button>
             </form>
           )}
@@ -256,6 +271,8 @@ export function InterviewPage() {
     );
   }
 
+  const nextQuestionIndex = detail.turns.length + 1;
+
   return (
     <div className="interview-layout">
       <section className="panel interview-panel">
@@ -280,50 +297,98 @@ export function InterviewPage() {
           {detail.turns.map((turn) => (
             <TurnView key={turn.id} turn={turn} />
           ))}
+
+          {/* Streaming: question being generated */}
           {streamQuestion ? (
-            <div className="chat-bubble coach">
-              <strong>Coach</strong>
-              <p>{streamQuestion}</p>
+            <div className="chat-bubble coach stream-in">
+              <strong>Q{nextQuestionIndex}</strong>
+              <p>{streamQuestion}<span className="cursor-blink" /></p>
             </div>
           ) : null}
-          {streamFeedback || streamScore !== null || streamModelAnswer ? (
-            <div className="chat-bubble coach">
-              <strong>{streamScore !== null ? `Score: ${streamScore}/10` : "Feedback"}</strong>
-              <p>{streamFeedback}</p>
-              {streamModelAnswer ? (
-                <details open>
+
+          {/* Question loading placeholder */}
+          {isBusy && !streamQuestion && streamPhase === "idle" && needsQuestion ? (
+            <div className="chat-bubble coach thinking-bubble">
+              <Loader2 size={16} className="spin" />
+              <span>Preparing question {nextQuestionIndex}…</span>
+            </div>
+          ) : null}
+
+          {/* Pending answer shown immediately after submit */}
+          {pendingAnswer ? (
+            <div className="chat-bubble candidate stream-in">
+              <strong>You</strong>
+              <p>{pendingAnswer}</p>
+            </div>
+          ) : null}
+
+          {/* Evaluation phases */}
+          {streamPhase === "evaluating" && !streamFeedback ? (
+            <div className="chat-bubble coach thinking-bubble">
+              <Loader2 size={16} className="spin" />
+              <span>Evaluating your answer…</span>
+            </div>
+          ) : null}
+
+          {streamFeedback || streamScore !== null ? (
+            <div className="chat-bubble coach stream-in">
+              <strong>
+                {streamScore !== null ? `Score: ${streamScore}/10` : (
+                  <span className="score-loading">
+                    <Loader2 size={14} className="spin" /> Scoring…
+                  </span>
+                )}
+              </strong>
+              <p>{streamFeedback}{streamPhase === "feedback" ? <span className="cursor-blink" /> : null}</p>
+
+              {streamPhase === "model_answer" || streamModelAnswer ? (
+                <details open className="stream-in">
                   <summary>Model answer</summary>
-                  <p>{streamModelAnswer}</p>
+                  <p>
+                    {streamModelAnswer}
+                    {streamPhase === "model_answer" ? <span className="cursor-blink" /> : null}
+                  </p>
                 </details>
+              ) : streamPhase === "feedback" ? (
+                <div className="model-answer-loading">
+                  <Loader2 size={14} className="spin" />
+                  <span>Preparing model answer…</span>
+                </div>
               ) : null}
             </div>
           ) : null}
+
+          <div ref={chatBottomRef} />
         </div>
-        {needsQuestion ? (
-          <button className="primary-button" onClick={askNext} disabled={isBusy}>
-            <Mic2 size={18} />
-            {isBusy ? "Listening for the next question..." : "Next question"}
+
+        {needsQuestion && !isBusy ? (
+          <button className="primary-button" onClick={handleAskNext}>
+            <Play size={18} />
+            Next question
           </button>
         ) : null}
-        {needsAnswer ? (
+
+        {needsAnswer && !isBusy ? (
           <form className="answer-composer" onSubmit={submitAnswer}>
             <textarea
               rows={5}
               value={answer}
               onChange={(event) => setAnswer(event.target.value)}
-              placeholder="Answer as you would in the interview..."
+              placeholder="Answer as you would in the interview…"
             />
-            <button className="primary-button" type="submit" disabled={isBusy}>
+            <button className="primary-button" type="submit">
               Submit answer
             </button>
           </form>
         ) : null}
-        {needsRetry ? (
-          <button className="primary-button" onClick={() => submitAnswer()} disabled={isBusy}>
+
+        {needsRetry && !isBusy ? (
+          <button className="primary-button" onClick={() => submitAnswer()}>
             <RotateCcw size={18} />
             Retry evaluation
           </button>
         ) : null}
+
         {detail.status !== "active" ? (
           <div className="success-banner">Session {detail.status}. Review it in History.</div>
         ) : null}
