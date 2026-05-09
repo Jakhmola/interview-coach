@@ -4,7 +4,7 @@ Personalized AI interview practice. Upload a CV + project docs, paste a job desc
 
 ## Stack
 
-- FastAPI + Streamlit
+- FastAPI + React
 - LangGraph multi-agent supervisor (LangChain + MCP tools)
 - Ollama on host (default `qwen3:8b`)
 - Postgres (app data) + SQLite (LangGraph checkpoints)
@@ -20,7 +20,7 @@ cp .env.example .env
 
 make up
 curl http://localhost:8000/healthz   # → {"status":"ok",...}
-open http://localhost:8501           # Streamlit
+open http://localhost:8501           # React UI
 ```
 
 Run tests on the host (no container needed):
@@ -92,7 +92,7 @@ INTEGRATION=1 uv run pytest tests/test_llm.py::test_real_llm_streaming -v
 
 | Service          | URL                          |
 | ---------------- | ---------------------------- |
-| Streamlit UI     | http://localhost:8501        |
+| React UI         | http://localhost:8501        |
 | FastAPI docs     | http://localhost:8000/docs   |
 | Adminer (DB UI)  | http://localhost:8090        |
 | llama.cpp server | http://localhost:8080        |
@@ -136,6 +136,7 @@ no SDK init, no callback, no network calls.
 
 ```
 src/interview_coach/    # FastAPI app + agents, observability, MCP, db, llm
-ui/                     # Streamlit app
+frontend/               # React + TypeScript app served by the ui container
+ui/                     # Legacy Streamlit app, kept temporarily
 tests/                  # pytest
 ```

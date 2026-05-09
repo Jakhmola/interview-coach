@@ -62,3 +62,16 @@ class AnswerSubmitRequest(BaseModel):
 class PrepareRequest(BaseModel):
     job_id: uuid.UUID
     force_refresh: bool = False
+
+
+class PrepStatusOut(BaseModel):
+    job_id: uuid.UUID
+    has_cv: bool
+    profile_ready: bool
+    job_analyzed: bool
+    company_researched: bool
+    can_start: bool
+    missing: list[str]
+    profile: dict[str, Any] | None = None
+    job: dict[str, Any] | None = None
+    company: dict[str, Any] | None = None

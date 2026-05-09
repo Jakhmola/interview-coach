@@ -35,6 +35,7 @@ from interview_coach.api.auth.deps import get_current_user
 from interview_coach.api.sessions.schemas import (
     AnswerSubmitRequest,
     PrepareRequest,
+    PrepStatusOut,
     RoundType,
     SessionCreateRequest,
     SessionDetail,
@@ -131,6 +132,59 @@ async def abandon_session(
 
 
 # --- Phase 10: prepare endpoint -------------------------------------
+
+
+@router.get("/prepare/status", response_model=PrepStatusOut)
+async def prepare_status(
+    job_id: uuid.UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> PrepStatusOut:
+    """Read-only readiness view for the frontend setup flow."""
+    job = await repos.get_job(session, job_id, user.id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "job_not_found")
+
+    docs = await repos.list_documents_for_user(session, user.id)
+    has_cv = any(d.kind == "cv" for d in docs)
+    profile = await repos.get_profile(session, user.id)
+    snapshot = await repos.get_company_snapshot_by_job(session, job_id)
+
+    profile_ready = profile is not None
+    job_analyzed = bool(job.parsed_json)
+    company_researched = snapshot is not None
+
+    missing: list[str] = []
+    if not has_cv:
+        missing.append("cv")
+    if not profile_ready:
+        missing.append("profile")
+    if not job_analyzed:
+        missing.append("job_analysis")
+    if not company_researched:
+        missing.append("company_research")
+
+    return PrepStatusOut(
+        job_id=job.id,
+        has_cv=has_cv,
+        profile_ready=profile_ready,
+        job_analyzed=job_analyzed,
+        company_researched=company_researched,
+        can_start=not missing,
+        missing=missing,
+        profile=profile.profile_json if profile is not None else None,
+        job=job.parsed_json,
+        company=(
+            {
+                "company_name": snapshot.company_name,
+                "snapshot": snapshot.snapshot_json,
+                "source_urls": snapshot.source_urls,
+                "updated_at": snapshot.updated_at,
+            }
+            if snapshot is not None
+            else None
+        ),
+    )
 
 
 @router.post("/prepare")

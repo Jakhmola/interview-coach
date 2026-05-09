@@ -16,3 +16,6 @@ pg_data
 *.sqlite
 *.sqlite3
 tests
+frontend/node_modules
+frontend/dist
+frontend/*.tsbuildinfo

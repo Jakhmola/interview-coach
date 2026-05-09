@@ -8,7 +8,7 @@ help:
 	@echo "make rebuild   - docker compose build --no-cache"
 	@echo "make ps        - docker compose ps"
 	@echo "make sh-api    - shell into api container"
-	@echo "make sh-ui     - shell into ui container"
+	@echo "make sh-ui     - shell into React ui container"
 	@echo "make sh-db     - psql into db container"
 	@echo "make db-ui     - print Adminer URL + creds for the local DB"
 	@echo "make test      - run pytest on host via uv"

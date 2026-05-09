@@ -205,6 +205,136 @@ async def test_abandon_does_not_downgrade_complete_session(
     assert r.json()["status"] == "complete"
 
 
+# --- preparation status ---
+
+
+async def _seed_status_case(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    *,
+    skip: str | None = None,
+) -> dict[str, str]:
+    import uuid as _uuid
+
+    seeds = await _seed_user_and_job(client, auth_token, db_session, with_doc=skip != "cv")
+    user_id = _uuid.UUID(seeds["user_id"])
+    job_id = _uuid.UUID(seeds["job_id"])
+
+    if skip != "profile":
+        await repos.upsert_profile(
+            db_session,
+            user_id=user_id,
+            profile_json={
+                "summary": "Backend engineer focused on reliable APIs.",
+                "skills": ["python", "fastapi"],
+                "experiences": [],
+                "projects": [],
+                "education": [],
+            },
+            source_doc_ids=[],
+            model_name="qwen3-8b",
+        )
+    if skip != "job_parsed":
+        await repos.update_job_parsed_json(
+            db_session,
+            job_id,
+            user_id,
+            {
+                "title": "Senior Backend Engineer",
+                "seniority": "senior",
+                "must_have_skills": ["python", "postgres"],
+                "nice_to_have_skills": [],
+                "responsibilities": ["Build reliable APIs."],
+                "behavioral_signals": ["ownership"],
+                "company_name": "Acme",
+            },
+        )
+    if skip != "snapshot":
+        await repos.upsert_company_snapshot(
+            db_session,
+            job_id=job_id,
+            company_name="Acme",
+            snapshot_json={
+                "mission": "Build dependable tools.",
+                "products": ["Workbench"],
+                "recent_news": [],
+                "values_and_signals": ["ownership"],
+            },
+            source_urls=["https://example.com"],
+            model_name="qwen3-8b",
+        )
+    return seeds
+
+
+@pytest.mark.parametrize(
+    ("skip", "missing_key"),
+    [
+        ("profile", "profile"),
+        ("job_parsed", "job_analysis"),
+        ("snapshot", "company_research"),
+    ],
+)
+async def test_prepare_status_reports_missing_artifact(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    skip: str,
+    missing_key: str,
+) -> None:
+    seeds = await _seed_status_case(client, auth_token, db_session, skip=skip)
+
+    r = await client.get(
+        "/sessions/prepare/status",
+        headers=_auth(auth_token),
+        params={"job_id": seeds["job_id"]},
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["can_start"] is False
+    assert missing_key in body["missing"]
+
+
+async def test_prepare_status_reports_missing_cv(
+    client: AsyncClient, auth_token: str, db_session: AsyncSession
+) -> None:
+    seeds = await _seed_status_case(client, auth_token, db_session, skip="cv")
+
+    r = await client.get(
+        "/sessions/prepare/status",
+        headers=_auth(auth_token),
+        params={"job_id": seeds["job_id"]},
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["has_cv"] is False
+    assert "cv" in body["missing"]
+    assert body["can_start"] is False
+
+
+async def test_prepare_status_ready_includes_compact_artifacts(
+    client: AsyncClient, auth_token: str, db_session: AsyncSession
+) -> None:
+    seeds = await _seed_status_case(client, auth_token, db_session)
+
+    r = await client.get(
+        "/sessions/prepare/status",
+        headers=_auth(auth_token),
+        params={"job_id": seeds["job_id"]},
+    )
+
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["can_start"] is True
+    assert body["missing"] == []
+    assert body["profile"]["summary"] == "Backend engineer focused on reliable APIs."
+    assert body["job"]["title"] == "Senior Backend Engineer"
+    assert body["company"]["company_name"] == "Acme"
+    assert body["company"]["snapshot"]["mission"] == "Build dependable tools."
+
+
 # --- streaming ---
 
 

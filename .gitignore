@@ -33,6 +33,11 @@ pg_data/
 htmlcov/
 .ruff_cache/
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+
 # Per-phase detailed plan; overwritten each phase, master is in plan/master.md
 plan/current-phase.md
 
