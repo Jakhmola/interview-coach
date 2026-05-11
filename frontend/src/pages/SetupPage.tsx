@@ -10,6 +10,7 @@ import {
   api,
   prepareSessionStream,
 } from "../api";
+import { LoadingStatus } from "../components/LoadingStatus";
 import { EmptyState, StatusPill, formatDate } from "../components/ui";
 import { useAuth } from "../state/auth";
 
@@ -17,6 +18,12 @@ const nodeLabels: Record<string, string> = {
   profile_builder: "Profile builder",
   job_analyzer: "Job analyzer",
   company_researcher: "Company research",
+};
+
+const nodeLoadingMessages: Record<string, string[]> = {
+  profile_builder: ["Reading your CV", "Finding signal in your projects", "Building candidate profile"],
+  job_analyzer: ["Parsing role expectations", "Extracting must-have skills", "Mapping interview focus"],
+  company_researcher: ["Scanning company context", "Collecting recent signals", "Preparing company notes"],
 };
 
 function asText(value: unknown): string {
@@ -333,9 +340,12 @@ export function SetupPage() {
             {Object.keys(nodeState).length ? (
               <div className="node-list">
                 {Object.entries(nodeLabels).map(([key, label]) => (
-                  <span key={key}>
-                    {label}: <strong>{nodeState[key] ?? "pending"}</strong>
-                  </span>
+                  <TaskStatus
+                    key={key}
+                    label={label}
+                    state={nodeState[key] ?? "pending"}
+                    messages={nodeLoadingMessages[key] ?? [`Preparing ${label.toLowerCase()}`]}
+                  />
                 ))}
               </div>
             ) : null}
@@ -344,6 +354,37 @@ export function SetupPage() {
         )}
       </section>
     </div>
+  );
+}
+
+function TaskStatus({
+  label,
+  state,
+  messages,
+}: {
+  label: string;
+  state: string;
+  messages: string[];
+}) {
+  const normalizedState = state.startsWith("cached") ? "cached" : state;
+  const isActive = normalizedState === "pending" || normalizedState === "running";
+  const fallback =
+    normalizedState === "done"
+      ? "Complete"
+      : normalizedState === "cached"
+        ? "Using cached result"
+        : normalizedState === "running"
+          ? "Working"
+          : "Queued";
+
+  return (
+    <article className={`task-status task-${normalizedState}`}>
+      <span className="task-status-dot" />
+      <div>
+        <strong>{label}</strong>
+        <LoadingStatus active={isActive} messages={messages} fallback={fallback} />
+      </div>
+    </article>
   );
 }
 

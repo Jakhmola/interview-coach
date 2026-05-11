@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Play, RotateCcw, Square } from "lucide-react";
+import Confetti from "react-confetti";
 
 import {
   ApiError,
@@ -13,6 +14,7 @@ import {
   api,
   nextQuestionStream,
 } from "../api";
+import { LoadingStatus } from "../components/LoadingStatus";
 import { EmptyState, StatusPill, formatDate, shortId } from "../components/ui";
 import { useAuth } from "../state/auth";
 
@@ -23,6 +25,7 @@ const roundLabels: Record<RoundType, string> = {
 
 export function InterviewPage() {
   const { token } = useAuth();
+  const windowSize = useWindowSize();
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -39,12 +42,22 @@ export function InterviewPage() {
   const [pendingAnswer, setPendingAnswer] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [celebrationPieces, setCelebrationPieces] = useState<number | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const celebratedSessionsRef = useRef<Set<string>>(new Set());
 
   const activeSessions = useMemo(
     () => sessions.filter((session) => session.status === "active"),
     [sessions],
   );
+
+  const overallScore = useMemo(() => {
+    const scored = detail?.turns.filter((turn) => turn.score !== null && turn.score !== undefined) ?? [];
+    if (!scored.length) {
+      return null;
+    }
+    return scored.reduce((total, turn) => total + (turn.score ?? 0), 0) / scored.length;
+  }, [detail?.turns]);
 
   const refresh = async () => {
     if (!token) return;
@@ -67,6 +80,17 @@ export function InterviewPage() {
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [detail?.turns, streamQuestion, streamFeedback, streamModelAnswer, pendingAnswer]);
+
+  useEffect(() => {
+    if (!detail || detail.status !== "complete" || overallScore === null) {
+      return;
+    }
+    if (celebratedSessionsRef.current.has(detail.id)) {
+      return;
+    }
+    celebratedSessionsRef.current.add(detail.id);
+    setCelebrationPieces(scoreToConfettiPieces(overallScore));
+  }, [detail, overallScore]);
 
   const loadSession = async (id: string) => {
     if (!token) return;
@@ -275,6 +299,20 @@ export function InterviewPage() {
 
   return (
     <div className="interview-layout">
+      {celebrationPieces !== null ? (
+        <Confetti
+          width={windowSize.width}
+          height={windowSize.height}
+          numberOfPieces={celebrationPieces}
+          recycle={false}
+          run
+          gravity={0.18}
+          tweenDuration={6500}
+          colors={["#2f6f63", "#72c1b0", "#f2b366", "#ef7f59", "#466d8f", "#f7f4ed"]}
+          className="completion-confetti"
+          onConfettiComplete={() => setCelebrationPieces(null)}
+        />
+      ) : null}
       <section className="panel interview-panel">
         <div className="panel-header">
           <div>
@@ -310,7 +348,15 @@ export function InterviewPage() {
           {isBusy && !streamQuestion && streamPhase === "idle" && needsQuestion ? (
             <div className="chat-bubble coach thinking-bubble">
               <Loader2 size={16} className="spin" />
-              <span>Preparing question {nextQuestionIndex}…</span>
+              <LoadingStatus
+                active
+                messages={[
+                  `Preparing question ${nextQuestionIndex}`,
+                  "Choosing the sharpest follow-up",
+                  "Grounding it in your profile",
+                ]}
+                fallback={`Preparing question ${nextQuestionIndex}`}
+              />
             </div>
           ) : null}
 
@@ -326,7 +372,11 @@ export function InterviewPage() {
           {streamPhase === "evaluating" && !streamFeedback ? (
             <div className="chat-bubble coach thinking-bubble">
               <Loader2 size={16} className="spin" />
-              <span>Evaluating your answer…</span>
+              <LoadingStatus
+                active
+                messages={["Scoring your structure", "Checking evidence and specificity", "Drafting feedback"]}
+                fallback="Evaluating your answer"
+              />
             </div>
           ) : null}
 
@@ -352,7 +402,11 @@ export function InterviewPage() {
               ) : streamPhase === "feedback" ? (
                 <div className="model-answer-loading">
                   <Loader2 size={14} className="spin" />
-                  <span>Preparing model answer…</span>
+                  <LoadingStatus
+                    active
+                    messages={["Preparing model answer", "Tuning it to the role", "Making the example sharper"]}
+                    fallback="Preparing model answer"
+                  />
                 </div>
               ) : null}
             </div>
@@ -390,11 +444,35 @@ export function InterviewPage() {
         ) : null}
 
         {detail.status !== "active" ? (
-          <div className="success-banner">Session {detail.status}. Review it in History.</div>
+          <div className="success-banner">
+            Session {detail.status}. {overallScore !== null ? `Overall score: ${overallScore.toFixed(1)}/10. ` : ""}
+            Review it in History.
+          </div>
         ) : null}
       </section>
     </div>
   );
+}
+
+function scoreToConfettiPieces(score: number) {
+  const clamped = Math.max(0, Math.min(10, score));
+  return Math.round(80 + clamped * 32);
+}
+
+function useWindowSize() {
+  const getSize = () => ({
+    width: typeof window === "undefined" ? 300 : window.innerWidth,
+    height: typeof window === "undefined" ? 200 : window.innerHeight,
+  });
+  const [size, setSize] = useState(getSize);
+
+  useEffect(() => {
+    const handleResize = () => setSize(getSize());
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  return size;
 }
 
 function TurnView({ turn }: { turn: Turn }) {
