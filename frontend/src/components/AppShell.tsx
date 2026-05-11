@@ -1,6 +1,8 @@
-import { BookOpenCheck, FileText, History, LogOut, Mic2, Sparkles } from "lucide-react";
-import { NavLink, Outlet } from "react-router-dom";
+import { FileText, History, Lock, LogOut, Mic2, Sparkles } from "lucide-react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
 
+import { ApiError, api } from "../api";
 import { useAuth } from "../state/auth";
 
 const navItems = [
@@ -10,11 +12,47 @@ const navItems = [
 ];
 
 export function AppShell() {
-  const { user, logout } = useAuth();
+  const { token, user, logout } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [isSetupComplete, setIsSetupComplete] = useState(false);
+  const [hasCheckedReadiness, setHasCheckedReadiness] = useState(false);
+  const [readinessError, setReadinessError] = useState<string | null>(null);
+
+  const refreshReadiness = useCallback(async () => {
+    if (!token) {
+      setIsSetupComplete(false);
+      setHasCheckedReadiness(true);
+      return;
+    }
+    setReadinessError(null);
+    try {
+      const jobs = await api.listJobs(token);
+      const statuses = await Promise.all(
+        jobs.map((job) => api.prepStatus(token, job.id).catch(() => null)),
+      );
+      setIsSetupComplete(statuses.some((status) => status?.can_start));
+    } catch (err) {
+      setReadinessError(err instanceof ApiError ? err.detail : "Could not check setup readiness.");
+      setIsSetupComplete(false);
+    } finally {
+      setHasCheckedReadiness(true);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void refreshReadiness();
+  }, [refreshReadiness]);
+
+  useEffect(() => {
+    if (hasCheckedReadiness && !isSetupComplete && location.pathname !== "/setup") {
+      navigate("/setup", { replace: true });
+    }
+  }, [hasCheckedReadiness, isSetupComplete, location.pathname, navigate]);
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <header className="workspace-header">
         <div className="brand">
           <span className="brand-mark">
             <Sparkles size={20} />
@@ -24,36 +62,55 @@ export function AppShell() {
             <span>Practice studio</span>
           </div>
         </div>
-        <nav className="nav-list">
+        <div className="user-menu">
+          <span>{user?.email}</span>
+          <button className="icon-button" onClick={logout} title="Log out">
+            <LogOut size={18} />
+          </button>
+        </div>
+      </header>
+      <main className="main-panel">
+        <section className="tab-stage" aria-label="Workspace sections">
+          <nav className="big-tabs">
           {navItems.map((item) => {
             const Icon = item.icon;
+            const disabled = item.to !== "/setup" && hasCheckedReadiness && !isSetupComplete;
+            if (disabled) {
+              return (
+                <button
+                  key={item.to}
+                  className="big-tab disabled"
+                  type="button"
+                  disabled
+                  title="Complete setup before opening this section"
+                >
+                  <Icon size={24} />
+                  <span>{item.label}</span>
+                  <Lock size={16} />
+                </button>
+              );
+            }
             return (
-              <NavLink key={item.to} to={item.to} className="nav-link">
-                <Icon size={18} />
-                {item.label}
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) => `big-tab ${isActive ? "active animated-gradient-border" : ""}`}
+              >
+                <Icon size={24} />
+                <span>{item.label}</span>
               </NavLink>
             );
           })}
-        </nav>
-        <div className="sidebar-card">
-          <BookOpenCheck size={18} />
-          <span>Warm up with a prepared job before starting a round.</span>
-        </div>
-      </aside>
-      <main className="main-panel">
+          </nav>
+          {readinessError ? <div className="error-banner compact">{readinessError}</div> : null}
+        </section>
         <header className="topbar">
           <div>
             <span className="eyebrow">Coaching workspace</span>
-            <h1>Prepare, rehearse, review.</h1>
-          </div>
-          <div className="user-menu">
-            <span>{user?.email}</span>
-            <button className="icon-button" onClick={logout} title="Log out">
-              <LogOut size={18} />
-            </button>
+            <h1>{isSetupComplete ? "Ready to rehearse." : "Set up your interview kit."}</h1>
           </div>
         </header>
-        <Outlet />
+        <Outlet context={{ refreshReadiness, isSetupComplete }} />
       </main>
     </div>
   );
