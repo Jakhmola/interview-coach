@@ -25,11 +25,13 @@ class _DocumentBase(BaseModel):
 
 class DocumentListItem(_DocumentBase):
     char_count: int = Field(description="Length of extracted text")
+    project_title: str | None = None
 
 
 class DocumentOut(_DocumentBase):
     raw_text: str
     parsed_json: dict[str, Any] | None = None
+    project_title: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property

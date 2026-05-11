@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from interview_coach.db.models import (
     CompanySnapshotRow,
     Document,
+    DocumentMapping,
     GroundingChunk,
     Job,
     ProfileRow,
@@ -62,6 +63,21 @@ async def delete_document(
     return (result.rowcount or 0) > 0
 
 
+async def update_document_title(
+    session: AsyncSession,
+    document_id: uuid.UUID,
+    user_id: uuid.UUID,
+    project_title: str,
+) -> bool:
+    """Set documents.project_title for a project_doc. Returns True on hit."""
+    doc = await get_document(session, document_id, user_id)
+    if doc is None:
+        return False
+    doc.project_title = project_title
+    await session.commit()
+    return True
+
+
 async def create_document(
     session: AsyncSession,
     *,
@@ -91,6 +107,62 @@ async def create_document(
     await session.commit()
     await session.refresh(doc)
     return doc
+
+
+# --- document mappings ---
+
+
+async def list_document_mappings(
+    session: AsyncSession, document_id: uuid.UUID
+) -> Sequence[DocumentMapping]:
+    result = await session.execute(
+        select(DocumentMapping)
+        .where(DocumentMapping.document_id == document_id)
+        .order_by(DocumentMapping.created_at.asc())
+    )
+    return result.scalars().all()
+
+
+async def delete_document_mappings_for_document(
+    session: AsyncSession, document_id: uuid.UUID
+) -> int:
+    result = await session.execute(
+        delete(DocumentMapping).where(DocumentMapping.document_id == document_id)
+    )
+    await session.commit()
+    return result.rowcount or 0
+
+
+async def replace_document_mappings(
+    session: AsyncSession,
+    *,
+    document_id: uuid.UUID,
+    user_id: uuid.UUID,
+    rows: list[dict[str, Any]],
+) -> int:
+    """Delete prior mappings for `document_id`, then insert new rows.
+
+    Each row dict: ``mapping_kind``, ``experience_idx?``, ``highlight_idx?``,
+    ``project_idx?``, ``extracted_json?``.
+    """
+    await session.execute(
+        delete(DocumentMapping).where(DocumentMapping.document_id == document_id)
+    )
+    new_rows = [
+        DocumentMapping(
+            document_id=document_id,
+            user_id=user_id,
+            mapping_kind=r["mapping_kind"],
+            experience_idx=r.get("experience_idx"),
+            highlight_idx=r.get("highlight_idx"),
+            project_idx=r.get("project_idx"),
+            extracted_json=r.get("extracted_json"),
+        )
+        for r in rows
+    ]
+    session.add_all(new_rows)
+    await session.commit()
+    return len(new_rows)
 
 
 # --- jobs ---

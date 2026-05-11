@@ -2,9 +2,9 @@
 
 Postgres-only path — uses pgvector's `<=>` cosine-distance operator. The
 default `source_kinds` is the set of "candidate-deep" corpora the model
-answer is allowed to draw from. Phase 14: `('project_doc',)`. Phase 15
-will widen the default to `('project_doc', 'github')` here in this file —
-no schema migration needed.
+answer is allowed to draw from. Phase 14.1: optional ``document_ids`` filter
+lets the evaluator scope retrieval to the project_doc(s) the question was
+about, when the question generator pre-picked a focus with doc provenance.
 """
 
 from __future__ import annotations
@@ -29,32 +29,65 @@ class GroundingHit:
     filename: str
 
 
+MIN_GROUNDING_SCORE = 0.5
+"""Cosine-similarity floor for a chunk to be considered grounding.
+
+L2-normalized vectors → cosine sim in [-1, 1]. Empirically Jina v3
+``retrieval.query`` ↔ ``retrieval.passage`` matches a relevant chunk at
+~0.55–0.75. A floor of 0.5 keeps the truly-on-topic chunks and drops noise
+that would otherwise pollute the model-answer prompt when the question is
+about something the corpus doesn't cover.
+"""
+
+
 async def retrieve_grounding(
     *,
     user_id: uuid.UUID,
     query: str,
     k: int = 4,
     source_kinds: tuple[str, ...] = ("project_doc",),
+    document_ids: tuple[uuid.UUID, ...] = (),
+    min_score: float = MIN_GROUNDING_SCORE,
 ) -> list[GroundingHit]:
     """Embed the query, then return the top-k chunks belonging to `user_id`
-    whose `source_doc_kind` is in `source_kinds`. Empty input string or no
-    matching rows return `[]`.
+    whose `source_doc_kind` is in `source_kinds`. When `document_ids` is
+    non-empty, results are further scoped to chunks from those specific docs
+    (used when the question generator pinned a focus to a project_doc).
+
+    Hits with cosine similarity below ``min_score`` are dropped so the
+    model-answer prompt never gets fed weakly-related chunks.
+
+    Empty input string or no matching rows return `[]`.
     """
     if not query.strip() or not source_kinds:
         return []
 
     with span(
         "rag.retrieve_grounding",
-        input={"query": query, "k": k, "source_kinds": list(source_kinds)},
+        input={
+            "query": query,
+            "k": k,
+            "source_kinds": list(source_kinds),
+            "document_ids": [str(d) for d in document_ids],
+            "min_score": min_score,
+        },
         metadata={"user_id": str(user_id)},
     ) as obs:
         qvec = await embed_query(query)
-        hits = await _vector_search(qvec=qvec, user_id=user_id, source_kinds=source_kinds, k=k)
+        raw_hits = await _vector_search(
+            qvec=qvec,
+            user_id=user_id,
+            source_kinds=source_kinds,
+            document_ids=document_ids,
+            k=k,
+        )
+        hits = [h for h in raw_hits if h.score >= min_score]
         if obs is not None:
             try:
                 obs.update(
                     output={
                         "n_hits": len(hits),
+                        "n_dropped_below_min_score": len(raw_hits) - len(hits),
                         "hits": [
                             {
                                 "filename": h.filename,
@@ -76,10 +109,15 @@ async def _vector_search(
     qvec: list[float],
     user_id: uuid.UUID,
     source_kinds: tuple[str, ...],
+    document_ids: tuple[uuid.UUID, ...],
     k: int,
 ) -> list[GroundingHit]:
+    doc_clause = ""
+    if document_ids:
+        doc_clause = "           AND gc.document_id = ANY(:doc_ids)\n"
+
     sql = text(
-        """
+        f"""
         SELECT gc.text AS text,
                gc.document_id AS document_id,
                gc.source_doc_kind AS source_doc_kind,
@@ -90,21 +128,22 @@ async def _vector_search(
           JOIN documents d ON d.id = gc.document_id
          WHERE gc.user_id = :uid
            AND gc.source_doc_kind = ANY(:kinds)
-         ORDER BY gc.embedding <=> CAST(:qvec AS vector)
+{doc_clause}         ORDER BY gc.embedding <=> CAST(:qvec AS vector)
          LIMIT :k
         """
     ).bindparams(bindparam("kinds", expanding=False))
 
+    params: dict[str, object] = {
+        "qvec": _to_pgvector_literal(qvec),
+        "uid": str(user_id),
+        "kinds": list(source_kinds),
+        "k": k,
+    }
+    if document_ids:
+        params["doc_ids"] = [str(d) for d in document_ids]
+
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            sql,
-            {
-                "qvec": _to_pgvector_literal(qvec),
-                "uid": str(user_id),
-                "kinds": list(source_kinds),
-                "k": k,
-            },
-        )
+        result = await session.execute(sql, params)
         rows = result.mappings().all()
 
     return [

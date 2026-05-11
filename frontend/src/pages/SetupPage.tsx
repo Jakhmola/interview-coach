@@ -10,6 +10,7 @@ import {
   api,
   prepareSessionStream,
 } from "../api";
+import { DocMappingModal } from "../components/DocMappingModal";
 import { LoadingStatus } from "../components/LoadingStatus";
 import { EmptyState, StatusPill, formatDate } from "../components/ui";
 import { useAuth } from "../state/auth";
@@ -47,6 +48,7 @@ export function SetupPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isPreparing, setIsPreparing] = useState(false);
   const [nodeState, setNodeState] = useState<Record<string, string>>({});
+  const [mappingDocId, setMappingDocId] = useState<string | null>(null);
 
   const selectedJob = useMemo(
     () => jobs.find((job) => job.id === selectedJobId) ?? null,
@@ -96,6 +98,9 @@ export function SetupPage() {
       const doc = await api.uploadDocument(token, kind, event.target.files[0]);
       setMessage(`Uploaded ${doc.filename}.`);
       await load();
+      if (kind === "project_doc") {
+        setMappingDocId(doc.id);
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Upload failed.");
     } finally {
@@ -208,6 +213,18 @@ export function SetupPage() {
 
   return (
     <div className="page-grid setup-grid">
+      {mappingDocId && token ? (
+        <DocMappingModal
+          token={token}
+          documentId={mappingDocId}
+          onClose={() => setMappingDocId(null)}
+          onApplied={async () => {
+            setMappingDocId(null);
+            setMessage("Project mapping saved.");
+            await load();
+          }}
+        />
+      ) : null}
       <section className="panel wide">
         <div className="panel-header">
           <div>
@@ -240,12 +257,29 @@ export function SetupPage() {
                 <div>
                   <strong>{doc.filename}</strong>
                   <span>
-                    {doc.kind === "cv" ? "CV" : "Project doc"} · {doc.char_count.toLocaleString()} chars
+                    {doc.kind === "cv" ? "CV" : "Project doc"}
+                    {doc.project_title ? ` · "${doc.project_title}"` : ""} ·{" "}
+                    {doc.char_count.toLocaleString()} chars
                   </span>
                 </div>
-                <button className="icon-button danger" onClick={() => deleteDocument(doc.id)} title="Delete">
-                  <Trash2 size={17} />
-                </button>
+                <div className="list-actions">
+                  {doc.kind === "project_doc" ? (
+                    <button
+                      className="ghost-button"
+                      onClick={() => setMappingDocId(doc.id)}
+                      title="Re-map to profile"
+                    >
+                      Re-map
+                    </button>
+                  ) : null}
+                  <button
+                    className="icon-button danger"
+                    onClick={() => deleteDocument(doc.id)}
+                    title="Delete"
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                </div>
               </article>
             ))}
           </div>

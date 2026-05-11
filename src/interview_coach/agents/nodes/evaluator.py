@@ -195,9 +195,21 @@ async def _run_model_answer_call(
 async def _retrieve_for_turn(*, user_id: uuid.UUID, turn: Any) -> list[GroundingHit]:
     metadata = turn.metadata_json or {}
     focus_label = metadata.get("focus_label")
+    raw_doc_ids = metadata.get("focus_document_ids") or []
+    doc_ids: tuple[uuid.UUID, ...] = ()
+    if raw_doc_ids:
+        parsed: list[uuid.UUID] = []
+        for d in raw_doc_ids:
+            try:
+                parsed.append(uuid.UUID(str(d)))
+            except (ValueError, TypeError):
+                logger.warning("skipping invalid focus_document_id %r on turn %s", d, turn.id)
+        doc_ids = tuple(parsed)
     query = f"{turn.question} {focus_label or ''}".strip()
     try:
-        return await retrieve_grounding(user_id=user_id, query=query, k=4)
+        return await retrieve_grounding(
+            user_id=user_id, query=query, k=4, document_ids=doc_ids
+        )
     except Exception:  # noqa: BLE001
         # Retrieval failure should not derail the evaluation — fall back
         # to profile-only model answer.

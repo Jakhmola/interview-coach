@@ -31,11 +31,60 @@ export type DocumentItem = {
   byte_size: number;
   char_count: number;
   created_at: string;
+  project_title?: string | null;
 };
 
 export type DocumentDetail = DocumentItem & {
   raw_text: string;
   parsed_json?: Record<string, unknown> | null;
+};
+
+export type DocIntakeSuggestion = {
+  mapping_kind: "highlight" | "experience" | "project";
+  experience_idx?: number | null;
+  highlight_idx?: number | null;
+  confidence: number;
+  reason: string;
+};
+
+export type DocIntakeExtracted = {
+  tech_stack: string[];
+  description?: string | null;
+  urls: string[];
+};
+
+export type ProfileHighlight = {
+  highlight_idx: number;
+  text: string;
+};
+
+export type ProfileExperience = {
+  experience_idx: number;
+  company: string;
+  role: string;
+  highlights: ProfileHighlight[];
+};
+
+export type MappingSuggestion = {
+  document_id: string;
+  title: string;
+  preview: string;
+  extracted: DocIntakeExtracted;
+  suggestions: DocIntakeSuggestion[];
+  experiences: ProfileExperience[];
+};
+
+export type MappingRow = {
+  mapping_kind: "highlight" | "experience" | "project";
+  experience_idx?: number | null;
+  highlight_idx?: number | null;
+  project_idx?: number | null;
+};
+
+export type ApplyMappingResponse = {
+  document_id: string;
+  title: string;
+  n_rows: number;
 };
 
 export type JobItem = {
@@ -167,6 +216,18 @@ export const api = {
   getDocument: (token: string, id: string) => apiFetch<DocumentDetail>(`/documents/${id}`, { token }),
   deleteDocument: (token: string, id: string) =>
     apiFetch<void>(`/documents/${id}`, { method: "DELETE", token }),
+  getMappingSuggestion: (token: string, documentId: string) =>
+    apiFetch<MappingSuggestion>(`/documents/${documentId}/mapping-suggestion`, { token }),
+  postDocumentMapping: (
+    token: string,
+    documentId: string,
+    body: { title?: string; rows: MappingRow[]; extracted: DocIntakeExtracted },
+  ) =>
+    apiFetch<ApplyMappingResponse>(`/documents/${documentId}/mapping`, {
+      method: "POST",
+      token,
+      body: JSON.stringify(body),
+    }),
   submitJobText: (token: string, text: string) =>
     apiFetch<JobDetail>("/jobs", { method: "POST", token, body: JSON.stringify({ text }) }),
   submitJobUrl: (token: string, url: string) =>

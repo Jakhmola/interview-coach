@@ -129,8 +129,9 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 11    | Observability (Langfuse)                       | ✅          |
 | 12a   | Eval harness — question-quality baseline       | ✅          |
 | 13    | Variety — deterministic focus picker           | ✅          |
-| 13.1  | Interviewer-voice / JD-relevance prompt rework | ⏳          |
-| 14    | Model-answer RAG grounding (user-doc chunks)   | ⏳          |
+| 13.1  | Interviewer-voice / JD-relevance prompt rework | ⤵ folded into 14.1 |
+| 14    | Model-answer RAG grounding (user-doc chunks)   | ✅          |
+| 14.1  | Project-identity-aware profile + RAG + prompts | 🚧          |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
 | 15    | GitHub ingestion                               | ⏳          |

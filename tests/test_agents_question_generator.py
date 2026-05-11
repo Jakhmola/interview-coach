@@ -71,7 +71,15 @@ async def seeded_profile(agent_session: AsyncSession, alice: User) -> None:
                     "role": "Senior SWE",
                     "start": "2021",
                     "end": "present",
-                    "highlights": ["Rewrote sync stack to async, 40% latency drop."],
+                    "highlights": [
+                        {
+                            "text": "Rewrote sync stack to async, 40% latency drop.",
+                            "tech_stack": [],
+                            "description": None,
+                            "urls": [],
+                            "source_document_ids": [],
+                        }
+                    ],
                 }
             ],
             "projects": [
@@ -80,6 +88,9 @@ async def seeded_profile(agent_session: AsyncSession, alice: User) -> None:
                     "description": "Internal high-throughput API gateway.",
                     "tech": ["python", "fastapi"],
                     "role": "tech lead",
+                    "urls": [],
+                    "source": "project_doc",
+                    "source_document_ids": [],
                 }
             ],
             "education": [],
@@ -187,12 +198,15 @@ async def test_generate_resume_walkthrough_streams_and_persists(
         "candidate vs team",
     ]
 
-    # User message includes profile context (the project name), round_type,
-    # and the deterministic picker's chosen focus_target.
+    # User message includes profile context (the project name), the framing
+    # role/company, and the picker's chosen focus_target.
     [system_msg, user_msg] = captured[0]
     assert "AsyncAPI" in user_msg.content
-    assert '"round_type": "resume_walkthrough"' in user_msg.content
+    assert '"company": "Acme"' in user_msg.content
+    assert '"role": "Senior Backend Engineer"' in user_msg.content
     assert '"focus_target":' in user_msg.content
+    # System prompt is templated with the company name.
+    assert "Acme" in system_msg.content
 
 
 async def test_generate_behavioral_threads_focus_target(
@@ -463,5 +477,7 @@ async def test_prior_turns_threaded_into_prompt(
         pass
 
     [_sys, user_msg] = captured[0]
+    # Prior turns include the question; answers are stripped from the prompt
+    # to keep context tight (Phase 14.1).
     assert "Walk me through AsyncAPI." in user_msg.content
-    assert "rewrote the sync stack" in user_msg.content
+    assert "rewrote the sync stack" not in user_msg.content

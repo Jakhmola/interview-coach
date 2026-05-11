@@ -1,4 +1,4 @@
-"""ProfileBuilder unit tests with mocked MCP loader and mocked LLM."""
+"""ProfileBuilder unit tests with a mocked LLM (Phase 14.1: CV-only)."""
 
 from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock
@@ -10,6 +10,7 @@ from interview_coach.agents.nodes import profile_builder
 from interview_coach.agents.schemas import (
     Education,
     Experience,
+    Highlight,
     Profile,
     ProjectItem,
 )
@@ -47,7 +48,7 @@ def _fake_profile() -> Profile:
                 role="Senior Engineer",
                 start="2021",
                 end="present",
-                highlights=["Built async API"],
+                highlights=[Highlight(text="Built async API")],
             )
         ],
         projects=[
@@ -57,25 +58,24 @@ def _fake_profile() -> Profile:
     )
 
 
+async def _seed_cv(session: AsyncSession, user: User) -> models.Document:
+    return await repos.create_document(
+        session,
+        user_id=user.id,
+        kind="cv",
+        filename="alice.pdf",
+        content_type="application/pdf",
+        byte_size=42,
+        raw_text="Alice Engineer ... 6 years of Python ...",
+    )
+
+
 async def test_build_profile_persists(
     agent_session: AsyncSession,
     alice: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake_docs = [
-        {
-            "id": "doc-1",
-            "kind": "cv",
-            "filename": "alice.pdf",
-            "raw_text": "Alice Engineer ... 6 years of Python ...",
-        }
-    ]
-
-    async def fake_loader(uid: str) -> list[dict]:
-        assert uid == str(alice.id)
-        return fake_docs
-
-    monkeypatch.setattr(profile_builder, "_load_user_docs", fake_loader)
+    cv = await _seed_cv(agent_session, alice)
 
     fake_llm = AsyncMock()
     fake_llm.ainvoke = AsyncMock(return_value=_fake_profile())
@@ -91,12 +91,13 @@ async def test_build_profile_persists(
 
     assert isinstance(result, Profile)
     assert result.skills == ["python", "fastapi", "postgres"]
+    # Highlight is now a structured object.
+    assert result.experiences[0].highlights[0].text == "Built async API"
 
-    # Assert persisted
     row = await repos.get_profile(agent_session, alice.id)
     assert row is not None
     assert row.profile_json["skills"] == ["python", "fastapi", "postgres"]
-    assert row.source_doc_ids == ["doc-1"]
+    assert row.source_doc_ids == [str(cv.id)]
 
 
 async def test_build_profile_replaces_existing(
@@ -105,12 +106,7 @@ async def test_build_profile_replaces_existing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Rebuilding for the same user replaces (does not duplicate)."""
-
-    monkeypatch.setattr(
-        profile_builder,
-        "_load_user_docs",
-        AsyncMock(return_value=[{"id": "d1", "kind": "cv", "filename": "a.pdf", "raw_text": "x"}]),
-    )
+    await _seed_cv(agent_session, alice)
 
     fake_llm = AsyncMock()
     fake_llm.ainvoke = AsyncMock(return_value=_fake_profile())
@@ -139,18 +135,9 @@ async def test_build_profile_replaces_existing(
     assert len(rows) == 1
 
 
-async def test_build_profile_no_docs(
+async def test_build_profile_no_cv(
     agent_session: AsyncSession,
     alice: User,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(profile_builder, "_load_user_docs", AsyncMock(return_value=[]))
     with pytest.raises(profile_builder.NoDocumentsError):
         await profile_builder.build_profile(alice.id)
-
-
-def test_format_docs_truncates_long_text() -> None:
-    big = "x" * (profile_builder.MAX_DOC_CHARS + 100)
-    out = profile_builder._format_docs([{"kind": "cv", "filename": "huge.pdf", "raw_text": big}])
-    assert "[truncated]" in out
-    assert len(out) < len(big) + 200

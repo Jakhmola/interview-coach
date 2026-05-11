@@ -1,13 +1,18 @@
 """QuestionGenerator agent node.
 
-Streams one interview question. The model emits a single JSON object
-``{"question": "...", "anchors": [...]}``; we forward the question text to
-the SSE client as it arrives, then capture anchors at end-of-stream and
-persist a `Turn` row.
+Streams one interview question. Phase 14.1: focus candidates are now rich
+`Highlight` objects (each with provenance back to the project_doc that
+enriched it) plus standalone `ProjectItem`s. The picked focus's
+`document_ids` flow through to `turn.metadata_json.focus_document_ids` so
+the evaluator's RAG retrieval can scope to the right project.
+
+The model emits a single JSON object ``{"question": "...", "anchors": [...]}``;
+we forward the question text to the SSE client as it arrives, then capture
+anchors at end-of-stream and persist a `Turn` row.
 
 Shape: an async generator that yields token strings (visible to the user)
-and finally yields a sentinel `("__done__", {"question_id": ..., "turn_index": ...})`
-so the API layer can format the SSE `done` event without re-fetching state.
+and finally yields a sentinel
+``("done", {"question_id": ..., "turn_index": ...})``.
 """
 
 from __future__ import annotations
@@ -81,52 +86,46 @@ def _tokens(text: str) -> set[str]:
     return set(_TOKEN_RE.findall(text.lower()))
 
 
-def _experience_focus_key(exp: dict[str, Any], idx: int) -> str:
+def _truncate(text: str, n: int = 100) -> str:
+    text = text.strip()
+    if len(text) <= n:
+        return text
+    return text[: n - 1].rstrip() + "…"
+
+
+def _highlight_label(exp: dict[str, Any], hl: dict[str, Any]) -> str:
+    text = (hl.get("text") or "").strip() or "(unnamed highlight)"
     company = (exp.get("company") or "").strip()
-    role = (exp.get("role") or "").strip()
-    if company or role:
-        return f"experience:{company}/{role}".strip("/")
-    return f"experience:idx_{idx}"
-
-
-def _project_focus_key(proj: dict[str, Any], idx: int) -> str:
-    name = (proj.get("name") or "").strip()
-    if name:
-        return f"project:{name}"
-    return f"project:idx_{idx}"
-
-
-def _experience_label(exp: dict[str, Any]) -> str:
-    role = (exp.get("role") or "").strip()
-    company = (exp.get("company") or "").strip()
-    if role and company:
-        return f"{role} @ {company}"
-    return role or company or "(unnamed experience)"
+    return _truncate(f'"{text}" at {company}' if company else f'"{text}"', 140)
 
 
 def _project_label(proj: dict[str, Any]) -> str:
     name = (proj.get("name") or "").strip()
     description = (proj.get("description") or "").strip()
     if name and description:
-        return f"{name} — {description}"
+        return _truncate(f"{name} — {description}", 140)
     return name or description or "(unnamed project)"
 
 
-def _resume_candidate_corpus(item_kind: str, item: dict[str, Any]) -> set[str]:
-    """Token bag used to score JD overlap for a resume candidate."""
-    if item_kind == "experience":
-        parts: list[str] = [
-            str(item.get("role") or ""),
-            str(item.get("company") or ""),
-            *[str(h) for h in (item.get("highlights") or [])],
-        ]
-    else:  # project
-        parts = [
-            str(item.get("name") or ""),
-            str(item.get("description") or ""),
-            *[str(t) for t in (item.get("tech") or [])],
-            str(item.get("role") or ""),
-        ]
+def _highlight_candidate_corpus(exp: dict[str, Any], hl: dict[str, Any]) -> set[str]:
+    """Token bag used to score JD overlap for a highlight."""
+    parts = [
+        str(hl.get("text") or ""),
+        str(hl.get("description") or ""),
+        str(exp.get("role") or ""),
+        str(exp.get("company") or ""),
+        *[str(t) for t in (hl.get("tech_stack") or [])],
+    ]
+    return _tokens(" ".join(parts))
+
+
+def _project_candidate_corpus(proj: dict[str, Any]) -> set[str]:
+    parts = [
+        str(proj.get("name") or ""),
+        str(proj.get("description") or ""),
+        *[str(t) for t in (proj.get("tech") or [])],
+        str(proj.get("role") or ""),
+    ]
     return _tokens(" ".join(parts))
 
 
@@ -138,37 +137,42 @@ def _pick_focus_target(
     company_snapshot: dict[str, Any],
     prior_focus_counts: dict[str, int],
     rng: random.Random,
-) -> tuple[str, str] | None:
-    """Pre-pick which experience / project / signal the question must drill into.
+) -> tuple[str, str, list[str]] | None:
+    """Pre-pick which highlight / project / signal the question must drill into.
 
-    Returns (focus_key, focus_label) or None if no candidates are available.
+    Returns ``(focus_key, focus_label, document_ids)`` or None.
 
     Scoring:
       inv_freq(k) = 1 / (1 + prior_focus_counts.get(k, 0))
       resume_walkthrough: weight = (1 + jd_overlap_count) * inv_freq
       behavioral_star:    weight = inv_freq
-    Then weighted-sample with `rng` so ties don't always pick the first.
+    Weighted-sample with `rng` so ties don't always pick the first.
     """
-    candidates: list[tuple[str, str, float]] = []  # (key, label, weight)
+    candidates: list[tuple[str, str, list[str], float]] = []  # (key, label, doc_ids, weight)
 
     if round_type == "resume_walkthrough":
         must_have = _tokens(" ".join(str(s) for s in (job_analysis.get("must_have_skills") or [])))
         for i, exp in enumerate(profile.get("experiences") or []):
             if not isinstance(exp, dict):
                 continue
-            key = _experience_focus_key(exp, i)
-            label = _experience_label(exp)
-            overlap = len(_resume_candidate_corpus("experience", exp) & must_have)
-            inv_freq = 1.0 / (1.0 + prior_focus_counts.get(key, 0))
-            candidates.append((key, label, (1.0 + overlap) * inv_freq))
-        for i, proj in enumerate(profile.get("projects") or []):
+            for j, hl in enumerate(exp.get("highlights") or []):
+                if not isinstance(hl, dict):
+                    continue
+                key = f"highlight:{i}:{j}"
+                label = _highlight_label(exp, hl)
+                doc_ids = [str(d) for d in (hl.get("source_document_ids") or [])]
+                overlap = len(_highlight_candidate_corpus(exp, hl) & must_have)
+                inv_freq = 1.0 / (1.0 + prior_focus_counts.get(key, 0))
+                candidates.append((key, label, doc_ids, (1.0 + overlap) * inv_freq))
+        for k, proj in enumerate(profile.get("projects") or []):
             if not isinstance(proj, dict):
                 continue
-            key = _project_focus_key(proj, i)
+            key = f"project:{(proj.get('name') or '').strip() or f'idx_{k}'}"
             label = _project_label(proj)
-            overlap = len(_resume_candidate_corpus("project", proj) & must_have)
+            doc_ids = [str(d) for d in (proj.get("source_document_ids") or [])]
+            overlap = len(_project_candidate_corpus(proj) & must_have)
             inv_freq = 1.0 / (1.0 + prior_focus_counts.get(key, 0))
-            candidates.append((key, label, (1.0 + overlap) * inv_freq))
+            candidates.append((key, label, doc_ids, (1.0 + overlap) * inv_freq))
     elif round_type == "behavioral_star":
         signals: list[str] = list(job_analysis.get("behavioral_signals") or [])
         if not signals:
@@ -178,50 +182,84 @@ def _pick_focus_target(
             if not sig_str:
                 continue
             inv_freq = 1.0 / (1.0 + prior_focus_counts.get(sig_str, 0))
-            candidates.append((sig_str, sig_str, inv_freq))
+            candidates.append((sig_str, sig_str, [], inv_freq))
     else:
         raise ValueError(f"unknown round_type: {round_type!r}")
 
     if not candidates:
         return None
 
-    weights = [w for _, _, w in candidates]
-    keys_labels = [(k, lbl) for k, lbl, _ in candidates]
-    chosen_key, chosen_label = rng.choices(keys_labels, weights=weights, k=1)[0]
-    return chosen_key, chosen_label
+    weights = [w for _, _, _, w in candidates]
+    triples = [(k, lbl, ids) for k, lbl, ids, _ in candidates]
+    chosen_key, chosen_label, chosen_doc_ids = rng.choices(triples, weights=weights, k=1)[0]
+    return chosen_key, chosen_label, chosen_doc_ids
+
+
+def _first_sentence(text: str, max_chars: int = 160) -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+    m = re.search(r"[.!?]", text)
+    sentence = text[: m.end()].strip() if m else text
+    if len(sentence) > max_chars:
+        sentence = sentence[: max_chars - 1].rstrip() + "…"
+    return sentence
 
 
 def _build_user_message(
     *,
-    round_type: RoundType,
-    context: dict[str, Any],
+    role_title: str,
+    company_name: str,
     focus_label: str | None,
+    profile: dict[str, Any],
+    prior_turns: list[dict[str, Any]],
     turn_index: int,
 ) -> str:
     """JSON payload of the structured context we hand to the LLM.
 
-    Sticking to JSON keeps the prompt parseable for the model and easy to
-    snapshot for tests — no clever templating.
+    Phase 14.1: framing fields go first (`role`, `company`, `focus_target`)
+    so the LLM sees them before the bulky profile. ``prior_turns`` is
+    questions only — answers are stripped to keep the context tight.
     """
     payload: dict[str, Any] = {
-        "round_type": round_type,
+        "role": role_title,
+        "company": company_name,
         "turn_index": turn_index,
-        "profile": context["profile"],
-        "job_analysis": context["job_analysis"],
-        "company_snapshot": context["company_snapshot"],
-        "prior_turns": context["prior_turns"],
     }
     if focus_label is not None:
         payload["focus_target"] = focus_label
+    payload["profile"] = profile
+    payload["prior_turns"] = [{"question": t["question"]} for t in prior_turns]
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-def _system_for(round_type: RoundType) -> str:
+def _render_system_prompt(
+    *,
+    round_type: RoundType,
+    job_analysis: dict[str, Any],
+    company_snapshot: dict[str, Any],
+) -> str:
+    company_name = (job_analysis.get("company_name") or "").strip() or "the hiring company"
+    role_title = (job_analysis.get("title") or "").strip() or "this role"
+    seniority = (job_analysis.get("seniority") or "").strip() or "unknown"
+    mission_one_line = _first_sentence(company_snapshot.get("mission") or "") or "—"
+    values = [str(v).strip() for v in (company_snapshot.get("values_and_signals") or [])][:4]
+    values_one_line = ", ".join(v for v in values if v) or "professionalism, ownership, clarity"
+
     if round_type == "resume_walkthrough":
-        return QUESTION_RESUME_WALKTHROUGH_SYSTEM
-    if round_type == "behavioral_star":
-        return QUESTION_BEHAVIORAL_STAR_SYSTEM
-    raise ValueError(f"unknown round_type: {round_type!r}")
+        template = QUESTION_RESUME_WALKTHROUGH_SYSTEM
+    elif round_type == "behavioral_star":
+        template = QUESTION_BEHAVIORAL_STAR_SYSTEM
+    else:
+        raise ValueError(f"unknown round_type: {round_type!r}")
+
+    return template.format(
+        company_name=company_name,
+        role_title=role_title,
+        seniority=seniority,
+        mission_one_line=mission_one_line,
+        values_one_line=values_one_line,
+    )
 
 
 async def stream_question(
@@ -276,25 +314,38 @@ async def stream_question(
     )
     focus_key: str | None
     focus_label: str | None
+    focus_document_ids: list[str]
     if picked is None:
-        focus_key, focus_label = None, None
+        focus_key, focus_label, focus_document_ids = None, None, []
     else:
-        focus_key, focus_label = picked
+        focus_key, focus_label, focus_document_ids = picked
+
+    company_name = (
+        (context["job_analysis"].get("company_name") or "").strip() or "the hiring company"
+    )
+    role_title = (context["job_analysis"].get("title") or "").strip() or "this role"
 
     user_msg = _build_user_message(
-        round_type=round_type,
-        context=context,
+        role_title=role_title,
+        company_name=company_name,
         focus_label=focus_label,
+        profile=context["profile"],
+        prior_turns=context["prior_turns"],
         turn_index=turn_index,
+    )
+    system_msg = _render_system_prompt(
+        round_type=round_type,
+        job_analysis=context["job_analysis"],
+        company_snapshot=context["company_snapshot"],
     )
 
     logger.info(
-        "QuestionGenerator: session=%s turn=%d round=%s focus_key=%r prior_counts=%s",
+        "QuestionGenerator: session=%s turn=%d round=%s focus_key=%r doc_ids=%s",
         session_id,
         turn_index,
         round_type,
         focus_key,
-        prior_counts,
+        focus_document_ids,
     )
 
     llm = chat_model(temperature=temperature).bind(response_format={"type": "json_object"})
@@ -302,7 +353,7 @@ async def stream_question(
     async def _model_deltas() -> AsyncIterator[str]:
         async for chunk in llm.astream(
             [
-                SystemMessage(content=_system_for(round_type)),
+                SystemMessage(content=system_msg),
                 HumanMessage(content=user_msg),
             ]
         ):
@@ -341,13 +392,12 @@ async def stream_question(
         metadata["focus_key"] = focus_key
     if focus_label is not None:
         metadata["focus_label"] = focus_label
+    if focus_document_ids:
+        metadata["focus_document_ids"] = focus_document_ids
 
     if focus_label is not None:
         label_tokens = _tokens(focus_label)
         question_tokens = _tokens(question_obj.question)
-        # Heuristic: if no informative token from the focus label survives in
-        # the question, the LLM probably drifted. Warning only — qwen3 isn't
-        # perfectly steerable and substring matching misses paraphrases.
         if label_tokens and not (label_tokens & question_tokens):
             logger.warning(
                 "focus drift suspected: target=%r question=%r",

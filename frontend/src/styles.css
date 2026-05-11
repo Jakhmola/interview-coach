@@ -848,3 +848,157 @@ summary {
     padding: 10px 6px;
   }
 }
+
+/* phase 14.1 — doc mapping modal */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 11, 18, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  padding: 28px 16px;
+}
+
+.modal-panel {
+  background: var(--panel-bg, #14182a);
+  color: inherit;
+  border-radius: 14px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45);
+  width: 100%;
+  max-width: 720px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-header,
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 12px;
+}
+
+.modal-footer {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: none;
+  justify-content: flex-end;
+}
+
+.modal-body {
+  padding: 16px 22px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.modal-preview pre {
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow-y: auto;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.extracted-block {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  background: rgba(99, 132, 255, 0.18);
+  border: 1px solid rgba(99, 132, 255, 0.3);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+}
+
+.url-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+
+.mapping-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mapping-exp {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.mapping-exp header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.mapping-exp ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.checkbox-row input[type="checkbox"] {
+  margin-top: 3px;
+}
+
+.mapping-standalone {
+  border: 1px dashed rgba(255, 255, 255, 0.16);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.suggested-tag {
+  font-style: italic;
+  font-size: 11px;
+  opacity: 0.75;
+  margin-left: 4px;
+}
+
+.hint {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.list-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}

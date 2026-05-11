@@ -1,7 +1,9 @@
-"""ProfileBuilder agent node.
+"""ProfileBuilder agent node — CV-only after Phase 14.1.
 
-Reads the user's documents through MCP tools (`list_documents`, `get_document`),
-asks the LLM to extract a structured `Profile`, and persists it.
+Reads the user's CV (one allowed per user) and extracts a structured `Profile`
+whose Experience highlights are bare `Highlight(text=...)` objects. Project_doc
+uploads no longer trigger a profile rebuild — they go through the `doc_intake`
+node and enrich existing highlights via the document_mappings flow.
 """
 
 from __future__ import annotations
@@ -17,61 +19,47 @@ from interview_coach.config import settings
 from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
 from interview_coach.llm.client import chat_model
-from interview_coach.mcp.client import decode_tool_result, get_tools
 
 logger = logging.getLogger(__name__)
 
-# Per-document text cap to avoid blowing context on extreme inputs. qwen3:8b
-# advertises ~32k context but practical perf degrades earlier; trim defensively.
-MAX_DOC_CHARS = 8000
+# qwen3:8b advertises ~32k context; trim defensively against extreme CVs.
+MAX_DOC_CHARS = 12000
 
 
 class NoDocumentsError(Exception):
-    """Raised when a user has no documents to build a profile from."""
+    """Raised when the user has no CV to build a profile from."""
 
 
-async def _load_user_docs(user_id: str) -> list[dict]:
-    """Pull all of `user_id`'s documents via MCP."""
-    tools = {t.name: t for t in await get_tools()}
-
-    metas = decode_tool_result(await tools["list_documents"].ainvoke({"user_id": user_id}))
-    docs: list[dict] = []
-    for meta in metas:
-        full = decode_tool_result(
-            await tools["get_document"].ainvoke({"document_id": meta["id"], "user_id": user_id})
-        )
-        if full:
-            docs.append(full[0])
-    return docs
-
-
-def _format_docs(docs: list[dict]) -> str:
-    blocks: list[str] = []
+async def _load_cv(user_id: uuid.UUID) -> tuple[uuid.UUID, str] | None:
+    """Return (doc_id, raw_text) of the user's CV, or None if no CV is present."""
+    async with AsyncSessionLocal() as s:
+        docs = await repos.list_documents_for_user(s, user_id)
     for d in docs:
-        text = d["raw_text"]
-        if len(text) > MAX_DOC_CHARS:
-            text = text[:MAX_DOC_CHARS] + "\n…[truncated]"
-        blocks.append(f"# [{d['kind']}] {d['filename']}\n\n{text}")
-    return "\n\n---\n\n".join(blocks)
+        if d.kind == "cv":
+            return d.id, d.raw_text
+    return None
 
 
 async def build_profile(user_id: uuid.UUID, *, temperature: float = 0.0) -> Profile:
-    """Build (and persist) a structured profile for `user_id`.
+    """Build (and persist) a structured profile for `user_id` from their CV.
 
     Raises:
-        NoDocumentsError: user has no documents to read.
+        NoDocumentsError: user has no CV.
     """
-    docs = await _load_user_docs(str(user_id))
-    if not docs:
-        raise NoDocumentsError(f"user {user_id} has no documents")
+    loaded = await _load_cv(user_id)
+    if loaded is None:
+        raise NoDocumentsError(f"user {user_id} has no CV")
+    cv_id, cv_text = loaded
+    if len(cv_text) > MAX_DOC_CHARS:
+        cv_text = cv_text[:MAX_DOC_CHARS] + "\n…[truncated]"
 
-    logger.info("ProfileBuilder: extracting from %d doc(s) for user=%s", len(docs), user_id)
+    logger.info("ProfileBuilder: extracting CV for user=%s (cv_doc=%s)", user_id, cv_id)
 
     llm = chat_model(temperature=temperature).with_structured_output(Profile, method="json_schema")
     profile = await llm.ainvoke(
         [
             SystemMessage(content=PROFILE_BUILDER_SYSTEM),
-            HumanMessage(content=_format_docs(docs)),
+            HumanMessage(content=cv_text),
         ]
     )
     assert isinstance(profile, Profile)
@@ -80,8 +68,8 @@ async def build_profile(user_id: uuid.UUID, *, temperature: float = 0.0) -> Prof
         await repos.upsert_profile(
             session,
             user_id=user_id,
-            profile_json=profile.model_dump(),
-            source_doc_ids=[d["id"] for d in docs],
+            profile_json=profile.model_dump(mode="json"),
+            source_doc_ids=[str(cv_id)],
             model_name=settings.model_name,
         )
 

@@ -50,12 +50,23 @@ services:
       context: .
       dockerfile: Dockerfile.api
     env_file: .env
+    # Cap CPU so embedding generation doesn't pin all host cores
+    # (otherwise the IDE / browser hang during ingest). Override the cap
+    # via API_CPUS / EMBED_THREADS in .env if needed.
+    cpus: ${API_CPUS:-12}
     environment:
       DATABASE_URL: postgresql+asyncpg://interview_coach:${POSTGRES_PASSWORD:-interview_coach}@db:5432/interview_coach
       # Talk to the llama service over the docker network (NOT host.docker.internal).
       LLM_BASE_URL: http://llama:8080/v1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       GRAPH_DB_PATH: /data/graph_checkpoints.sqlite
+      # Thread cap applied by interview_coach.rag.embeddings on model load.
+      # Keep <= API_CPUS above.
+      EMBED_THREADS: ${EMBED_THREADS:-12}
+      OMP_NUM_THREADS: ${EMBED_THREADS:-12}
+      MKL_NUM_THREADS: ${EMBED_THREADS:-12}
+      OPENBLAS_NUM_THREADS: ${EMBED_THREADS:-12}
+      TOKENIZERS_PARALLELISM: "false"
       # Phase 11 — Langfuse tracing. Empty when not configured;
       # observability code is a no-op in that case.
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}

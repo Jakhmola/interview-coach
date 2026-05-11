@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any
 
 from interview_coach.observability.langfuse import span
@@ -19,6 +20,28 @@ logger = logging.getLogger(__name__)
 
 MODEL_NAME = "jinaai/jina-embeddings-v3"
 EMBEDDING_DIM = 1024
+
+# Cap CPU usage so the host (IDE, browser, etc.) keeps headroom. Defaults
+# to leaving ~4 cores free on the box. Override via EMBED_THREADS env.
+def _resolve_thread_cap() -> int:
+    raw = os.environ.get("EMBED_THREADS")
+    if raw:
+        try:
+            n = int(raw)
+            if n > 0:
+                return n
+        except ValueError:
+            pass
+    cpu = os.cpu_count() or 4
+    return max(1, cpu - 4)
+
+
+_THREAD_CAP = _resolve_thread_cap()
+# Apply BEFORE torch/HF import so the BLAS/OMP backends pick these up.
+os.environ.setdefault("OMP_NUM_THREADS", str(_THREAD_CAP))
+os.environ.setdefault("MKL_NUM_THREADS", str(_THREAD_CAP))
+os.environ.setdefault("OPENBLAS_NUM_THREADS", str(_THREAD_CAP))
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 _MODEL: Any | None = None
 _LOAD_LOCK: asyncio.Lock | None = None
@@ -39,9 +62,22 @@ async def get_model() -> Any:
     async with _get_lock():
         if _MODEL is not None:
             return _MODEL
-        logger.info("Loading Jina v3 model %s (cold load, ~5–10s)", MODEL_NAME)
+        logger.info(
+            "Loading Jina v3 model %s (cold load, ~5–10s; thread cap=%d)",
+            MODEL_NAME,
+            _THREAD_CAP,
+        )
         # Heavy import deferred until first use.
+        import torch
         from sentence_transformers import SentenceTransformer
+
+        torch.set_num_threads(_THREAD_CAP)
+        try:
+            torch.set_num_interop_threads(max(1, _THREAD_CAP // 2))
+        except RuntimeError:
+            # set_num_interop_threads must be called before any parallel work;
+            # if torch was already touched elsewhere this raises — non-fatal.
+            pass
 
         loop = asyncio.get_running_loop()
         model = await loop.run_in_executor(

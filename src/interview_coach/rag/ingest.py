@@ -36,7 +36,8 @@ async def embed_and_store_document(document_id: uuid.UUID) -> int:
         raise ValueError(f"document {document_id} not found")
 
     model = await get_model()
-    chunks = chunk_text(doc.raw_text, tokenizer=model.tokenizer)
+    project_title = doc.project_title if doc.kind == "project_doc" else None
+    chunks = chunk_text(doc.raw_text, tokenizer=model.tokenizer, project_title=project_title)
     if not chunks:
         logger.info("doc %s produced 0 chunks; skipping", document_id)
         # Still wipe stale chunks if any — keeps the table consistent.
