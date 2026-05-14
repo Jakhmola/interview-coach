@@ -71,7 +71,7 @@ async def test_structured_retry_fires_once_on_validation_error(telemetry_db) -> 
     fake = _FakeStructuredLLM([validation_err, valid])
 
     class _Base:
-        def with_structured_output(self, schema, method=None):  # noqa: ANN001, ARG002
+        def with_structured_output(self, schema, method=None, include_raw=False):  # noqa: ANN001, ARG002
             return fake
 
     with patch.object(llm_client, "chat_model", return_value=_Base()):
@@ -104,7 +104,7 @@ async def test_structured_no_retry_on_success(telemetry_db) -> None:
     fake = _FakeStructuredLLM([valid])
 
     class _Base:
-        def with_structured_output(self, schema, method=None):  # noqa: ANN001, ARG002
+        def with_structured_output(self, schema, method=None, include_raw=False):  # noqa: ANN001, ARG002
             return fake
 
     with patch.object(llm_client, "chat_model", return_value=_Base()):
@@ -138,7 +138,7 @@ async def test_structured_retry_propagates_second_failure(telemetry_db) -> None:
     fake = _FakeStructuredLLM([err1, err2])
 
     class _Base:
-        def with_structured_output(self, schema, method=None):  # noqa: ANN001, ARG002
+        def with_structured_output(self, schema, method=None, include_raw=False):  # noqa: ANN001, ARG002
             return fake
 
     with patch.object(llm_client, "chat_model", return_value=_Base()):

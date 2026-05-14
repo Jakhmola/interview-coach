@@ -295,8 +295,10 @@ class LLMCall(Base):
     """One row per LLM call. Written by `llm.telemetry.record_call`.
 
     `node_name` is best-effort (NULL when no context was set). `prompt_tokens`
-    and `completion_tokens` are NULL when llama.cpp's `stream_usage` block is
-    absent on the response (it's provider-dependent).
+    and `completion_tokens` are NULL only when the provider didn't emit a
+    usage block at all — llama.cpp and OpenAI both do when
+    `stream_options.include_usage=true` (set via `stream_usage=True` in the
+    `ChatOpenAI` factory).
     """
 
     __tablename__ = "llm_calls"

@@ -107,15 +107,14 @@ async def stream_text(
     started = time.perf_counter()
     pt: int | None = None
     ct: int | None = None
-    last_chunk: AIMessageChunk | None = None
     try:
         if first.content:
             yield _to_text(first.content)
-        last_chunk = first
+        pt, ct = _merge_usage(pt, ct, first)
         async for chunk in agen:
             if chunk.content:
                 yield _to_text(chunk.content)
-            last_chunk = chunk
+            pt, ct = _merge_usage(pt, ct, chunk)
     except Exception as e:
         latency_ms = int((time.perf_counter() - started) * 1000)
         await record_call(
@@ -125,12 +124,6 @@ async def stream_text(
             error_class=e.__class__.__name__,
         )
         raise
-    finally:
-        if last_chunk is not None:
-            usage = getattr(last_chunk, "usage_metadata", None) or getattr(
-                last_chunk, "response_metadata", {}
-            ).get("token_usage")
-            pt, ct = extract_token_usage(usage)
 
     latency_ms = int((time.perf_counter() - started) * 1000)
     await record_call(
@@ -192,10 +185,11 @@ async def astream_with_telemetry(
     in their own way. Use `stream_text` for the simpler text-only callers.
     """
     started = time.perf_counter()
-    last_chunk: AIMessageChunk | None = None
+    pt: int | None = None
+    ct: int | None = None
     try:
         async for chunk in llm.astream(messages):
-            last_chunk = chunk
+            pt, ct = _merge_usage(pt, ct, chunk)
             yield chunk
     except Exception as e:
         latency_ms = int((time.perf_counter() - started) * 1000)
@@ -208,13 +202,6 @@ async def astream_with_telemetry(
         raise
 
     latency_ms = int((time.perf_counter() - started) * 1000)
-    pt: int | None = None
-    ct: int | None = None
-    if last_chunk is not None:
-        usage = getattr(last_chunk, "usage_metadata", None) or getattr(
-            last_chunk, "response_metadata", {}
-        ).get("token_usage")
-        pt, ct = extract_token_usage(usage)
     await record_call(
         model=settings.model_name,
         latency_ms=latency_ms,
@@ -224,18 +211,38 @@ async def astream_with_telemetry(
     )
 
 
+def _merge_usage(
+    pt: int | None, ct: int | None, chunk: AIMessageChunk
+) -> tuple[int | None, int | None]:
+    """Pick up token counts from any chunk that carries them.
+
+    llama.cpp (and OpenAI when `stream_options.include_usage=true`) sends
+    `usage_metadata` on a *trailing* chunk after the final content delta —
+    and then sometimes one more empty chunk after that. Tracking only the
+    last chunk loses the usage row. Instead, merge whenever a chunk has it.
+    """
+    usage = getattr(chunk, "usage_metadata", None) or getattr(
+        chunk, "response_metadata", {}
+    ).get("token_usage")
+    new_pt, new_ct = extract_token_usage(usage)
+    return (new_pt if new_pt is not None else pt, new_ct if new_ct is not None else ct)
+
+
 def _usage_from_result(result: Any) -> tuple[int | None, int | None]:
     """Pull token usage from an `ainvoke` result.
 
     For raw chat results: `result.usage_metadata` (LangChain) or
     `result.response_metadata['token_usage']` (OpenAI shape).
 
-    For structured outputs (`with_structured_output`), the result is the
-    parsed Pydantic model and usage isn't surfaced — return (None, None).
+    For `with_structured_output(..., include_raw=True)`, the result is a
+    dict containing the raw `AIMessage` under "raw" — pull usage from there.
     """
-    usage = getattr(result, "usage_metadata", None)
+    target: Any = result
+    if isinstance(result, dict) and "raw" in result:
+        target = result["raw"]
+    usage = getattr(target, "usage_metadata", None)
     if usage is None:
-        meta = getattr(result, "response_metadata", None)
+        meta = getattr(target, "response_metadata", None)
         if isinstance(meta, dict):
             usage = meta.get("token_usage")
     return extract_token_usage(usage)
@@ -267,11 +274,12 @@ async def chat_model_structured[T: BaseModel](
     Raises whatever exception the second attempt raised.
     """
     base = chat_model(temperature=temperature, **overrides)
-    llm = base.with_structured_output(schema, method="json_schema")
+    llm = base.with_structured_output(schema, method="json_schema", include_raw=True)
     msgs = list(messages)
 
     try:
-        return await ainvoke_with_telemetry(llm, msgs, retry_count=0)
+        result = await ainvoke_with_telemetry(llm, msgs, retry_count=0)
+        return _unwrap_structured(result, schema)
     except _STRUCTURED_RETRY_EXC as e:
         _logger.warning(
             "structured-output parse failed on first attempt (%s: %s); retrying once",
@@ -288,7 +296,24 @@ async def chat_model_structured[T: BaseModel](
                 )
             )
         ]
-        return await ainvoke_with_telemetry(llm, retry_msgs, retry_count=1)
+        result = await ainvoke_with_telemetry(llm, retry_msgs, retry_count=1)
+        return _unwrap_structured(result, schema)
+
+
+def _unwrap_structured(result: Any, schema: type[BaseModel]) -> Any:
+    """`with_structured_output(..., include_raw=True)` returns
+    `{"raw": AIMessage, "parsed": <model>, "parsing_error": ... | None}`.
+    Raise the parsing error if present; otherwise return the parsed model.
+    """
+    if isinstance(result, dict) and "parsed" in result:
+        err = result.get("parsing_error")
+        if err is not None:
+            raise err if isinstance(err, BaseException) else ValueError(str(err))
+        parsed = result["parsed"]
+        if parsed is None:
+            raise ValueError("structured-output returned no parsed value")
+        return parsed
+    return result
 
 
 def _to_text(content: Any) -> str:
