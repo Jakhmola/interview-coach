@@ -4,6 +4,8 @@ from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
+    BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -286,6 +288,41 @@ class DocumentMapping(Base):
             "mapping_kind in ('highlight','experience','project')",
             name="ck_document_mappings_kind",
         ),
+    )
+
+
+class LLMCall(Base):
+    """One row per LLM call. Written by `llm.telemetry.record_call`.
+
+    `node_name` is best-effort (NULL when no context was set). `prompt_tokens`
+    and `completion_tokens` are NULL when llama.cpp's `stream_usage` block is
+    absent on the response (it's provider-dependent).
+    """
+
+    __tablename__ = "llm_calls"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer(), "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    node_name: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model: Mapped[str] = mapped_column(String(128), nullable=False)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    success: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    error_class: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    __table_args__ = (
+        Index("ix_llm_calls_ts", "ts"),
+        Index("ix_llm_calls_node", "node_name", "ts"),
     )
 
 

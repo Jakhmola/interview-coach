@@ -253,9 +253,7 @@ async def post_mapping(
     if doc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
     if doc.kind != "project_doc":
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "mapping endpoint is only for project_doc"
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "mapping endpoint is only for project_doc")
 
     if body.title:
         new_title = body.title.strip()[:160]

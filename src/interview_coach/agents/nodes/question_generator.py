@@ -40,7 +40,8 @@ from interview_coach.agents.streaming_json import (
 from interview_coach.db import repos
 from interview_coach.db.models import SessionRow
 from interview_coach.db.session import AsyncSessionLocal
-from interview_coach.llm.client import chat_model
+from interview_coach.llm.client import astream_with_telemetry, chat_model
+from interview_coach.llm.telemetry import set_node_context
 
 logger = logging.getLogger(__name__)
 
@@ -321,8 +322,8 @@ async def stream_question(
         focus_key, focus_label, focus_document_ids = picked
 
     company_name = (
-        (context["job_analysis"].get("company_name") or "").strip() or "the hiring company"
-    )
+        context["job_analysis"].get("company_name") or ""
+    ).strip() or "the hiring company"
     role_title = (context["job_analysis"].get("title") or "").strip() or "this role"
 
     user_msg = _build_user_message(
@@ -351,11 +352,12 @@ async def stream_question(
     llm = chat_model(temperature=temperature).bind(response_format={"type": "json_object"})
 
     async def _model_deltas() -> AsyncIterator[str]:
-        async for chunk in llm.astream(
+        async for chunk in astream_with_telemetry(
+            llm,
             [
                 SystemMessage(content=system_msg),
                 HumanMessage(content=user_msg),
-            ]
+            ],
         ):
             content = chunk.content
             if isinstance(content, str):
@@ -371,13 +373,14 @@ async def stream_question(
                             yield text
 
     parsed: dict[str, Any] | None = None
-    async for event, data in stream_json_object(
-        _model_deltas(), stream_string_fields=("question",)
-    ):
-        if event == "question_chunk":
-            yield ("token", data)
-        elif event == "done":
-            parsed = data
+    with set_node_context("question_generator"):
+        async for event, data in stream_json_object(
+            _model_deltas(), stream_string_fields=("question",)
+        ):
+            if event == "question_chunk":
+                yield ("token", data)
+            elif event == "done":
+                parsed = data
 
     if parsed is None:
         raise StreamingJsonError("stream ended without producing a parsed object")

@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = "jinaai/jina-embeddings-v3"
 EMBEDDING_DIM = 1024
 
+
 # Cap CPU usage so the host (IDE, browser, etc.) keeps headroom. Defaults
 # to leaving ~4 cores free on the box. Override via EMBED_THREADS env.
 def _resolve_thread_cap() -> int:

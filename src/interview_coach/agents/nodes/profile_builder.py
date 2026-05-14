@@ -18,7 +18,8 @@ from interview_coach.agents.schemas import Profile
 from interview_coach.config import settings
 from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
-from interview_coach.llm.client import chat_model
+from interview_coach.llm.client import ainvoke_with_telemetry, chat_model
+from interview_coach.llm.telemetry import set_node_context
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +56,17 @@ async def build_profile(user_id: uuid.UUID, *, temperature: float = 0.0) -> Prof
 
     logger.info("ProfileBuilder: extracting CV for user=%s (cv_doc=%s)", user_id, cv_id)
 
-    llm = chat_model(temperature=temperature).with_structured_output(Profile, method="json_schema")
-    profile = await llm.ainvoke(
-        [
-            SystemMessage(content=PROFILE_BUILDER_SYSTEM),
-            HumanMessage(content=cv_text),
-        ]
-    )
+    with set_node_context("profile_builder"):
+        llm = chat_model(temperature=temperature).with_structured_output(
+            Profile, method="json_schema"
+        )
+        profile = await ainvoke_with_telemetry(
+            llm,
+            [
+                SystemMessage(content=PROFILE_BUILDER_SYSTEM),
+                HumanMessage(content=cv_text),
+            ],
+        )
     assert isinstance(profile, Profile)
 
     async with AsyncSessionLocal() as session:

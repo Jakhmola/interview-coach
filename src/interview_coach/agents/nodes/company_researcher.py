@@ -19,7 +19,8 @@ from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
 from interview_coach.ingestion.errors import FetchFailed
 from interview_coach.ingestion.web import SearchResult, fetch_url_text, tavily_search
-from interview_coach.llm.client import chat_model
+from interview_coach.llm.client import ainvoke_with_telemetry, chat_model
+from interview_coach.llm.telemetry import set_node_context
 from interview_coach.mcp.client import decode_tool_result, get_tools
 
 logger = logging.getLogger(__name__)
@@ -145,15 +146,17 @@ async def research_company(
 
     body = "\n\n---\n\n".join(page_texts)
 
-    llm = chat_model(temperature=temperature).with_structured_output(
-        CompanySnapshot, method="json_schema"
-    )
-    snapshot = await llm.ainvoke(
-        [
-            SystemMessage(content=COMPANY_RESEARCHER_SYSTEM),
-            HumanMessage(content=f"Company: {company}\n\nSources:\n\n{body}"),
-        ]
-    )
+    with set_node_context("company_researcher"):
+        llm = chat_model(temperature=temperature).with_structured_output(
+            CompanySnapshot, method="json_schema"
+        )
+        snapshot = await ainvoke_with_telemetry(
+            llm,
+            [
+                SystemMessage(content=COMPANY_RESEARCHER_SYSTEM),
+                HumanMessage(content=f"Company: {company}\n\nSources:\n\n{body}"),
+            ],
+        )
     assert isinstance(snapshot, CompanySnapshot)
 
     async with AsyncSessionLocal() as session:

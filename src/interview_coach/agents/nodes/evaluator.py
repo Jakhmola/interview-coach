@@ -41,7 +41,8 @@ from interview_coach.agents.streaming_json import (
 )
 from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
-from interview_coach.llm.client import chat_model
+from interview_coach.llm.client import astream_with_telemetry, chat_model
+from interview_coach.llm.telemetry import set_node_context
 from interview_coach.rag.retrieval import GroundingHit, retrieve_grounding
 
 logger = logging.getLogger(__name__)
@@ -103,7 +104,7 @@ def _build_model_answer_message(
 
 
 async def _model_deltas(llm, messages):  # noqa: ANN001
-    async for chunk in llm.astream(messages):
+    async for chunk in astream_with_telemetry(llm, messages):
         content = chunk.content
         if isinstance(content, str):
             if content:
@@ -136,17 +137,18 @@ async def _run_judge_call(
     ]
 
     parsed: dict[str, Any] | None = None
-    async for event, data in stream_json_object(
-        _model_deltas(llm, messages),
-        stream_string_fields=("feedback",),
-        scalar_fields=("score",),
-    ):
-        if event == "feedback_chunk":
-            yield ("feedback_token", data)
-        elif event in ("score", "feedback_done"):
-            yield (event, data)
-        elif event == "done":
-            parsed = data
+    with set_node_context("evaluator_judge"):
+        async for event, data in stream_json_object(
+            _model_deltas(llm, messages),
+            stream_string_fields=("feedback",),
+            scalar_fields=("score",),
+        ):
+            if event == "feedback_chunk":
+                yield ("feedback_token", data)
+            elif event in ("score", "feedback_done"):
+                yield (event, data)
+            elif event == "done":
+                parsed = data
 
     if parsed is None:
         raise StreamingJsonError("judge stream ended without a parsed object")
@@ -172,16 +174,17 @@ async def _run_model_answer_call(
     ]
 
     parsed: dict[str, Any] | None = None
-    async for event, data in stream_json_object(
-        _model_deltas(llm, messages),
-        stream_string_fields=("model_answer",),
-    ):
-        if event == "model_answer_chunk":
-            yield ("model_answer_token", data)
-        elif event == "model_answer_done":
-            yield (event, data)
-        elif event == "done":
-            parsed = data
+    with set_node_context("evaluator_model_answer"):
+        async for event, data in stream_json_object(
+            _model_deltas(llm, messages),
+            stream_string_fields=("model_answer",),
+        ):
+            if event == "model_answer_chunk":
+                yield ("model_answer_token", data)
+            elif event == "model_answer_done":
+                yield (event, data)
+            elif event == "done":
+                parsed = data
 
     if parsed is None:
         raise StreamingJsonError("model-answer stream ended without a parsed object")
@@ -207,9 +210,7 @@ async def _retrieve_for_turn(*, user_id: uuid.UUID, turn: Any) -> list[Grounding
         doc_ids = tuple(parsed)
     query = f"{turn.question} {focus_label or ''}".strip()
     try:
-        return await retrieve_grounding(
-            user_id=user_id, query=query, k=4, document_ids=doc_ids
-        )
+        return await retrieve_grounding(user_id=user_id, query=query, k=4, document_ids=doc_ids)
     except Exception:  # noqa: BLE001
         # Retrieval failure should not derail the evaluation — fall back
         # to profile-only model answer.

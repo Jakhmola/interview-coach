@@ -27,7 +27,8 @@ from interview_coach.agents.schemas import DocIntakeResult, Profile
 from interview_coach.config import settings
 from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
-from interview_coach.llm.client import chat_model
+from interview_coach.llm.client import ainvoke_with_telemetry, chat_model
+from interview_coach.llm.telemetry import set_node_context
 
 logger = logging.getLogger(__name__)
 
@@ -84,22 +85,24 @@ async def run_intake(document_id: uuid.UUID, user_id: uuid.UUID) -> DocIntakeRes
         "experiences": _format_experiences_for_prompt(profile_row.profile_json),
     }
 
-    llm = chat_model(temperature=0.0).with_structured_output(
-        DocIntakeResult, method="json_schema"
-    )
-    try:
-        import json as _json
-
-        result = await llm.ainvoke(
-            [
-                SystemMessage(content=DOC_INTAKE_SYSTEM),
-                HumanMessage(content=_json.dumps(payload, ensure_ascii=False, indent=2)),
-            ]
+    with set_node_context("doc_intake"):
+        llm = chat_model(temperature=0.0).with_structured_output(
+            DocIntakeResult, method="json_schema"
         )
-    except ValidationError as e:
-        raise DocIntakeError(f"doc-intake JSON failed schema validation: {e}") from e
-    except Exception as e:  # noqa: BLE001
-        raise DocIntakeError(f"doc-intake call failed: {e}") from e
+        try:
+            import json as _json
+
+            result = await ainvoke_with_telemetry(
+                llm,
+                [
+                    SystemMessage(content=DOC_INTAKE_SYSTEM),
+                    HumanMessage(content=_json.dumps(payload, ensure_ascii=False, indent=2)),
+                ],
+            )
+        except ValidationError as e:
+            raise DocIntakeError(f"doc-intake JSON failed schema validation: {e}") from e
+        except Exception as e:  # noqa: BLE001
+            raise DocIntakeError(f"doc-intake call failed: {e}") from e
     assert isinstance(result, DocIntakeResult)
 
     title = result.title.strip()[:160] or doc.filename

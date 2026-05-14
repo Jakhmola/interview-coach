@@ -145,9 +145,7 @@ async def replace_document_mappings(
     Each row dict: ``mapping_kind``, ``experience_idx?``, ``highlight_idx?``,
     ``project_idx?``, ``extracted_json?``.
     """
-    await session.execute(
-        delete(DocumentMapping).where(DocumentMapping.document_id == document_id)
-    )
+    await session.execute(delete(DocumentMapping).where(DocumentMapping.document_id == document_id))
     new_rows = [
         DocumentMapping(
             document_id=document_id,
