@@ -1,7 +1,6 @@
 """JobAnalyzer unit tests with mocked MCP loader and mocked LLM."""
 
 from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -69,15 +68,10 @@ async def test_analyze_job_persists_into_parsed_json(
 
     monkeypatch.setattr(job_analyzer, "_load_job", fake_loader)
 
-    fake_llm = AsyncMock()
-    fake_llm.ainvoke = AsyncMock(return_value=_fake_analysis())
+    async def fake_chat_model_structured(_schema, _messages, *, temperature, **_overrides):
+        return _fake_analysis()
 
-    def fake_chat_model(**_: object):
-        m = AsyncMock()
-        m.with_structured_output = lambda _schema, **_kwargs: fake_llm
-        return m
-
-    monkeypatch.setattr(job_analyzer, "chat_model", fake_chat_model)
+    monkeypatch.setattr(job_analyzer, "chat_model_structured", fake_chat_model_structured)
 
     result = await job_analyzer.analyze_job(alice_job.id, alice.id)
 

@@ -15,7 +15,7 @@ from interview_coach.agents.prompts import JOB_ANALYZER_SYSTEM
 from interview_coach.agents.schemas import JobAnalysis
 from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
-from interview_coach.llm.client import ainvoke_with_telemetry, chat_model
+from interview_coach.llm.client import chat_model_structured
 from interview_coach.llm.telemetry import set_node_context
 from interview_coach.mcp.client import decode_tool_result, get_tools
 
@@ -54,15 +54,13 @@ async def analyze_job(
     logger.info("JobAnalyzer: analyzing job=%s for user=%s", job_id, user_id)
 
     with set_node_context("job_analyzer"):
-        llm = chat_model(temperature=temperature).with_structured_output(
-            JobAnalysis, method="json_schema"
-        )
-        analysis = await ainvoke_with_telemetry(
-            llm,
+        analysis = await chat_model_structured(
+            JobAnalysis,
             [
                 SystemMessage(content=JOB_ANALYZER_SYSTEM),
                 HumanMessage(content=text),
             ],
+            temperature=temperature,
         )
     assert isinstance(analysis, JobAnalysis)
 

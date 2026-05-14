@@ -17,14 +17,17 @@ from the final chunk's `usage_metadata` when llama.cpp returns it.
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 import httpx
+from langchain_core.exceptions import OutputParserException
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessageChunk, BaseMessage
+from langchain_core.messages import AIMessageChunk, BaseMessage, HumanMessage
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, ValidationError
 from tenacity import (
     AsyncRetrying,
     retry_if_exception_type,
@@ -236,6 +239,56 @@ def _usage_from_result(result: Any) -> tuple[int | None, int | None]:
         if isinstance(meta, dict):
             usage = meta.get("token_usage")
     return extract_token_usage(usage)
+
+
+_logger = logging.getLogger(__name__)
+
+_STRUCTURED_RETRY_EXC = (ValidationError, OutputParserException, ValueError)
+
+
+async def chat_model_structured[T: BaseModel](
+    schema: type[T],
+    messages: Sequence[BaseMessage],
+    *,
+    temperature: float,
+    **overrides: Any,
+) -> T:
+    """Call the LLM with `with_structured_output(schema)`; retry once on
+    schema validation / JSON parse failure with a self-correction follow-up.
+
+    Records one telemetry row per attempt. The second row carries
+    `retry_count=1`.
+
+    The retry message tells the model exactly what went wrong:
+        Your previous output failed JSON schema validation.
+        Error: {error}
+        Return ONLY a valid JSON object matching the requested schema.
+
+    Raises whatever exception the second attempt raised.
+    """
+    base = chat_model(temperature=temperature, **overrides)
+    llm = base.with_structured_output(schema, method="json_schema")
+    msgs = list(messages)
+
+    try:
+        return await ainvoke_with_telemetry(llm, msgs, retry_count=0)
+    except _STRUCTURED_RETRY_EXC as e:
+        _logger.warning(
+            "structured-output parse failed on first attempt (%s: %s); retrying once",
+            e.__class__.__name__,
+            e,
+        )
+        retry_msgs = list(msgs) + [
+            HumanMessage(
+                content=(
+                    "Your previous output failed JSON schema validation.\n"
+                    f"Error: {e}\n"
+                    "Return ONLY a valid JSON object matching the requested schema. "
+                    "Do not include any prose, markdown, or commentary."
+                )
+            )
+        ]
+        return await ainvoke_with_telemetry(llm, retry_msgs, retry_count=1)
 
 
 def _to_text(content: Any) -> str:

@@ -1,7 +1,6 @@
 """ProfileBuilder unit tests with a mocked LLM (Phase 14.1: CV-only)."""
 
 from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -77,15 +76,10 @@ async def test_build_profile_persists(
 ) -> None:
     cv = await _seed_cv(agent_session, alice)
 
-    fake_llm = AsyncMock()
-    fake_llm.ainvoke = AsyncMock(return_value=_fake_profile())
+    async def fake_chat_model_structured(_schema, _messages, *, temperature, **_overrides):
+        return _fake_profile()
 
-    def fake_chat_model(*, temperature: float = 0.0):
-        m = AsyncMock()
-        m.with_structured_output = lambda _schema, **_kwargs: fake_llm
-        return m
-
-    monkeypatch.setattr(profile_builder, "chat_model", fake_chat_model)
+    monkeypatch.setattr(profile_builder, "chat_model_structured", fake_chat_model_structured)
 
     result = await profile_builder.build_profile(alice.id)
 
@@ -108,15 +102,10 @@ async def test_build_profile_replaces_existing(
     """Rebuilding for the same user replaces (does not duplicate)."""
     await _seed_cv(agent_session, alice)
 
-    fake_llm = AsyncMock()
-    fake_llm.ainvoke = AsyncMock(return_value=_fake_profile())
+    async def fake_chat_model_structured(_schema, _messages, *, temperature, **_overrides):
+        return _fake_profile()
 
-    def fake_chat_model(**_: object):
-        m = AsyncMock()
-        m.with_structured_output = lambda _schema, **_kwargs: fake_llm
-        return m
-
-    monkeypatch.setattr(profile_builder, "chat_model", fake_chat_model)
+    monkeypatch.setattr(profile_builder, "chat_model_structured", fake_chat_model_structured)
 
     await profile_builder.build_profile(alice.id)
     await profile_builder.build_profile(alice.id)

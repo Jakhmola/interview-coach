@@ -27,7 +27,7 @@ from interview_coach.agents.schemas import DocIntakeResult, Profile
 from interview_coach.config import settings
 from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
-from interview_coach.llm.client import ainvoke_with_telemetry, chat_model
+from interview_coach.llm.client import chat_model_structured
 from interview_coach.llm.telemetry import set_node_context
 
 logger = logging.getLogger(__name__)
@@ -86,18 +86,16 @@ async def run_intake(document_id: uuid.UUID, user_id: uuid.UUID) -> DocIntakeRes
     }
 
     with set_node_context("doc_intake"):
-        llm = chat_model(temperature=0.0).with_structured_output(
-            DocIntakeResult, method="json_schema"
-        )
         try:
             import json as _json
 
-            result = await ainvoke_with_telemetry(
-                llm,
+            result = await chat_model_structured(
+                DocIntakeResult,
                 [
                     SystemMessage(content=DOC_INTAKE_SYSTEM),
                     HumanMessage(content=_json.dumps(payload, ensure_ascii=False, indent=2)),
                 ],
+                temperature=0.0,
             )
         except ValidationError as e:
             raise DocIntakeError(f"doc-intake JSON failed schema validation: {e}") from e
