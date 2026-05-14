@@ -18,10 +18,11 @@ from interview_coach.config import settings
 from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
 from interview_coach.ingestion.errors import FetchFailed
-from interview_coach.ingestion.web import SearchResult, fetch_url_text, tavily_search
 from interview_coach.llm.client import ainvoke_with_telemetry, chat_model
 from interview_coach.llm.telemetry import set_node_context
 from interview_coach.mcp.client import decode_tool_result, get_tools
+from interview_coach.providers.base import SearchResult
+from interview_coach.providers.tavily import fetch_url_text, tavily_search
 
 logger = logging.getLogger(__name__)
 

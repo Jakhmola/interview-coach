@@ -23,6 +23,11 @@ class Settings(BaseSettings):
 
     tavily_api_key: str | None = None
 
+    # Pluggable provider names (see `interview_coach.providers.registry`).
+    # Add new options like `"crawl4ai"` when those providers land.
+    web_search_provider: str = "tavily"
+    web_fetch_provider: str = "tavily"
+
     # OpenAI-compatible LLM endpoint. In compose, the api service reaches the
     # `llama` container over the docker network; the .env file overrides this
     # to localhost for host-side runs (pytest, scripts).

@@ -19,6 +19,7 @@ _tools: list[BaseTool] | None = None
 
 
 def _server_config() -> dict:
+    env = dict(os.environ)
     return {
         "documents": {
             "command": "python",
@@ -26,8 +27,16 @@ def _server_config() -> dict:
             "transport": "stdio",
             # Pass the parent env explicitly so DATABASE_URL etc. reach the
             # subprocess. langchain-mcp-adapters does not auto-inherit env.
-            "env": dict(os.environ),
-        }
+            "env": env,
+        },
+        "web": {
+            "command": "python",
+            "args": ["-m", "interview_coach.mcp.servers.web_server"],
+            "transport": "stdio",
+            # web_server needs TAVILY_API_KEY; pass the parent env explicitly
+            # (same mechanism as the documents server).
+            "env": env,
+        },
     }
 
 
