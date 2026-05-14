@@ -131,7 +131,8 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 13    | Variety — deterministic focus picker           | ✅          |
 | 13.1  | Interviewer-voice / JD-relevance prompt rework | ⤵ folded into 14.1 |
 | 14    | Model-answer RAG grounding (user-doc chunks)   | ✅          |
-| 14.1  | Project-identity-aware profile + RAG + prompts | 🚧          |
+| 14.1  | Project-identity-aware profile + RAG + prompts | ✅          |
+| 16    | Agent layer hardening (telemetry + MCP rework) | ✅          |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
 | 15    | GitHub ingestion                               | ⏳          |
@@ -266,6 +267,12 @@ move. The full evaluator-quality eval is now Phase 12b, after RAG.
 - `tests/integration/eval/test_model_answer_quality.py` + `model_answer_faithfulness` G-Eval (informational, no failing threshold) — Phase 14 baselines only.
 - Compose: switch base image `postgres:16` → `pgvector/pgvector:pg16`.
 - **Smoke test:** upload a real CV + project_doc; `grounding_chunks` populates within ~5s/doc; run a session and inspect a model_answer for first-person voice + grounded specifics + no document-style citation; eval baseline numbers print.
+
+### Phase 16 — Agent layer hardening (telemetry + structured retry + MCP rework)
+- **LLM telemetry**: new `llm_calls(id, ts, node_name, model, prompt_tokens, completion_tokens, latency_ms, retry_count, success, error_class)` table (Alembic `0009`). `llm/telemetry.py` provides `set_node_context(name)` (ContextVar-based, async-safe) and `record_call(...)`; `llm/client.py` wraps both call shapes (`ainvoke_with_telemetry`, `astream_with_telemetry`, plus telemetry-aware `stream_text`). Token counts captured from any chunk carrying `usage_metadata` — llama.cpp emits it on a trailing chunk after the final content delta, so naive "track last chunk" loses the row.
+- **Structured-output self-correction**: `chat_model_structured[T: BaseModel](schema, ...)` wraps `with_structured_output(schema, method="json_schema", include_raw=True)`. On `ValidationError | OutputParserException | ValueError` the call retries once with a `HumanMessage` explaining the failure; `retry_count=1` is recorded in telemetry. `include_raw=True` keeps `usage_metadata` reachable for token accounting.
+- **MCP rework**: new `providers/` package (`base.py` Protocols, `tavily.py`, `registry.py`) is the actual swap-able seam — MCP servers are now thin shells over it. New `web_server` exposes `web_search` + `web_fetch` tools (deferred-import path keeps subprocess startup cheap). `documents_server` slimmed to `get_job` + `search_grounding` tools, plus a `project_doc://{user_id}/{document_id}` Resource (CV intentionally not exposed). `ingestion/web.py` kept as a one-release re-export shim for `jobs/routes.py`. Boundary rules (MCP wraps external-world I/O and LLM-readable surfaces only; never app-owned Postgres CRUD; thin shells over providers; two callers — internal-direct and MCP-wrapped — is correct) pinned for future phases.
+- **Smoke test:** end-to-end session populates `llm_calls` rows for all six call sites (profile_builder, job_analyzer, doc_intake, company_researcher, question_generator, evaluator_judge, evaluator_model_answer) with non-zero `prompt_tokens`/`completion_tokens`/`latency_ms`; `ps -ef | grep python` inside the api container shows `documents_server` + `web_server` subprocesses; injected malformed structured output records `retry_count=1`.
 
 ### Phase 14b — RAG grounding (Tavily tech-spec corpus, optional)
 Only if Phase 14 questions feel grounded in the candidate's voice but still technically vague.
