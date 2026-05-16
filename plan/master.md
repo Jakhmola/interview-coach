@@ -133,6 +133,7 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 14    | Model-answer RAG grounding (user-doc chunks)   | ✅          |
 | 14.1  | Project-identity-aware profile + RAG + prompts | ✅          |
 | 16    | Agent layer hardening (telemetry + MCP rework) | ✅          |
+| 17    | Embeddings service extraction (sidecar)        | 🚧          |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
 | 15    | GitHub ingestion                               | ⏳          |
@@ -273,6 +274,12 @@ move. The full evaluator-quality eval is now Phase 12b, after RAG.
 - **Structured-output self-correction**: `chat_model_structured[T: BaseModel](schema, ...)` wraps `with_structured_output(schema, method="json_schema", include_raw=True)`. On `ValidationError | OutputParserException | ValueError` the call retries once with a `HumanMessage` explaining the failure; `retry_count=1` is recorded in telemetry. `include_raw=True` keeps `usage_metadata` reachable for token accounting.
 - **MCP rework**: new `providers/` package (`base.py` Protocols, `tavily.py`, `registry.py`) is the actual swap-able seam — MCP servers are now thin shells over it. New `web_server` exposes `web_search` + `web_fetch` tools (deferred-import path keeps subprocess startup cheap). `documents_server` slimmed to `get_job` + `search_grounding` tools, plus a `project_doc://{user_id}/{document_id}` Resource (CV intentionally not exposed). `ingestion/web.py` kept as a one-release re-export shim for `jobs/routes.py`. Boundary rules (MCP wraps external-world I/O and LLM-readable surfaces only; never app-owned Postgres CRUD; thin shells over providers; two callers — internal-direct and MCP-wrapped — is correct) pinned for future phases.
 - **Smoke test:** end-to-end session populates `llm_calls` rows for all six call sites (profile_builder, job_analyzer, doc_intake, company_researcher, question_generator, evaluator_judge, evaluator_model_answer) with non-zero `prompt_tokens`/`completion_tokens`/`latency_ms`; `ps -ef | grep python` inside the api container shows `documents_server` + `web_server` subprocesses; injected malformed structured output records `retry_count=1`.
+
+### Phase 17 — Embeddings service extraction (sidecar)
+- Embeddings move out of the `api` container into a new `embedder` FastAPI sidecar. `api` drops `sentence-transformers` + `torch` from its install closure and talks to the sidecar over HTTP via a small `EmbeddingClient`. Single `POST /embed` endpoint takes `{texts, task}` (where `task` ∈ `retrieval.passage | retrieval.query`); `GET /model` exposes `{name, dim}` and api asserts the lock on lifespan boot. Weights persist via a mounted HF cache volume.
+- **Why a custom thin wrapper, not TEI/Infinity**: TEI does not natively support `jinaai/jina-embeddings-v3` (missing `model_type` field; only unofficial converted forks). Infinity lists the model but does not clearly expose task-specific LoRA adapter selection. Numeric parity is non-negotiable since existing `grounding_chunks` rows are tagged with `model_name = "jinaai/jina-embeddings-v3"`.
+- Chunking stays on api via a tokenizer-only path (`AutoTokenizer.from_pretrained("jinaai/jina-embeddings-v3", trust_remote_code=True)`). MCP `documents_server` subprocess builds its own `EmbeddingClient` from env (no `app.state` available).
+- **Smoke test:** `make up` brings up both services; `curl :8001/model` returns the locked name+dim; end-to-end session works; parity test shows `||Δ||_inf < 1e-6` between in-process and over-the-wire vectors; api image is materially smaller; killing `embedder` mid-flight degrades gracefully (ingest errors, retrieval returns `[]`).
 
 ### Phase 14b — RAG grounding (Tavily tech-spec corpus, optional)
 Only if Phase 14 questions feel grounded in the candidate's voice but still technically vague.
