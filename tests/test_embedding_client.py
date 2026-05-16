@@ -13,8 +13,8 @@ import pytest
 from interview_coach.rag.client import (
     EXPECTED_DIM,
     EXPECTED_MODEL_NAME,
-    EmbeddingClient,
     EmbedderUnavailable,
+    EmbeddingClient,
 )
 from interview_coach.rag.model_lock import (
     EmbedderModelMismatch,
@@ -37,9 +37,7 @@ async def test_model_info_happy() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
         assert req.method == "GET"
         assert req.url.path == "/model"
-        return httpx.Response(
-            200, json={"name": EXPECTED_MODEL_NAME, "dim": EXPECTED_DIM}
-        )
+        return httpx.Response(200, json={"name": EXPECTED_MODEL_NAME, "dim": EXPECTED_DIM})
 
     client = _client_with_transport(handler)
     info = await client.model_info()
@@ -49,9 +47,7 @@ async def test_model_info_happy() -> None:
 
 async def test_model_lock_pass() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, json={"name": EXPECTED_MODEL_NAME, "dim": EXPECTED_DIM}
-        )
+        return httpx.Response(200, json={"name": EXPECTED_MODEL_NAME, "dim": EXPECTED_DIM})
 
     client = _client_with_transport(handler)
     await assert_embedder_model(client)  # no raise
@@ -60,9 +56,7 @@ async def test_model_lock_pass() -> None:
 
 async def test_model_lock_name_mismatch() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, json={"name": "other/model", "dim": EXPECTED_DIM}
-        )
+        return httpx.Response(200, json={"name": "other/model", "dim": EXPECTED_DIM})
 
     client = _client_with_transport(handler)
     with pytest.raises(EmbedderModelMismatch):
@@ -72,9 +66,7 @@ async def test_model_lock_name_mismatch() -> None:
 
 async def test_model_lock_dim_mismatch() -> None:
     def handler(req: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, json={"name": EXPECTED_MODEL_NAME, "dim": 768}
-        )
+        return httpx.Response(200, json={"name": EXPECTED_MODEL_NAME, "dim": 768})
 
     client = _client_with_transport(handler)
     with pytest.raises(EmbedderModelMismatch):

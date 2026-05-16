@@ -13,7 +13,6 @@ import math
 import httpx
 import numpy as np
 import pytest
-
 from embedder import main as app_module
 from embedder.main import EMBEDDING_DIM, MODEL_NAME, app
 
@@ -94,9 +93,7 @@ async def test_embed_happy_path(fake_model_loaded: None) -> None:
     assert len(payload["vectors"]) == 2
     for vec in payload["vectors"]:
         assert len(vec) == EMBEDDING_DIM
-        assert math.isclose(
-            math.sqrt(sum(x * x for x in vec)), 1.0, abs_tol=1e-4
-        )
+        assert math.isclose(math.sqrt(sum(x * x for x in vec)), 1.0, abs_tol=1e-4)
 
 
 async def test_embed_validates_task(fake_model_loaded: None) -> None:

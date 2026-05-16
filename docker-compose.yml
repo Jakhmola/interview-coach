@@ -45,28 +45,53 @@ services:
               capabilities: [gpu]
     restart: unless-stopped
 
+  embedder:
+    build:
+      context: ./services/embedder
+      dockerfile: Dockerfile
+    # Cap CPU so embedding generation doesn't pin all host cores. Embeddings
+    # used to share the api container; Phase 17 moved them here so the cap
+    # follows.
+    cpus: ${EMBEDDER_CPUS:-12}
+    environment:
+      EMBED_THREADS: ${EMBED_THREADS:-12}
+      OMP_NUM_THREADS: ${EMBED_THREADS:-12}
+      MKL_NUM_THREADS: ${EMBED_THREADS:-12}
+      OPENBLAS_NUM_THREADS: ${EMBED_THREADS:-12}
+      TOKENIZERS_PARALLELISM: "false"
+      HF_HOME: /cache/hf
+    volumes:
+      # Persist Jina v3 weights across container restarts. First boot
+      # downloads ~500MB; subsequent boots are near-instant.
+      - embedder_cache:/cache/hf
+    ports:
+      - "127.0.0.1:8001:8001"
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/healthz').status == 200 else 1)"
+      interval: 5s
+      retries: 30
+      # Cold start downloads weights on first boot; give it room.
+      start_period: 90s
+    restart: unless-stopped
+
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
     env_file: .env
-    # Cap CPU so embedding generation doesn't pin all host cores
-    # (otherwise the IDE / browser hang during ingest). Override the cap
-    # via API_CPUS / EMBED_THREADS in .env if needed.
-    cpus: ${API_CPUS:-12}
+    cpus: ${API_CPUS:-4}
     environment:
       DATABASE_URL: postgresql+asyncpg://interview_coach:${POSTGRES_PASSWORD:-interview_coach}@db:5432/interview_coach
       # Talk to the llama service over the docker network (NOT host.docker.internal).
       LLM_BASE_URL: http://llama:8080/v1
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       GRAPH_DB_PATH: /data/graph_checkpoints.sqlite
-      # Thread cap applied by interview_coach.rag.embeddings on model load.
-      # Keep <= API_CPUS above.
-      EMBED_THREADS: ${EMBED_THREADS:-12}
-      OMP_NUM_THREADS: ${EMBED_THREADS:-12}
-      MKL_NUM_THREADS: ${EMBED_THREADS:-12}
-      OPENBLAS_NUM_THREADS: ${EMBED_THREADS:-12}
-      TOKENIZERS_PARALLELISM: "false"
+      # Phase 17: embedding model lives in the embedder sidecar.
+      EMBEDDER_URL: http://embedder:8001
       # Phase 11 — Langfuse tracing. Empty when not configured;
       # observability code is a no-op in that case.
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
@@ -84,6 +109,10 @@ services:
       # may need to wait. Tenacity retries on transient connect errors.
       llama:
         condition: service_started
+      # Phase 17: the api lifespan calls GET /model on the embedder for
+      # the same-model lock check, so wait for it to report healthy.
+      embedder:
+        condition: service_healthy
     healthcheck:
       test:
         - "CMD"
@@ -121,3 +150,4 @@ services:
 volumes:
   pg_data:
   graph_data:
+  embedder_cache:

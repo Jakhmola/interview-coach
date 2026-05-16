@@ -1,4 +1,4 @@
-.PHONY: help up down logs build rebuild ps sh-api sh-ui sh-db db-ui test fmt lint lock sync
+.PHONY: help up down logs build rebuild ps sh-api sh-ui sh-db sh-embedder embedder-logs db-ui test fmt lint lock sync
 
 help:
 	@echo "make up        - docker compose up -d (build if needed)"
@@ -10,6 +10,8 @@ help:
 	@echo "make sh-api    - shell into api container"
 	@echo "make sh-ui     - shell into React ui container"
 	@echo "make sh-db     - psql into db container"
+	@echo "make sh-embedder    - shell into embedder container"
+	@echo "make embedder-logs  - tail embedder logs"
 	@echo "make db-ui     - print Adminer URL + creds for the local DB"
 	@echo "make test      - run pytest on host via uv"
 	@echo "make fmt       - ruff format"
@@ -43,6 +45,12 @@ sh-ui:
 
 sh-db:
 	docker compose exec db psql -U interview_coach -d interview_coach
+
+sh-embedder:
+	docker compose exec embedder bash
+
+embedder-logs:
+	docker compose logs -f embedder
 
 db-ui:
 	@echo "Adminer:  http://localhost:8090"

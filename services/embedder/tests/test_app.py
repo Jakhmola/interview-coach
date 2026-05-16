@@ -8,7 +8,6 @@ import math
 
 import httpx
 import pytest
-
 from embedder.main import EMBEDDING_DIM, MODEL_NAME, _load_model, app
 
 

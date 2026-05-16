@@ -221,9 +221,9 @@ def _merge_usage(
     and then sometimes one more empty chunk after that. Tracking only the
     last chunk loses the usage row. Instead, merge whenever a chunk has it.
     """
-    usage = getattr(chunk, "usage_metadata", None) or getattr(
-        chunk, "response_metadata", {}
-    ).get("token_usage")
+    usage = getattr(chunk, "usage_metadata", None) or getattr(chunk, "response_metadata", {}).get(
+        "token_usage"
+    )
     new_pt, new_ct = extract_token_usage(usage)
     return (new_pt if new_pt is not None else pt, new_ct if new_ct is not None else ct)
 

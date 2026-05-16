@@ -36,9 +36,10 @@ dependencies = [
     "pypdf>=5.1",
     "python-docx>=1.1",
     "python-multipart>=0.0.20",
-    "sentence-transformers>=3.2",
+    # Phase 17: sentence-transformers + einops moved to the embedder sidecar
+    # (services/embedder/pyproject.toml). The api keeps only `transformers`
+    # for the tokenizer-only path used by rag/chunking.py.
     "transformers>=4.45,<5",
-    "einops>=0.8",
     "pgvector>=0.3",
 ]
 

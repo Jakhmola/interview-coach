@@ -16,7 +16,8 @@ from sqlalchemy import bindparam, text
 
 from interview_coach.db.session import AsyncSessionLocal
 from interview_coach.observability.langfuse import span
-from interview_coach.rag.embeddings import embed_query
+from interview_coach.rag import get_embedding_client
+from interview_coach.rag.client import EmbedderUnavailable
 
 
 @dataclass
@@ -73,7 +74,13 @@ async def retrieve_grounding(
         },
         metadata={"user_id": str(user_id)},
     ) as obs:
-        qvec = await embed_query(query)
+        client = await get_embedding_client()
+        try:
+            qvec = await client.embed_query(query)
+        except EmbedderUnavailable:
+            # Degrade gracefully: the evaluator can still produce a
+            # non-grounded model answer rather than 500-ing the turn.
+            return []
         raw_hits = await _vector_search(
             qvec=qvec,
             user_id=user_id,

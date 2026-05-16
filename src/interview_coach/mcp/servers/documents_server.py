@@ -90,8 +90,9 @@ async def search_grounding(
     `source_kind` defaults to ``project_doc``. Pass ``cv`` to search the
     candidate's resume chunks, or ``all`` to include both.
     """
-    # Heavy import deferred so the MCP process doesn't pull sentence-transformers
-    # unless this tool is actually called.
+    # Phase 17: embedding happens over HTTP via the embedder sidecar.
+    # No heavy imports here — `retrieve_grounding` builds its EmbeddingClient
+    # via `get_embedding_client()` (one per MCP subprocess, memoized).
     from interview_coach.rag.retrieval import retrieve_grounding
 
     uid = uuid.UUID(user_id)
