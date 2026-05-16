@@ -41,5 +41,12 @@ class Settings(BaseSettings):
     # overridden via .env to a workspace path or `:memory:`.
     graph_db_path: str = "/data/graph_checkpoints.sqlite"
 
+    # Phase 17: embeddings sidecar. `embedder_url` is the base URL the
+    # api uses to reach the service; in compose it's `http://embedder:8001`.
+    # `embedder_timeout_s` covers worst-case cold-load on first request.
+    embedder_url: str = "http://embedder:8001"
+    embedder_timeout_s: float = 60.0
+    embedder_retries: int = 3
+
 
 settings = Settings()

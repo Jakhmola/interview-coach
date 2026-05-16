@@ -17,6 +17,8 @@ from interview_coach.api.jobs import router as jobs_router
 from interview_coach.api.sessions import router as sessions_router
 from interview_coach.config import settings
 from interview_coach.observability.langfuse import flush_langfuse, langfuse_enabled
+from interview_coach.rag.client import EmbeddingClient
+from interview_coach.rag.model_lock import assert_embedder_model
 
 logging.basicConfig(
     level=settings.log_level,
@@ -33,6 +35,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with open_checkpointer(settings.graph_db_path) as checkpointer:
         app.state.prep_graph = build_prep_graph()
         app.state.interview_graph = build_interview_graph(checkpointer)
+
+        # Phase 17: stand up the embedder client and lock the model name +
+        # dim. Mismatch on either ⇒ refuse to boot — existing
+        # `grounding_chunks` rows assume Jina v3 / 1024-d.
+        embedding_client = EmbeddingClient.from_settings()
+        await assert_embedder_model(embedding_client)
+        app.state.embedding_client = embedding_client
+
         if langfuse_enabled():
             logger.info("Langfuse tracing is enabled for this api process")
         try:
@@ -43,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             from interview_coach.mcp.client import reset_client
 
             await reset_client()
+            await embedding_client.aclose()
 
 
 app = FastAPI(title="interview-coach API", version=__version__, lifespan=lifespan)
