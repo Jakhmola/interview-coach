@@ -109,20 +109,28 @@ def span(
     if not _ensure_client_initialized():
         yield None
         return
+    # Open the observation; if construction itself fails, degrade to a
+    # no-op trace and let the wrapped body run normally. Never swallow
+    # exceptions raised by the body — a @contextmanager generator must
+    # yield exactly once, and re-yielding after the body raised causes
+    # "RuntimeError: generator didn't stop after throw()" which masks
+    # the original exception (HTTP 4xx becomes 500).
     try:
         from langfuse import get_client
 
         client = get_client()
-        with client.start_as_current_observation(
+        cm = client.start_as_current_observation(
             name=name,
             as_type="span",
             input=input,
             metadata=metadata,
-        ) as obs:
-            yield obs
+        )
     except Exception:
-        logger.exception("Langfuse span %r failed; running without trace", name)
+        logger.exception("Langfuse span %r setup failed; running without trace", name)
         yield None
+        return
+    with cm as obs:
+        yield obs
 
 
 @contextmanager
@@ -146,15 +154,19 @@ def trace_attributes(
     try:
         from langfuse import propagate_attributes
 
-        with propagate_attributes(
+        cm = propagate_attributes(
             user_id=user_id,
             session_id=session_id,
             metadata=metadata,
             tags=tags,
-        ):
-            yield
+        )
     except Exception:
-        logger.exception("Langfuse trace_attributes failed; running without attributes")
+        logger.exception(
+            "Langfuse trace_attributes setup failed; running without attributes"
+        )
+        yield
+        return
+    with cm:
         yield
 
 

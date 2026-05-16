@@ -49,15 +49,11 @@ services:
     build:
       context: ./services/embedder
       dockerfile: Dockerfile
-    # Cap CPU so embedding generation doesn't pin all host cores. Embeddings
-    # used to share the api container; Phase 17 moved them here so the cap
-    # follows.
-    cpus: ${EMBEDDER_CPUS:-12}
+    # Single CPU cap: EMBED_THREADS drives torch.set_num_threads AND propagates
+    # to OMP/MKL/OPENBLAS inside the process (see embedder/main.py). One knob,
+    # no drift between compose-level CFS quotas and in-process thread caps.
     environment:
-      EMBED_THREADS: ${EMBED_THREADS:-12}
-      OMP_NUM_THREADS: ${EMBED_THREADS:-12}
-      MKL_NUM_THREADS: ${EMBED_THREADS:-12}
-      OPENBLAS_NUM_THREADS: ${EMBED_THREADS:-12}
+      EMBED_THREADS: ${EMBED_THREADS:-8}
       TOKENIZERS_PARALLELISM: "false"
       HF_HOME: /cache/hf
     volumes:

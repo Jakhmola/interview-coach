@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS builder
 
 ENV UV_LINK_MODE=copy \
@@ -7,10 +8,13 @@ ENV UV_LINK_MODE=copy \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
-RUN uv venv /app/.venv && uv pip install --no-cache .
+COPY pyproject.toml uv.lock README.md ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project --no-dev
 
 COPY embedder ./embedder
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
 
 FROM python:3.13-slim AS runtime

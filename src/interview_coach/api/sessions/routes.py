@@ -47,7 +47,11 @@ from interview_coach.api.streaming import SSE_HEADERS, sse_event
 from interview_coach.db import repos
 from interview_coach.db.models import User
 from interview_coach.db.session import get_db
-from interview_coach.observability.langfuse import langfuse_callback, trace_attributes
+from interview_coach.observability.langfuse import (
+    flush_langfuse,
+    langfuse_callback,
+    trace_attributes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +222,8 @@ async def prepare_session(
         "graph": "prep",
         "user_id": str(user.id),
         "job_id": str(body.job_id),
-        "force_refresh": body.force_refresh,
+        # Langfuse v4 propagated-attribute values must be strings.
+        "force_refresh": str(body.force_refresh),
     }
 
     async def event_stream() -> AsyncIterator[bytes]:
@@ -241,6 +246,10 @@ async def prepare_session(
                 yield sse_event("done", {"job_id": str(body.job_id), "ready": True})
         except (NoDocumentsError, NoSearchHits, NoUsablePages, CompanyNameMissing) as e:
             yield sse_event("error", {"code": type(e).__name__, "detail": str(e)})
+        finally:
+            # v4 SDK buffers spans; without an explicit flush, prep traces only
+            # appear when a later request (e.g. next_question) nudges the queue.
+            await flush_langfuse()
 
     return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
 
@@ -312,7 +321,8 @@ async def next_question(
         "user_id": str(user.id),
         "session_id": str(session_id),
         "round_type": row.round_type,
-        "turn_index": turn_index,
+        # Langfuse v4 propagated-attribute values must be strings.
+        "turn_index": str(turn_index),
     }
     trace_tags = ["graph:interview", f"round:{row.round_type}", "phase:next_question"]
 
@@ -341,6 +351,8 @@ async def next_question(
         except StreamingJsonError as e:
             logger.exception("Streaming JSON failed for session=%s", session_id)
             yield sse_event("error", {"code": "streaming_json_error", "detail": str(e)})
+        finally:
+            await flush_langfuse()
 
     return StreamingResponse(
         event_stream(),
@@ -386,7 +398,8 @@ async def submit_answer(
         "user_id": str(user.id),
         "session_id": str(session_id),
         "round_type": sess.round_type,
-        "turn_index": latest.turn_index,
+        # Langfuse v4 propagated-attribute values must be strings.
+        "turn_index": str(latest.turn_index),
     }
     trace_tags = ["graph:interview", f"round:{sess.round_type}", "phase:submit_answer"]
 
@@ -426,6 +439,8 @@ async def submit_answer(
         except StreamingJsonError as e:
             logger.exception("Evaluator streaming failed for session=%s", session_id)
             yield sse_event("error", {"code": "streaming_json_error", "detail": str(e)})
+        finally:
+            await flush_langfuse()
 
     return StreamingResponse(
         event_stream(),
