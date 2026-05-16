@@ -1,0 +1,36 @@
+[project]
+name = "embedder"
+version = "0.1.0"
+description = "Interview Coach — embeddings sidecar (Jina v3)"
+requires-python = ">=3.13"
+readme = "README.md"
+dependencies = [
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.34.0",
+    "pydantic==2.11.9",
+    "sentence-transformers>=3.2",
+    "transformers>=4.45,<5",
+    "einops>=0.8",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==8.3.0",
+    "pytest-asyncio==0.25.0",
+    "httpx==0.28.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["embedder"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+    "embedder: tests that download / load the real model (opt in with -m embedder)",
+]
