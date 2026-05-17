@@ -4,6 +4,7 @@ import { Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import { AppShell } from "./components/AppShell";
 import { LoginPage } from "./pages/LoginPage";
 import { SetupPage } from "./pages/SetupPage";
+import { ManagePage } from "./pages/ManagePage";
 import { InterviewPage } from "./pages/InterviewPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { ActiveJobProvider } from "./state/activeJob";
@@ -55,6 +56,7 @@ export function App() {
           >
             <Route index element={<Navigate to="/setup" replace />} />
             <Route path="setup" element={<SetupPage />} />
+            <Route path="setup/manage" element={<ManagePage />} />
             <Route path="interview" element={<InterviewPage />} />
             <Route path="history" element={<HistoryPage />} />
           </Route>

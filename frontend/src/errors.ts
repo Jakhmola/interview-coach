@@ -20,15 +20,15 @@ export const ERRORS: Record<string, ErrorEntry> = {
   },
   ProfileMissing: {
     message: "Your profile is still being built.",
-    hint: "This usually takes 15–30s after CV upload.",
+    hint: "This can take up to a minute or two after CV upload.",
   },
   "No profile yet": {
     message: "Your profile is still being built.",
-    hint: "This usually takes 15–30s after CV upload.",
+    hint: "This can take up to a minute or two after CV upload.",
   },
   "upload your CV and build a profile before adding project docs": {
     message: "Your profile is still being built.",
-    hint: "This usually takes 15–30s after CV upload — the mapping will open as soon as it's ready.",
+    hint: "This can take up to a minute or two after CV upload — the mapping will open as soon as it's ready.",
   },
   "apply_mapping needs a profile; upload your CV first": {
     message: "Your profile is still being built.",

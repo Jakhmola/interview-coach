@@ -1,4 +1,4 @@
-import { FileText, History, Lock, LogOut, Mic2, Sparkles } from "lucide-react";
+import { History, LogOut, Mic2, Settings2, Sparkles } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 
@@ -8,8 +8,8 @@ import { ActiveJobChip } from "./ActiveJobChip";
 import { ErrorBanner } from "./ui";
 
 const navItems = [
-  { to: "/setup", label: "Setup", icon: FileText },
-  { to: "/interview", label: "Interview", icon: Mic2 },
+  { to: "/setup", label: "Setup", icon: Settings2 },
+  { to: "/interview", label: "Practice", icon: Mic2 },
   { to: "/history", label: "History", icon: History },
 ];
 
@@ -53,43 +53,30 @@ export function AppShell() {
   }, [hasCheckedReadiness, isSetupComplete, location.pathname, navigate]);
 
   return (
-    <div className="app-shell">
-      <header className="workspace-header">
-        <div className="brand">
-          <span className="brand-mark">
-            <Sparkles size={20} />
+    <div className="shell">
+      <aside className="sidebar" aria-label="Primary navigation">
+        <div className="sidebar-brand">
+          <span className="sidebar-brand-mark">
+            <Sparkles size={16} />
           </span>
-          <div>
-            <strong>Interview Coach</strong>
-            <span>Practice studio</span>
-          </div>
+          <span className="sidebar-brand-name">Interview Coach</span>
         </div>
-        <ActiveJobChip />
-        <div className="user-menu">
-          <span>{user?.email}</span>
-          <button className="icon-button" onClick={logout} title="Log out">
-            <LogOut size={18} />
-          </button>
-        </div>
-      </header>
-      <main className="main-panel">
-        <section className="tab-stage" aria-label="Workspace sections">
-          <nav className="big-tabs">
+
+        <nav className="sidebar-nav">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const disabled = item.to !== "/setup" && hasCheckedReadiness && !isSetupComplete;
-            if (disabled) {
+            const locked = item.to !== "/setup" && hasCheckedReadiness && !isSetupComplete;
+            if (locked) {
               return (
                 <button
                   key={item.to}
-                  className="big-tab disabled"
                   type="button"
+                  className="sidebar-nav-item locked"
                   disabled
-                  title="Complete setup before opening this section"
+                  title="Complete setup first"
                 >
-                  <Icon size={24} />
+                  <Icon size={16} />
                   <span>{item.label}</span>
-                  <Lock size={16} />
                 </button>
               );
             }
@@ -97,24 +84,38 @@ export function AppShell() {
               <NavLink
                 key={item.to}
                 to={item.to}
-                className={({ isActive }) => `big-tab ${isActive ? "active animated-gradient-border" : ""}`}
+                className={({ isActive }) =>
+                  `sidebar-nav-item${isActive ? " active" : ""}`
+                }
               >
-                <Icon size={24} />
+                <Icon size={16} />
                 <span>{item.label}</span>
               </NavLink>
             );
           })}
-          </nav>
-          <ErrorBanner code={readinessError} />
-          {/* readinessError holds a raw code/detail string from the catch in
-              refreshReadiness; ErrorBanner translates it (or renders null). */}
-        </section>
-        <header className="topbar">
-          <div>
-            <span className="eyebrow">Coaching workspace</span>
-            <h1>{isSetupComplete ? "Ready to rehearse." : "Set up your interview kit."}</h1>
+        </nav>
+
+        <div className="sidebar-footer">
+          <ActiveJobChip />
+          <div className="sidebar-account">
+            <span className="sidebar-account-email" title={user?.email}>
+              {user?.email}
+            </span>
+            <button
+              type="button"
+              className="sidebar-account-logout"
+              onClick={logout}
+              title="Log out"
+              aria-label="Log out"
+            >
+              <LogOut size={14} />
+            </button>
           </div>
-        </header>
+        </div>
+      </aside>
+
+      <main className="canvas">
+        <ErrorBanner code={readinessError} />
         <Outlet context={{ refreshReadiness, isSetupComplete }} />
       </main>
     </div>

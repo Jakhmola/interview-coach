@@ -243,6 +243,49 @@ async def test_delete_cv_blocked_by_active_session(
     assert d.json()["detail"] == "cv_in_use"
 
 
+# --- delete-CV also drops profile ------------------------------------
+
+
+async def test_delete_cv_drops_profile(
+    client: AsyncClient,
+    auth_token: str,
+    sample_pdf: bytes,
+    db_session,  # noqa: ANN001
+    patched_bg_tasks: dict[str, AsyncMock],
+) -> None:
+    """When the CV is deleted, the profile that was grounded in it must
+    also be dropped — otherwise the wizard sees stale profile_ready=True
+    and skips the upload step on the next visit."""
+    from interview_coach.db import repos
+
+    r = await client.post(
+        "/documents",
+        headers=_auth(auth_token),
+        data={"kind": "cv"},
+        files={"file": ("cv.pdf", sample_pdf, "application/pdf")},
+    )
+    cv_id = r.json()["id"]
+
+    me = await client.get("/auth/me", headers=_auth(auth_token))
+    user_id = uuid.UUID(me.json()["id"])
+
+    # Seed a profile row directly (simulating profile_builder having run).
+    await repos.upsert_profile(
+        db_session,
+        user_id=user_id,
+        profile_json={"summary": "x"},
+        source_doc_ids=[cv_id],
+        model_name="test",
+    )
+    assert await repos.get_profile(db_session, user_id) is not None
+
+    d = await client.delete(f"/documents/{cv_id}", headers=_auth(auth_token))
+    assert d.status_code == 204
+
+    db_session.expire_all()
+    assert await repos.get_profile(db_session, user_id) is None
+
+
 # --- helpers ---------------------------------------------------------
 
 

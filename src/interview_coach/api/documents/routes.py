@@ -398,6 +398,9 @@ async def delete_document(
         active = await repos.count_active_sessions_for_user(session, user.id)
         if active > 0:
             raise HTTPException(status.HTTP_409_CONFLICT, "cv_in_use")
+        # Drop the profile that this CV grounded. Without this, profile_ready
+        # stays true after CV deletion and the wizard would skip the CV step.
+        await repos.delete_profile(session, user.id)
 
     if doc.kind == "project_doc":
         try:

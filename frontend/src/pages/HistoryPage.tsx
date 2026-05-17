@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { JobItem, Session, SessionDetail, SessionStatus, api } from "../api";
-import { EmptyState, ErrorBanner, StatusPill, formatDate } from "../components/ui";
+import { ErrorBanner } from "../components/ui";
 import { codeFrom } from "../errors";
 import { useAuth } from "../state/auth";
 
@@ -11,7 +11,7 @@ const roundLabels = {
   behavioral_star: "Behavioral / STAR",
 };
 
-const statusTone: Record<SessionStatus, "neutral" | "good" | "warn" | "bad" | "info"> = {
+const statusTone: Record<SessionStatus, string> = {
   active: "info",
   complete: "good",
   abandoned: "neutral",
@@ -21,9 +21,9 @@ export function HistoryPage() {
   const { token } = useAuth();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [jobs, setJobs] = useState<JobItem[]>([]);
-  // Per-job detail cache keyed by job_id so we can render group headers
-  // ("Senior PM @ Acme") without burning a getJob call per session.
-  const [jobDetails, setJobDetails] = useState<Record<string, { title?: string; company?: string }>>({});
+  const [jobDetails, setJobDetails] = useState<
+    Record<string, { title?: string; company?: string }>
+  >({});
   const [filter, setFilter] = useState<"all" | SessionStatus>("all");
   const [error, setError] = useState<string | null>(null);
 
@@ -34,13 +34,9 @@ export function HistoryPage() {
         setSessions(ss);
         setJobs(jj);
       })
-      .catch((err: unknown) => {
-        setError(codeFrom(err));
-      });
+      .catch((err: unknown) => setError(codeFrom(err)));
   }, [token]);
 
-  // Fetch per-job detail once we know which jobs appear in the history.
-  // Skipped silently for jobs that have been deleted (404).
   useEffect(() => {
     if (!token) return;
     const seenJobIds = new Set(sessions.map((s) => s.job_id));
@@ -64,9 +60,7 @@ export function HistoryPage() {
       if (cancelled) return;
       setJobDetails((prev) => {
         const next = { ...prev };
-        for (const [id, v] of entries) {
-          next[id] = v;
-        }
+        for (const [id, v] of entries) next[id] = v;
         return next;
       });
     });
@@ -76,12 +70,13 @@ export function HistoryPage() {
   }, [token, sessions, jobDetails]);
 
   const filtered = useMemo(
-    () => (filter === "all" ? sessions : sessions.filter((session) => session.status === filter)),
+    () =>
+      filter === "all"
+        ? sessions
+        : sessions.filter((session) => session.status === filter),
     [sessions, filter],
   );
 
-  // Group filtered sessions by job_id. Group order: by most-recent session
-  // within each group, descending.
   const groups = useMemo(() => {
     const byJob = new Map<string, Session[]>();
     for (const s of filtered) {
@@ -99,45 +94,64 @@ export function HistoryPage() {
   }, [filtered]);
 
   return (
-    <section className="panel wide">
-      <div className="panel-header">
-        <div>
-          <span className="eyebrow">Review</span>
-          <h2>Interview history</h2>
+    <div className="history">
+      <header className="history-header">
+        <h1 className="history-title">History</h1>
+        <div className="history-filter">
+          {(["all", "complete", "active", "abandoned"] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              className={`history-filter-pill${filter === f ? " active" : ""}`}
+              onClick={() => setFilter(f)}
+            >
+              {f}
+            </button>
+          ))}
         </div>
-        <select value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}>
-          <option value="all">All sessions</option>
-          <option value="active">Active</option>
-          <option value="complete">Complete</option>
-          <option value="abandoned">Abandoned</option>
-        </select>
-      </div>
+      </header>
+
       <ErrorBanner code={error} />
+
       {filtered.length === 0 ? (
-        <EmptyState title="No sessions here" body="Completed interviews and drafts will appear here." />
+        <div className="history-empty">
+          <p>No sessions yet.</p>
+        </div>
       ) : (
         <div className="history-groups">
           {groups.map((g) => {
             const jobMeta = jobDetails[g.jobId];
             const jobInList = jobs.find((j) => j.id === g.jobId);
-            const role = jobMeta?.title || "(role TBD)";
-            const company = jobMeta?.company || jobInList?.source_url || "Pasted JD";
+            const role = jobMeta?.title;
+            const company = jobMeta?.company || jobInList?.source_url;
             const isDeleted = !jobInList && !jobMeta;
-            const label = isDeleted ? "(JD deleted)" : `${role} @ ${company}`;
             return (
-              <div className="history-group" key={g.jobId}>
-                <h3 className="history-group-header">{label}</h3>
+              <section className="history-group" key={g.jobId}>
+                <header className="history-group-header">
+                  {isDeleted ? (
+                    <span className="history-group-deleted">JD deleted</span>
+                  ) : (
+                    <>
+                      <span className="history-group-role">{role || "Role"}</span>
+                      <span className="history-group-sep">·</span>
+                      <span className="history-group-company">{company || "Company"}</span>
+                    </>
+                  )}
+                  <span className="history-group-count">
+                    {g.sessions.length} session{g.sessions.length === 1 ? "" : "s"}
+                  </span>
+                </header>
                 <div className="history-list">
                   {g.sessions.map((session) => (
                     <HistorySession key={session.id} session={session} token={token!} />
                   ))}
                 </div>
-              </div>
+              </section>
             );
           })}
         </div>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -147,49 +161,69 @@ function HistorySession({ session, token }: { session: Session; token: string })
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isOpen || detail) {
-      return;
-    }
+    if (!isOpen || detail) return;
     api
       .getSession(token, session.id)
       .then(setDetail)
-      .catch((err: unknown) => {
-        setError(codeFrom(err));
-      });
+      .catch((err: unknown) => setError(codeFrom(err)));
   }, [isOpen, detail, session.id, token]);
 
-  const scored = detail?.turns.filter((turn) => turn.score !== null && turn.score !== undefined) ?? [];
+  const scored = detail?.turns.filter((t) => t.score !== null && t.score !== undefined) ?? [];
   const average = scored.length
-    ? scored.reduce((total, turn) => total + (turn.score ?? 0), 0) / scored.length
+    ? scored.reduce((total, t) => total + (t.score ?? 0), 0) / scored.length
     : null;
 
+  const date = new Date(session.created_at).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+
   return (
-    <article className="history-card">
-      <button className="history-trigger" onClick={() => setIsOpen((value) => !value)}>
-        <div>
+    <article className={`history-card${isOpen ? " open" : ""}`}>
+      <button
+        type="button"
+        className="history-card-trigger"
+        onClick={() => setIsOpen((x) => !x)}
+      >
+        <div className="history-card-main">
           <strong>{roundLabels[session.round_type]}</strong>
-          <span>
-            {formatDate(session.created_at)} · {session.n_questions} question
-            {session.n_questions === 1 ? "" : "s"}
+          <span className="history-card-meta">
+            {date} · {session.n_questions} q
+            {average !== null ? <> · {average.toFixed(1)}/10</> : null}
           </span>
         </div>
-        <StatusPill tone={statusTone[session.status]}>{session.status}</StatusPill>
-        <ChevronDown size={18} />
+        <span className={`history-card-status status-${statusTone[session.status]}`}>
+          {session.status}
+        </span>
+        <ChevronDown
+          size={16}
+          className={`history-card-chevron${isOpen ? " open" : ""}`}
+        />
       </button>
       {isOpen ? (
-        <div className="history-detail">
+        <div className="history-card-body">
           <ErrorBanner code={error} />
-          {!detail ? <p>Loading session...</p> : null}
-          {average !== null ? <p className="score-summary">Average score: {average.toFixed(1)}/10</p> : null}
+          {!detail ? <p className="history-card-loading">Loading…</p> : null}
           {detail?.turns.length === 0 ? <p>No turns recorded.</p> : null}
           {detail?.turns.map((turn) => (
-            <div className="turn-review" key={turn.id}>
-              <strong>Q{turn.turn_index + 1}. {turn.question}</strong>
-              {turn.answer ? <p><b>Your answer.</b> {turn.answer}</p> : <p>No answer recorded.</p>}
+            <div className="history-turn" key={turn.id}>
+              <strong className="history-turn-q">
+                Q{turn.turn_index + 1}. {turn.question}
+              </strong>
+              {turn.answer ? (
+                <p>
+                  <span className="history-turn-label">You</span> {turn.answer}
+                </p>
+              ) : (
+                <p className="history-turn-empty">No answer recorded.</p>
+              )}
               {turn.score !== null && turn.score !== undefined ? (
                 <>
-                  <p><b>Score.</b> {turn.score}/10</p>
-                  {turn.feedback ? <p><b>Feedback.</b> {turn.feedback}</p> : null}
+                  <p>
+                    <span className="history-turn-label">{turn.score}/10</span>{" "}
+                    {turn.feedback}
+                  </p>
                   {turn.model_answer ? (
                     <details>
                       <summary>Model answer</summary>
@@ -198,7 +232,7 @@ function HistorySession({ session, token }: { session: Session; token: string })
                   ) : null}
                 </>
               ) : (
-                <p>No evaluation yet.</p>
+                <p className="history-turn-empty">No evaluation yet.</p>
               )}
             </div>
           ))}

@@ -6,8 +6,13 @@
 
 Greenfield project (only `requirements.txt` + `uv.lock` exist) to build a webapp that helps a candidate prepare for a specific job. Flow: candidate uploads CV/project docs, supplies a job description (raw or URL), the system researches the company, then runs a per-round interview where it asks personalized questions, scores answers, gives feedback, and shows a model answer. v1 targets two round types — **Resume / Project Deep-Dive** and **Behavioral / STAR**.
 
-The stack is fixed by user choice and the existing `requirements.txt`:
-FastAPI + Streamlit + Postgres + LangGraph (multi-agent supervisor) + LangChain + MCP (Tavily for web, custom server for our own tools) + Ollama on host (qwen3:8b) + Docker Compose. Multi-user, JWT + bcrypt auth. Streaming responses. A2A wrapping deferred to phase 2. STT, GitHub ingestion, Markdown ingestion, technical/system-design rounds — all out of v1.
+The stack: FastAPI + React/TypeScript (Vite, replaced the original Streamlit
+UI in Phase 18) + Postgres (pgvector) + a separate FastAPI embedder sidecar
+(Jina embeddings v3) + LangGraph (multi-agent supervisor) + LangChain + MCP
+(Tavily for web, custom server for app-side tools) + Ollama on host (qwen3:8b)
++ Docker Compose. Multi-user, JWT + bcrypt auth. SSE streaming with
+AbortController on the client. A2A wrapping deferred. STT, Markdown ingestion,
+technical/system-design rounds — all out of v1.
 
 The plan is organized as bricks: each phase is independently testable end-to-end before the next is started.
 
@@ -16,9 +21,9 @@ The plan is organized as bricks: each phase is independently testable end-to-end
 ## High-level architecture
 
 ```
-┌─ Streamlit UI (container) ──────────────┐        Ollama on host
-│  pages: login / setup / interview /     │        host.docker.internal:11434
-│  history; api_client → FastAPI          │                ▲
+┌─ React + TS UI (container, Vite) ───────┐        Ollama on host
+│  routes: /login / /setup / /interview / │        host.docker.internal:11434
+│  /history; typed api.ts client → SSE    │                ▲
 └──────────────┬──────────────────────────┘                │
                │  HTTPS + JWT                              │
 ┌──────────────▼──────────────────────────┐                │
@@ -94,11 +99,16 @@ interview_coach/
       ollama.py               # ChatOllama factory, streaming wrapper, retry
     observability/
       langfuse.py             # optional callback handler (toggle by env)
-  ui/
-    app.py                    # Streamlit entry
-    pages/{login,setup,interview,history}.py
-    api_client.py             # httpx client → FastAPI
-    state.py                  # st.session_state helpers
+  frontend/                   # React + TS (Vite + Vitest); see frontend/src/
+    src/App.tsx
+    src/api.ts                # typed FastAPI client + SSE stream helpers
+    src/pages/                # LoginPage / SetupPage / InterviewPage / HistoryPage / ManagePage
+    src/state/                # auth + activeJob contexts, multi-tab + auth-expired
+    src/components/           # AppShell (left sidebar), DocMappingModal, ActiveJobChip,
+                              # ArmedDeleteButton, LoadingStatus, ui primitives
+    src/errors.ts             # backend code → user-facing message translation
+    src/hooks/useStreamAbort.ts
+    src/styles.css            # Copper Aquamarine Dream tokens + button system
   tests/
     unit/
     integration/
@@ -135,7 +145,9 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 14    | Model-answer RAG grounding (user-doc chunks)   | ✅          |
 | 14.1  | Project-identity-aware profile + RAG + prompts | ✅          |
 | 16    | Agent layer hardening (telemetry + MCP rework) | ✅          |
-| 17    | Embeddings service extraction (sidecar)        | 🚧          |
+| 17    | Embeddings service extraction (sidecar)        | ✅          |
+| 18    | UI infra rework (errors, active-job, abort, guards) | ✅      |
+| 18b   | UI/UX redesign (Copper Aquamarine, sidebar, wizard) | ✅      |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
 | 15    | GitHub ingestion                               | ⏳          |
@@ -283,6 +295,88 @@ move. The full evaluator-quality eval is now Phase 12b, after RAG.
 - Chunking stays on api via a tokenizer-only path (`AutoTokenizer.from_pretrained("jinaai/jina-embeddings-v3", trust_remote_code=True)`). MCP `documents_server` subprocess builds its own `EmbeddingClient` from env (no `app.state` available).
 - **Smoke test:** `make up` brings up both services; `curl :8001/model` returns the locked name+dim; end-to-end session works; parity test shows `||Δ||_inf < 1e-6` between in-process and over-the-wire vectors; api image is materially smaller; killing `embedder` mid-flight degrades gracefully (ingest errors, retrieval returns `[]`).
 
+### Phase 18 — UI infra rework (errors, active-job, abort, guards)
+Backend + frontend infrastructure layer for a usable multi-JD UX, without touching
+the visual design. Four commits land together.
+- **Backend**: CV upload auto-schedules `profile_builder` as a second background
+  task (mirrors the existing embedding task pattern); new
+  `POST /documents/{cv_id}/rebuild-profile` (202, idempotent, single-flight via
+  module-level `set[uuid.UUID]`); `GET /documents` and `GET /documents/{id}` gain
+  an `embedding_status: "ready" | "pending" | "failed" | "n_a"` field derived
+  from `count(grounding_chunks)` + doc age (60s grace); `DELETE /jobs/{id}`
+  returns 409 `job_in_use` if any active session references it;
+  `DELETE /documents/{cv_id}` returns 409 `cv_in_use` if any active session
+  exists.
+- **Frontend infra**: `errors.ts` central code → user-message translator
+  consumed by a new `<ErrorBanner code={…} />` component (no more raw
+  `ProfileMissing` / `NoSearchHits` leaking to users); `state/activeJob.tsx`
+  Context persisted via `localStorage`, validated on mount with silent
+  404-fallback to the most-recent JD; `state/auth.tsx` gains a `storage`
+  event listener for multi-tab logout + a global `auth-expired` event from
+  `apiFetch`'s 401 path; `api.ts` `streamPost` accepts an optional
+  `AbortSignal` and `useStreamAbort` manages one per page;
+  `ArmedDeleteButton` for two-click destructive confirms.
+- The dead Streamlit `ui/` directory was deleted in commit 1; `Dockerfile.ui`
+  already built from `frontend/`.
+- **Smoke test:** end-to-end demo as before, plus: upload a CV → embedding
+  pill flips ready within ~15s and profile_ready becomes true without a
+  manual prep run; uploading a project_doc pre-profile shows a graceful
+  "Profile is still building" panel and auto-promotes on profile-ready;
+  deleting a JD with an active session returns 409 with a translated
+  `job_in_use` message; expired JWT auto-redirects to `/login`; multi-tab
+  logout propagates within the storage tick.
+
+### Phase 18b — UI/UX redesign (Copper Aquamarine, sidebar, wizard)
+Visual + IA rework on top of Phase 18. No new backend contract beyond one
+small change. Reference designs: Raycast (surface ladder, hairline borders),
+Arc (warm dark base), Perplexity (answer-focused practice surface).
+- **Design tokens**: Copper Aquamarine Dream palette (Figma library) extracted
+  to a dark base. Copper `#C56B62` primary, peach `#DEA785` hover, slate-blue
+  `#6C739C` for info/ready status (replaces the prior sage green that
+  clashed), taupe `#BFB9B5` for secondary text. New surface ladder
+  `#0d0d11 → #15151b → #1d1d24 → #27272f`. Generous letter-spacing,
+  Inter/Geist stack.
+- **Left-sidebar shell**: top nav and big-tab cards removed. 220px sidebar
+  with brand at top, nav middle, active-job pill + account menu at the
+  footer. Below 800px the sidebar flattens to a horizontal strip.
+- **Active-job pill**: full-width sidebar pill showing role on line 1 and
+  company on line 2; opens an upward dropdown listing other JDs; when the
+  user has zero jobs the pill becomes a direct "Go to Setup" affordance
+  instead of opening an empty menu.
+- **Button system**: `.btn-primary` / `.btn-secondary` / `.btn-ghost`
+  / `.btn-quiet` semantic classes. Old `.primary-button` / `.ghost-button`
+  rules retokened in place so phase-18 page contents render correctly under
+  the new system without a per-page rewrite.
+- **Setup as a wizard**: SetupPage restructured into 4 explicit steps —
+  CV upload → JD paste → optional supporting docs → run prep. Returning
+  users with a complete setup see a "Ready to practice" landing card with
+  CV filename, JD snippet, and supporting-doc count instead of the wizard.
+  "Add another job" and "Add supporting doc" buttons on the landing route
+  back into the wizard at the right step (via an `overrideReady` flag so
+  the auto-skip doesn't bounce them back out). A separate `/setup/manage`
+  page hosts destructive actions and full lists.
+- **Practice focus mode**: bare `<select>` job picker removed; current
+  question rendered at 28–32px display type; answer textarea wide but
+  bounded; "End session" demoted to `.btn-quiet` at the bottom (still
+  armed-delete). After answer submission the page parks on the feedback +
+  model answer indefinitely; an explicit "Next question →" / "Finish
+  round →" CTA is the only thing that advances state.
+- **History timeline**: grouped by job_id with `{role} @ {company}` headers
+  from cached `getJob` calls.
+- **Backend addition**: `repos.delete_profile(user_id)` called from the
+  CV delete path so stale `profile_ready=true` doesn't survive a CV
+  deletion. Covered by `test_delete_cv_drops_profile`.
+- **Polish**: success toasts auto-dismiss after 3.5s and clear on step
+  change (no more "Job description saved." sticking through every wizard
+  step); prep-time copy updated from misleading "~20–40s" to "can take a
+  minute or two"; JD list items show source URL hostname or a preview
+  snippet rather than "Pasted JD".
+- **Smoke test:** full first-time flow on a fresh user lands cleanly on the
+  practice surface; "Add another job" reaches step 2 from a setup-complete
+  state; deleting a CV clears the profile so the wizard re-asks for one;
+  answering a question parks on the feedback until the user clicks the
+  advance CTA; one-job dropdown no longer shows a phantom scrollbar.
+
 ### Phase 14b — RAG grounding (Tavily tech-spec corpus, optional)
 Only if Phase 14 questions feel grounded in the candidate's voice but still technically vague.
 - New `tech_corpus_ingester` node in `prep_graph`, between `job_analyzer` and `company_researcher`.
@@ -330,7 +424,8 @@ The rest of the original Phase 12. Lands after RAG so the eval set is stable.
 - `src/interview_coach/mcp/servers/documents_server.py` — custom MCP server
 - `src/interview_coach/db/models.py` — SQLAlchemy schema (incremental per phase)
 - `src/interview_coach/llm/ollama.py` — ChatOllama factory (used by every node)
-- `ui/pages/interview.py` — streaming chat loop
+- `frontend/src/pages/InterviewPage.tsx` — streaming chat loop (SSE with AbortController)
+- `frontend/src/styles.css` — design tokens + sidebar shell + button system
 
 ---
 
@@ -351,7 +446,7 @@ The rest of the original Phase 12. Lands after RAG so the eval set is stable.
 After phase 9 is green (the earliest "real" demo):
 
 1. `docker compose up -d` → wait for healthy.
-2. Browse Streamlit, register a user, log in.
+2. Browse to `http://localhost:8501` (the React app), register a user, log in.
 3. Upload a real CV PDF + one project doc (DOCX).
 4. Paste a JD URL; system fetches and parses it.
 5. Pick round type **Resume Walkthrough**; click **Start interview**.
@@ -372,7 +467,7 @@ Eval (after phase 12): `pytest tests/integration -k quality` passes deepeval thr
 - **qwen3:8b latency** on CPU-only hosts may make per-turn evaluation slow; streaming masks it but consider lowering `n_questions` default or warning users. Keep a `MODEL_NAME` env so we can swap to a smaller model for testing.
 - **Tool-binding in `langchain-ollama` 1.0.0**: confirm tool-call support against qwen3:8b at the start of phase 6; if flaky, fall back to manual JSON-mode prompting.
 - **MCP server lifecycle inside api container**: prefer in-process `MultiServerMCPClient` boot over subprocess management for the custom `documents_server`.
-- **Streaming through SSE + Streamlit**: works, but `httpx` async streaming + `st.write_stream` needs a small adapter — write that helper once in `ui/api_client.py`.
+- **SSE streaming on the React side**: handled by `frontend/src/api.ts` `streamPost` which accepts an `AbortSignal`; pages create one per stream via `useStreamAbort` and abort on unmount. Mid-stream HTTP-side disconnects are converted to a synthetic `("error", {code: "stream_interrupted"})` frame instead of throwing.
 - **Postgres + Alembic in compose**: ensure api waits for DB readiness (healthcheck + `depends_on: condition: service_healthy`).
 
 ---

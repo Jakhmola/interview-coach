@@ -222,6 +222,16 @@ async def get_profile(session: AsyncSession, user_id: uuid.UUID) -> ProfileRow |
     return result.scalar_one_or_none()
 
 
+async def delete_profile(session: AsyncSession, user_id: uuid.UUID) -> bool:
+    """Drop a user's profile row. Used when the CV that grounded it is deleted."""
+    existing = await get_profile(session, user_id)
+    if existing is None:
+        return False
+    await session.delete(existing)
+    await session.commit()
+    return True
+
+
 async def upsert_profile(
     session: AsyncSession,
     *,

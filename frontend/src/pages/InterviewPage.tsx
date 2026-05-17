@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Play, RotateCcw, Square } from "lucide-react";
+import { ArrowRight, Loader2, Play, RotateCcw } from "lucide-react";
+import { Link } from "react-router-dom";
 import Confetti from "react-confetti";
 
 import {
@@ -15,7 +16,7 @@ import {
 } from "../api";
 import { ArmedDeleteButton } from "../components/ArmedDeleteButton";
 import { LoadingStatus } from "../components/LoadingStatus";
-import { EmptyState, ErrorBanner, StatusPill, formatDate, shortId } from "../components/ui";
+import { ErrorBanner } from "../components/ui";
 import { codeFrom } from "../errors";
 import { useStreamAbort } from "../hooks/useStreamAbort";
 import { useActiveJob } from "../state/activeJob";
@@ -26,9 +27,16 @@ const roundLabels: Record<RoundType, string> = {
   behavioral_star: "Behavioral / STAR",
 };
 
+const roundDescriptions: Record<RoundType, string> = {
+  resume_walkthrough:
+    "Drill into projects on your CV. Expect follow-ups on tradeoffs, scale, and your specific contribution.",
+  behavioral_star:
+    "STAR-format questions about how you handled situations. Expect questions on conflict, ownership, and ambiguity.",
+};
+
 export function InterviewPage() {
   const { token } = useAuth();
-  const { activeJobId, activeJob, setActiveJobId } = useActiveJob();
+  const { activeJobId, activeJob } = useActiveJob();
   const questionAbort = useStreamAbort();
   const answerAbort = useStreamAbort();
   const windowSize = useWindowSize();
@@ -36,7 +44,6 @@ export function InterviewPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
-  const [jobId, setJobId] = useState("");
   const [roundType, setRoundType] = useState<RoundType>("resume_walkthrough");
   const [nQuestions, setNQuestions] = useState(5);
   const [answer, setAnswer] = useState("");
@@ -44,7 +51,9 @@ export function InterviewPage() {
   const [streamFeedback, setStreamFeedback] = useState("");
   const [streamModelAnswer, setStreamModelAnswer] = useState("");
   const [streamScore, setStreamScore] = useState<number | null>(null);
-  const [streamPhase, setStreamPhase] = useState<"idle" | "evaluating" | "feedback" | "model_answer">("idle");
+  const [streamPhase, setStreamPhase] = useState<
+    "idle" | "evaluating" | "feedback" | "model_answer" | "done"
+  >("idle");
   const [pendingAnswer, setPendingAnswer] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,67 +62,48 @@ export function InterviewPage() {
   const celebratedSessionsRef = useRef<Set<string>>(new Set());
 
   const activeSessions = useMemo(
-    () => sessions.filter((session) => session.status === "active"),
-    [sessions],
+    () =>
+      sessions.filter(
+        (session) => session.status === "active" && session.job_id === activeJobId,
+      ),
+    [sessions, activeJobId],
   );
 
   const overallScore = useMemo(() => {
-    const scored = detail?.turns.filter((turn) => turn.score !== null && turn.score !== undefined) ?? [];
-    if (!scored.length) {
-      return null;
-    }
-    return scored.reduce((total, turn) => total + (turn.score ?? 0), 0) / scored.length;
+    const scored =
+      detail?.turns.filter((t) => t.score !== null && t.score !== undefined) ?? [];
+    if (!scored.length) return null;
+    return scored.reduce((t, x) => t + (x.score ?? 0), 0) / scored.length;
   }, [detail?.turns]);
 
   const refresh = async () => {
     if (!token) return;
-    const [nextJobs, nextSessions] = await Promise.all([api.listJobs(token), api.listSessions(token)]);
+    const [nextJobs, nextSessions] = await Promise.all([
+      api.listJobs(token),
+      api.listSessions(token),
+    ]);
     setJobs(nextJobs);
     setSessions(nextSessions);
-    // Default jobId to the active job from context; fall back to most-recent
-    // JD if none. Keeps the round-creation form in sync with the topbar chip.
-    setJobId((current) => current || activeJobId || nextJobs[0]?.id || "");
     if (activeId) {
       setDetail(await api.getSession(token, activeId));
     }
   };
 
   useEffect(() => {
-    refresh().catch((err: unknown) => {
-      setError(codeFrom(err));
-    });
+    refresh().catch((err: unknown) => setError(codeFrom(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeId]);
 
-  // Keep the form's jobId in sync if the chip flips.
-  useEffect(() => {
-    if (activeJobId && activeJobId !== jobId) {
-      setJobId(activeJobId);
-    }
-  }, [activeJobId, jobId]);
-
-  // Scroll to bottom whenever chat content changes
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [detail?.turns, streamQuestion, streamFeedback, streamModelAnswer, pendingAnswer]);
 
   useEffect(() => {
-    if (!detail || detail.status !== "complete" || overallScore === null) {
-      return;
-    }
-    if (celebratedSessionsRef.current.has(detail.id)) {
-      return;
-    }
+    if (!detail || detail.status !== "complete" || overallScore === null) return;
+    if (celebratedSessionsRef.current.has(detail.id)) return;
     celebratedSessionsRef.current.add(detail.id);
     setCelebrationPieces(scoreToConfettiPieces(overallScore));
   }, [detail, overallScore]);
-
-  const loadSession = async (id: string) => {
-    if (!token) return;
-    setActiveId(id);
-    setDetail(await api.getSession(token, id));
-    setError(null);
-  };
 
   const askNext = async (sessionId: string, sessionToken: string) => {
     setIsBusy(true);
@@ -126,11 +116,9 @@ export function InterviewPage() {
         sessionId,
         (frame: SseFrame) => {
           if (frame.event === "token" && typeof frame.data === "string") {
-            setStreamQuestion((current) => current + frame.data);
+            setStreamQuestion((c) => c + frame.data);
           }
-          if (frame.event === "error") {
-            setError(codeFrom(frame.data));
-          }
+          if (frame.event === "error") setError(codeFrom(frame.data));
         },
         signal,
       );
@@ -145,14 +133,13 @@ export function InterviewPage() {
 
   const startSession = async (event: FormEvent) => {
     event.preventDefault();
-    if (!token || !jobId) return;
+    if (!token || !activeJobId) return;
     setError(null);
     try {
-      const session = await api.createSession(token, jobId, roundType, nQuestions);
+      const session = await api.createSession(token, activeJobId, roundType, nQuestions);
       setActiveId(session.id);
       setDetail(await api.getSession(token, session.id));
       await refresh();
-      // Auto-ask the first question immediately.
       await askNext(session.id, token);
     } catch (err) {
       setError(codeFrom(err));
@@ -164,8 +151,6 @@ export function InterviewPage() {
     try {
       await api.abandonSession(token, id);
     } catch (err) {
-      // Multi-tab: another tab may have already abandoned this session.
-      // Surface the translated message, but still reset our local view.
       setError(codeFrom(err));
     }
     setActiveId(null);
@@ -174,13 +159,25 @@ export function InterviewPage() {
   };
 
   const latest = detail?.turns.at(-1);
+  // While streamPhase === "done" we're parked on the just-answered turn so
+  // the user can read the feedback. All "next-state" affordances are gated
+  // off until they click the advance CTA, which flips phase back to idle.
+  const showingFeedback = streamPhase === "done";
   const needsQuestion =
+    !showingFeedback &&
     detail?.status === "active" &&
     detail.turns.length < detail.n_questions &&
     (!latest || (latest.answer && latest.score !== null && latest.score !== undefined));
-  const needsAnswer = detail?.status === "active" && latest && !latest.answer;
+  const needsAnswer =
+    !showingFeedback && detail?.status === "active" && latest && !latest.answer;
   const needsRetry =
-    detail?.status === "active" && latest && latest.answer && latest.score === null;
+    !showingFeedback &&
+    detail?.status === "active" &&
+    latest &&
+    latest.answer &&
+    latest.score === null;
+  const isLastTurn =
+    detail !== null && detail.turns.length >= detail.n_questions;
 
   const submitAnswer = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -190,7 +187,6 @@ export function InterviewPage() {
       setError("Type an answer before submitting.");
       return;
     }
-    // Show the user's answer bubble immediately
     setPendingAnswer(text);
     setAnswer("");
     setIsBusy(true);
@@ -212,27 +208,25 @@ export function InterviewPage() {
           }
           if (frame.event === "feedback_token" && typeof frame.data === "string") {
             setStreamPhase("feedback");
-            setStreamFeedback((current) => current + frame.data);
+            setStreamFeedback((c) => c + frame.data);
           }
           if (frame.event === "model_answer_token" && typeof frame.data === "string") {
             setStreamPhase("model_answer");
-            setStreamModelAnswer((current) => current + frame.data);
+            setStreamModelAnswer((c) => c + frame.data);
           }
           if (frame.event === "model_answer_error") {
             setStreamModelAnswer("Model answer unavailable for this turn.");
           }
-          if (frame.event === "error") {
-            setError(codeFrom(frame.data));
-          }
+          if (frame.event === "error") setError(codeFrom(frame.data));
         },
         signal,
       );
       setDetail(await api.getSession(token, detail.id));
-      setPendingAnswer(null);
-      setStreamFeedback("");
-      setStreamModelAnswer("");
-      setStreamScore(null);
-      setStreamPhase("idle");
+      // Keep the streamed feedback/score/model-answer visible — the user
+      // hasn't had time to read them yet. Phase flips to "done" so the
+      // page renders an explicit "Next question" / "Finish round" CTA.
+      // The next user click is what flushes this state.
+      setStreamPhase("done");
     } catch (err) {
       setError(codeFrom(err));
       setPendingAnswer(null);
@@ -242,113 +236,147 @@ export function InterviewPage() {
     }
   };
 
-  const handleAskNext = () => {
+  // Called when the user explicitly advances past the feedback they just
+  // read. Flushes the local stream state, then either fetches the next
+  // question or simply lets the page render the done-state for the last
+  // turn (which the n_questions-reached invariant already guarantees).
+  const advance = async () => {
     if (!token || !detail) return;
-    askNext(detail.id, token);
+    setPendingAnswer(null);
+    setStreamFeedback("");
+    setStreamModelAnswer("");
+    setStreamScore(null);
+    setStreamPhase("idle");
+    // If more turns remain, fetch the next question immediately.
+    if (detail.turns.length < detail.n_questions) {
+      await askNext(detail.id, token);
+    }
   };
 
-  if (!activeId || !detail) {
-    const parsed = activeJob?.parsed_json as
-      | { title?: string; company_name?: string }
-      | null
-      | undefined;
-    const role = parsed?.title;
-    const company = parsed?.company_name;
-    const activeJobInList = jobs.find((j) => j.id === jobId);
-    const jobChoiceLabel = activeJob
-      ? `${role || "(role TBD)"} @ ${company || "(company TBD)"}`
-      : activeJobInList?.source_url || "Pasted JD";
+  // ───── Empty / setup states ─────
 
+  const parsed = activeJob?.parsed_json as
+    | { title?: string; company_name?: string }
+    | null
+    | undefined;
+  const role = parsed?.title;
+  const company = parsed?.company_name;
+  const jobLabel =
+    role && company
+      ? `${role} @ ${company}`
+      : role || company || "Active job";
+
+  if (!activeJobId) {
     return (
-      <div className="page-grid">
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Start</span>
-              <h2>New interview round</h2>
-            </div>
-          </div>
-          <ErrorBanner code={error} />
-          {jobs.length === 0 ? (
-            <EmptyState title="No job yet" body="Save and prepare a job on the Setup page first." />
-          ) : (
-            <form className="form-stack" onSubmit={startSession}>
-              <div className="interview-active-job">
-                <span className="eyebrow">Interviewing for</span>
-                <strong>{jobChoiceLabel}</strong>
-                <small>Use the chip in the header to switch active job.</small>
-                {jobs.length > 1 && jobId !== activeJobId ? (
-                  <button
-                    type="button"
-                    className="ghost-button small"
-                    onClick={() => setActiveJobId(jobId)}
-                  >
-                    Make this the active job
-                  </button>
-                ) : null}
-              </div>
-              <label>
-                Round type
-                <select value={roundType} onChange={(event) => setRoundType(event.target.value as RoundType)}>
-                  {Object.entries(roundLabels).map(([value, label]) => (
-                    <option value={value} key={value}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Questions: {nQuestions}
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
-                  value={nQuestions}
-                  onChange={(event) => setNQuestions(Number(event.target.value))}
-                />
-              </label>
-              <button className="primary-button" type="submit" disabled={isBusy || !jobId}>
-                {isBusy ? <Loader2 size={18} className="spin" /> : <Play size={18} />}
-                {isBusy ? "Preparing your first question..." : "Start interview"}
-              </button>
-            </form>
-          )}
-        </section>
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <span className="eyebrow">Resume</span>
-              <h2>Active sessions</h2>
-            </div>
-          </div>
-          {activeSessions.length === 0 ? (
-            <EmptyState title="No active sessions" body="Start a new round when you're ready." />
-          ) : (
-            <div className="list">
-              {activeSessions.map((session) => (
-                <article className="list-item" key={session.id}>
-                  <div>
-                    <strong>{roundLabels[session.round_type]}</strong>
-                    <span>
-                      {shortId(session.id)} · {formatDate(session.created_at)}
-                    </span>
-                  </div>
-                  <button className="secondary-button small" onClick={() => loadSession(session.id)}>
-                    Resume
-                  </button>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+      <div className="practice-empty">
+        <h1 className="practice-empty-title">Pick a job to practice for</h1>
+        <p className="practice-empty-body">
+          Use the active-job pill in the sidebar to switch, or set one up in{" "}
+          <Link to="/setup">Setup</Link>.
+        </p>
       </div>
     );
   }
 
+  if (jobs.length === 0) {
+    return (
+      <div className="practice-empty">
+        <h1 className="practice-empty-title">No jobs yet</h1>
+        <p className="practice-empty-body">
+          <Link to="/setup">Set one up</Link> to start practicing.
+        </p>
+      </div>
+    );
+  }
+
+  // ───── Start screen ─────
+
+  if (!activeId || !detail) {
+    return (
+      <div className="practice-start">
+        <header className="practice-start-header">
+          <span className="practice-start-eyebrow">Ready when you are</span>
+          <h1 className="practice-start-title">{jobLabel}</h1>
+        </header>
+
+        <ErrorBanner code={error} />
+
+        <form className="practice-start-form" onSubmit={startSession}>
+          <fieldset className="round-type-fieldset">
+            <legend>Round type</legend>
+            {(Object.keys(roundLabels) as RoundType[]).map((rt) => (
+              <label
+                key={rt}
+                className={`round-type-option${roundType === rt ? " selected" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="roundType"
+                  value={rt}
+                  checked={roundType === rt}
+                  onChange={() => setRoundType(rt)}
+                />
+                <span className="round-type-label">{roundLabels[rt]}</span>
+                <span className="round-type-desc">{roundDescriptions[rt]}</span>
+              </label>
+            ))}
+          </fieldset>
+
+          <label className="practice-questions-row">
+            <span>
+              Questions <strong>{nQuestions}</strong>
+            </span>
+            <input
+              type="range"
+              min={1}
+              max={10}
+              value={nQuestions}
+              onChange={(e) => setNQuestions(Number(e.target.value))}
+            />
+          </label>
+
+          <button className="btn-primary practice-start-cta" type="submit" disabled={isBusy}>
+            {isBusy ? <Loader2 size={16} className="spin" /> : <Play size={16} />}
+            {isBusy ? "Preparing first question…" : "Start round"}
+          </button>
+        </form>
+
+        {activeSessions.length > 0 ? (
+          <div className="practice-resume">
+            <span className="practice-resume-eyebrow">Resume in progress</span>
+            <div className="practice-resume-list">
+              {activeSessions.map((s) => (
+                <button
+                  type="button"
+                  key={s.id}
+                  className="practice-resume-item"
+                  onClick={() => setActiveId(s.id)}
+                >
+                  <span>{roundLabels[s.round_type]}</span>
+                  <span className="practice-resume-meta">
+                    {new Date(s.created_at).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                    })}{" "}
+                    · {s.n_questions} questions
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  // ───── Live round ─────
+
   const nextQuestionIndex = detail.turns.length + 1;
+  const turnQuestion =
+    needsAnswer || needsRetry || showingFeedback ? latest?.question : null;
 
   return (
-    <div className="interview-layout">
+    <div className="practice-live">
       {celebrationPieces !== null ? (
         <Confetti
           width={windowSize.width}
@@ -358,48 +386,78 @@ export function InterviewPage() {
           run
           gravity={0.18}
           tweenDuration={6500}
-          colors={["#2f6f63", "#72c1b0", "#f2b366", "#ef7f59", "#466d8f", "#f7f4ed"]}
+          colors={["#C56B62", "#DEA785", "#6C739C", "#BFB9B5", "#f0ebe6"]}
           className="completion-confetti"
           onConfettiComplete={() => setCelebrationPieces(null)}
         />
       ) : null}
-      <section className="panel interview-panel">
-        <div className="panel-header">
-          <div>
-            <span className="eyebrow">Live round</span>
-            <h2>{roundLabels[detail.round_type]}</h2>
-          </div>
-          <StatusPill tone={detail.status === "active" ? "info" : "good"}>{detail.status}</StatusPill>
-        </div>
-        <div className="progress-line">
-          <span>
-            {detail.turns.length} / {detail.n_questions} questions
-          </span>
-          <ArmedDeleteButton
-            label="End session"
-            icon={<Square size={15} />}
-            onConfirm={() => abandon(detail.id)}
-            className="ghost-button danger small"
-          />
-        </div>
-        <small className="delete-caption">You can still view it in History.</small>
-        <ErrorBanner code={error} />
-        <div className="chat-stack">
-          {detail.turns.map((turn) => (
-            <TurnView key={turn.id} turn={turn} />
-          ))}
 
-          {/* Streaming: question being generated */}
-          {streamQuestion ? (
-            <div className="chat-bubble coach stream-in" aria-live="polite" aria-atomic="false">
-              <strong>Q{nextQuestionIndex}</strong>
-              <p>{streamQuestion}<span className="cursor-blink" /></p>
+      <header className="practice-live-header">
+        <span className="practice-live-meta">
+          {roundLabels[detail.round_type]} · question{" "}
+          {Math.min(detail.turns.length || 1, detail.n_questions)}/{detail.n_questions}
+        </span>
+        <span className="practice-live-meta">{jobLabel}</span>
+      </header>
+
+      <ErrorBanner code={error} />
+
+      {detail.status !== "active" ? (
+        <div className="practice-done">
+          <h1 className="practice-done-title">Round {detail.status}</h1>
+          {overallScore !== null ? (
+            <p className="practice-done-score">
+              <strong>{overallScore.toFixed(1)}</strong>
+              <span>/ 10 average</span>
+            </p>
+          ) : null}
+          <p className="practice-done-hint">
+            Review it in <Link to="/history">History</Link>, or start another round.
+          </p>
+          <button
+            type="button"
+            className="btn-primary"
+            onClick={() => {
+              setActiveId(null);
+              setDetail(null);
+            }}
+          >
+            <RotateCcw size={14} /> Start another round
+          </button>
+          <details className="practice-done-review">
+            <summary>Show this round</summary>
+            <div className="practice-transcript">
+              {detail.turns.map((t) => (
+                <TurnView key={t.id} turn={t} />
+              ))}
             </div>
+          </details>
+        </div>
+      ) : (
+        <>
+          {/* Current question — display type, dominant focus */}
+          {streamQuestion ? (
+            <article
+              className="practice-question stream-in"
+              aria-live="polite"
+              aria-atomic="false"
+            >
+              <span className="practice-question-num">Q{nextQuestionIndex}</span>
+              <p>
+                {streamQuestion}
+                <span className="cursor-blink" />
+              </p>
+            </article>
+          ) : turnQuestion ? (
+            <article className="practice-question">
+              <span className="practice-question-num">Q{latest!.turn_index + 1}</span>
+              <p>{turnQuestion}</p>
+            </article>
           ) : null}
 
-          {/* Question loading placeholder */}
+          {/* Question loading */}
           {isBusy && !streamQuestion && streamPhase === "idle" && needsQuestion ? (
-            <div className="chat-bubble coach thinking-bubble">
+            <div className="practice-loading">
               <Loader2 size={16} className="spin" />
               <LoadingStatus
                 active
@@ -413,36 +471,75 @@ export function InterviewPage() {
             </div>
           ) : null}
 
-          {/* Pending answer shown immediately after submit */}
-          {pendingAnswer ? (
-            <div className="chat-bubble candidate stream-in">
-              <strong>You</strong>
-              <p>{pendingAnswer}</p>
-            </div>
+          {needsQuestion && !isBusy && detail.turns.length === 0 ? (
+            <button className="btn-primary" onClick={() => askNext(detail.id, token!)}>
+              <Play size={14} /> Begin
+            </button>
           ) : null}
 
-          {/* Evaluation phases */}
+          {/* Answer composer */}
+          {needsAnswer && !isBusy ? (
+            <form className="practice-composer" onSubmit={submitAnswer}>
+              <textarea
+                rows={8}
+                value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                placeholder="Answer as you would in the interview…"
+                autoFocus
+              />
+              <div className="practice-composer-actions">
+                <button className="btn-primary" type="submit">
+                  Submit <ArrowRight size={14} />
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {/* Pending answer bubble + evaluation */}
+          {pendingAnswer ? (
+            <article className="practice-your-answer">
+              <span className="practice-your-answer-label">Your answer</span>
+              <p>{pendingAnswer}</p>
+            </article>
+          ) : null}
+
           {streamPhase === "evaluating" && !streamFeedback ? (
-            <div className="chat-bubble coach thinking-bubble">
+            <div className="practice-loading">
               <Loader2 size={16} className="spin" />
               <LoadingStatus
                 active
-                messages={["Scoring your structure", "Checking evidence and specificity", "Drafting feedback"]}
+                messages={[
+                  "Scoring your structure",
+                  "Checking evidence and specificity",
+                  "Drafting feedback",
+                ]}
                 fallback="Evaluating your answer"
               />
             </div>
           ) : null}
 
           {streamFeedback || streamScore !== null ? (
-            <div className="chat-bubble coach stream-in" aria-live="polite" aria-atomic="false">
-              <strong>
-                {streamScore !== null ? `Score: ${streamScore}/10` : (
-                  <span className="score-loading">
+            <article
+              className="practice-feedback stream-in"
+              aria-live="polite"
+              aria-atomic="false"
+            >
+              <header>
+                {streamScore !== null ? (
+                  <span className="practice-feedback-score">
+                    <strong>{streamScore}</strong>
+                    <span>/ 10</span>
+                  </span>
+                ) : (
+                  <span className="practice-feedback-score loading">
                     <Loader2 size={14} className="spin" /> Scoring…
                   </span>
                 )}
-              </strong>
-              <p>{streamFeedback}{streamPhase === "feedback" ? <span className="cursor-blink" /> : null}</p>
+              </header>
+              <p>
+                {streamFeedback}
+                {streamPhase === "feedback" ? <span className="cursor-blink" /> : null}
+              </p>
 
               {streamPhase === "model_answer" || streamModelAnswer ? (
                 <details open className="stream-in">
@@ -453,56 +550,80 @@ export function InterviewPage() {
                   </p>
                 </details>
               ) : streamPhase === "feedback" ? (
-                <div className="model-answer-loading">
+                <div className="practice-loading subtle">
                   <Loader2 size={14} className="spin" />
                   <LoadingStatus
                     active
-                    messages={["Preparing model answer", "Tuning it to the role", "Making the example sharper"]}
+                    messages={[
+                      "Preparing model answer",
+                      "Tuning it to the role",
+                      "Making the example sharper",
+                    ]}
                     fallback="Preparing model answer"
                   />
                 </div>
               ) : null}
+            </article>
+          ) : null}
+
+          {showingFeedback ? (
+            <div className="practice-advance">
+              <button className="btn-primary" onClick={advance} disabled={isBusy}>
+                {isLastTurn ? (
+                  <>
+                    Finish round <ArrowRight size={14} />
+                  </>
+                ) : (
+                  <>
+                    Next question <ArrowRight size={14} />
+                  </>
+                )}
+              </button>
+              <small className="practice-advance-hint">
+                {isLastTurn
+                  ? "Wraps the round and shows your overall score."
+                  : "Take your time — the next question waits until you click."}
+              </small>
             </div>
           ) : null}
 
-          <div ref={chatBottomRef} />
-        </div>
-
-        {needsQuestion && !isBusy ? (
-          <button className="primary-button" onClick={handleAskNext}>
-            <Play size={18} />
-            Next question
-          </button>
-        ) : null}
-
-        {needsAnswer && !isBusy ? (
-          <form className="answer-composer" onSubmit={submitAnswer}>
-            <textarea
-              rows={5}
-              value={answer}
-              onChange={(event) => setAnswer(event.target.value)}
-              placeholder="Answer as you would in the interview…"
-            />
-            <button className="primary-button" type="submit">
-              Submit answer
+          {needsRetry && !isBusy ? (
+            <button className="btn-primary" onClick={() => submitAnswer()}>
+              <RotateCcw size={14} /> Retry evaluation
             </button>
-          </form>
-        ) : null}
+          ) : null}
 
-        {needsRetry && !isBusy ? (
-          <button className="primary-button" onClick={() => submitAnswer()}>
-            <RotateCcw size={18} />
-            Retry evaluation
-          </button>
-        ) : null}
+          {/* Past turns transcript — folded, quiet. Excludes the
+              current turn whenever it's being displayed in full above
+              (answering, retrying, or reading feedback). */}
+          {(() => {
+            const hideLatest = needsAnswer || needsRetry || showingFeedback;
+            const past = hideLatest ? detail.turns.slice(0, -1) : detail.turns;
+            if (past.length <= 0) return null;
+            return (
+              <details className="practice-transcript-fold">
+                <summary>Earlier in this round ({past.length})</summary>
+                <div className="practice-transcript">
+                  {past.map((t) => (
+                    <TurnView key={t.id} turn={t} />
+                  ))}
+                </div>
+              </details>
+            );
+          })()}
 
-        {detail.status !== "active" ? (
-          <div className="success-banner">
-            Session {detail.status}. {overallScore !== null ? `Overall score: ${overallScore.toFixed(1)}/10. ` : ""}
-            Review it in History.
-          </div>
-        ) : null}
-      </section>
+          <div ref={chatBottomRef} />
+
+          <footer className="practice-live-footer">
+            <ArmedDeleteButton
+              label="End session"
+              onConfirm={() => abandon(detail.id)}
+              className="btn-quiet"
+            />
+            <small className="practice-end-hint">You can still review it in History.</small>
+          </footer>
+        </>
+      )}
     </div>
   );
 }
@@ -518,32 +639,30 @@ function useWindowSize() {
     height: typeof window === "undefined" ? 200 : window.innerHeight,
   });
   const [size, setSize] = useState(getSize);
-
   useEffect(() => {
-    const handleResize = () => setSize(getSize());
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    const onResize = () => setSize(getSize());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
-
   return size;
 }
 
 function TurnView({ turn }: { turn: Turn }) {
   return (
-    <>
-      <div className="chat-bubble coach">
-        <strong>Q{turn.turn_index + 1}</strong>
-        <p>{turn.question}</p>
-      </div>
+    <div className="practice-past-turn">
+      <strong>Q{turn.turn_index + 1}</strong>
+      <p className="practice-past-q">{turn.question}</p>
       {turn.answer ? (
-        <div className="chat-bubble candidate">
-          <strong>You</strong>
+        <>
+          <span className="practice-past-label">You</span>
           <p>{turn.answer}</p>
-        </div>
+        </>
       ) : null}
       {turn.score !== null && turn.score !== undefined ? (
-        <div className="chat-bubble coach">
-          <strong>Score: {turn.score}/10</strong>
+        <>
+          <span className="practice-past-label">
+            {turn.score}/10
+          </span>
           {turn.feedback ? <p>{turn.feedback}</p> : null}
           {turn.model_answer ? (
             <details>
@@ -551,9 +670,8 @@ function TurnView({ turn }: { turn: Turn }) {
               <p>{turn.model_answer}</p>
             </details>
           ) : null}
-        </div>
+        </>
       ) : null}
-    </>
+    </div>
   );
 }
-

@@ -1,26 +1,29 @@
 import { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import { api, JobItem } from "../api";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
 
 /**
- * Persistent active-job indicator rendered in the AppShell topbar.
- * Shows `{role} @ {company}` derived from the JD's parsed_json, or
- * "No active job" when the user has no JDs yet.
+ * Active-job indicator, rendered in the sidebar footer.
+ * Click opens a switcher dropdown listing other JDs.
  *
- * Click opens a dropdown listing other JDs for quick switching. The
- * dropdown also exposes a "Clear" item that wipes the active selection.
+ * Job list is loaded eagerly (not just on open) so the chip knows
+ * whether opening a dropdown is even useful. With zero jobs, the chip
+ * becomes a direct "Go to Setup" affordance instead of opening an
+ * empty menu.
  */
 export function ActiveJobChip() {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const { activeJob, activeJobId, setActiveJobId, refresh } = useActiveJob();
 
   const [open, setOpen] = useState(false);
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
-  // Close on outside click.
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
@@ -33,9 +36,10 @@ export function ActiveJobChip() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  // Fetch JDs lazily — only when the user opens the dropdown.
+  // Eager load — we need the job count to decide chip behavior.
+  // Refetch when activeJobId changes so newly saved JDs appear in the menu.
   useEffect(() => {
-    if (!open || !token) return;
+    if (!token) return;
     let cancelled = false;
     api
       .listJobs(token)
@@ -43,12 +47,12 @@ export function ActiveJobChip() {
         if (!cancelled) setJobs(j);
       })
       .catch(() => {
-        /* swallow — chip stays usable; just no switcher */
+        /* swallow — chip stays usable */
       });
     return () => {
       cancelled = true;
     };
-  }, [open, token]);
+  }, [token, activeJobId]);
 
   const parsed = activeJob?.parsed_json as
     | { title?: string; company_name?: string }
@@ -58,61 +62,75 @@ export function ActiveJobChip() {
   const company = parsed?.company_name;
 
   const muted = !activeJobId;
-  const text = muted
-    ? "No active job"
-    : `${role || "(role TBD)"} @ ${company || "(company TBD)"}`;
+  const hasOtherJobs = jobs.some((j) => j.id !== activeJobId);
+  // Dropdown is only useful if there's something to switch to OR an
+  // active job to clear. Otherwise click should route to Setup.
+  const dropdownUseful = hasOtherJobs || !!activeJobId;
+
+  const onPillClick = () => {
+    if (dropdownUseful) {
+      setOpen((x) => !x);
+    } else {
+      navigate("/setup");
+    }
+  };
 
   return (
-    <div className="active-job-chip-wrap" ref={wrapRef}>
+    <div className="active-job" ref={wrapRef}>
       <button
         type="button"
-        className={`active-job-chip${muted ? " muted" : ""}`}
-        onClick={() => setOpen((x) => !x)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        title={muted ? undefined : "Switch active job"}
+        className={`active-job-pill${muted ? " muted" : ""}`}
+        onClick={onPillClick}
+        aria-haspopup={dropdownUseful ? "listbox" : undefined}
+        aria-expanded={dropdownUseful ? open : undefined}
+        title={
+          dropdownUseful
+            ? "Switch active job"
+            : "Add a job description to start"
+        }
       >
-        <span className="chip-label">Active job</span>
-        <span className="chip-value">{text}</span>
+        {muted ? (
+          <span className="active-job-value muted">
+            {jobs.length === 0 ? "Add a job →" : "No job selected"}
+          </span>
+        ) : (
+          <span className="active-job-value">
+            <span className="active-job-role">{role || "(role TBD)"}</span>
+            <span className="active-job-company">{company || "(company TBD)"}</span>
+          </span>
+        )}
+        {dropdownUseful ? (
+          <ChevronDown size={14} className={`active-job-caret${open ? " open" : ""}`} />
+        ) : null}
       </button>
 
-      {open ? (
+      {open && dropdownUseful ? (
         <div className="active-job-menu" role="listbox">
-          {jobs.length === 0 ? (
-            <div className="active-job-menu-empty">No saved JDs yet.</div>
-          ) : (
-            jobs.map((j) => {
-              // listJobs returns JobListItem, which doesn't carry parsed_json
-              // (the role+company we'd love to show). Use source_url or a
-              // "Pasted JD" fallback until the user selects it and the full
-              // detail loads via getJob in the context.
-              const fallback = j.source_url
-                ? j.source_url.slice(0, 60)
-                : "Pasted JD";
-              const date = new Date(j.created_at).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-              });
-              const isCurrent = j.id === activeJobId;
-              return (
-                <button
-                  key={j.id}
-                  type="button"
-                  role="option"
-                  aria-selected={isCurrent}
-                  className={`active-job-menu-item${isCurrent ? " current" : ""}`}
-                  onClick={() => {
-                    setActiveJobId(j.id);
-                    setOpen(false);
-                    void refresh();
-                  }}
-                >
-                  <span>{fallback}</span>
-                  <span className="active-job-menu-date">{date}</span>
-                </button>
-              );
-            })
-          )}
+          {jobs.map((j) => {
+            const fallback = j.source_url ? j.source_url.slice(0, 56) : "Pasted JD";
+            const date = new Date(j.created_at).toLocaleDateString(undefined, {
+              month: "short",
+              day: "numeric",
+            });
+            const isCurrent = j.id === activeJobId;
+            return (
+              <button
+                key={j.id}
+                type="button"
+                role="option"
+                aria-selected={isCurrent}
+                className={`active-job-menu-item${isCurrent ? " current" : ""}`}
+                onClick={() => {
+                  setActiveJobId(j.id);
+                  setOpen(false);
+                  void refresh();
+                }}
+              >
+                <span className="active-job-menu-item-label">{fallback}</span>
+                <span className="active-job-menu-item-date">{date}</span>
+              </button>
+            );
+          })}
           {activeJobId ? (
             <button
               type="button"

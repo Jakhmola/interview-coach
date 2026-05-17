@@ -206,7 +206,7 @@ export function DocMappingModal({
               <strong>Profile is still building.</strong>
               <span>
                 {" "}
-                Mapping needs your profile to be ready first — usually 15–30s after CV upload.
+                Mapping needs your profile to be ready first.
               </span>
             </div>
           </div>
