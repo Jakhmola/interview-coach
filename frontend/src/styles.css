@@ -1339,6 +1339,56 @@ summary {
 .workspace-header {
   gap: 16px;
 }
+
+/* InterviewPage: replacement for the bare-select job picker */
+.interview-active-job {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--paper-strong);
+}
+.interview-active-job strong {
+  font-size: 16px;
+  color: var(--ink);
+}
+.interview-active-job small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.interview-active-job .ghost-button.small {
+  align-self: flex-start;
+  padding: 4px 10px;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+/* Setup help text below the prep buttons */
+.setup-help-text {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* HistoryPage: group sessions by job */
+.history-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+.history-group-header {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+.history-group {
+  border-left: 2px solid rgba(119, 197, 147, 0.3);
+  padding-left: 14px;
+}
 @media (max-width: 720px) {
   .active-job-chip .chip-label {
     display: none;

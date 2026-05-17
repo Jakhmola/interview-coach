@@ -33,6 +33,8 @@ export type AuthResponse = {
   user: User;
 };
 
+export type EmbeddingStatus = "ready" | "pending" | "failed" | "n_a";
+
 export type DocumentItem = {
   id: string;
   user_id: string;
@@ -43,6 +45,7 @@ export type DocumentItem = {
   char_count: number;
   created_at: string;
   project_title?: string | null;
+  embedding_status?: EmbeddingStatus;
 };
 
 export type DocumentDetail = DocumentItem & {

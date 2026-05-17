@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -11,23 +11,29 @@ import {
 import { useOutletContext } from "react-router-dom";
 
 import {
-  ApiError,
   DocumentItem,
+  EmbeddingStatus,
   JobItem,
   PrepStatus,
   SseFrame,
   api,
   prepareSessionStream,
 } from "../api";
+import { ArmedDeleteButton } from "../components/ArmedDeleteButton";
 import { DocMappingModal } from "../components/DocMappingModal";
 import { LoadingStatus } from "../components/LoadingStatus";
-import { EmptyState, StatusPill, formatDate } from "../components/ui";
+import { EmptyState, ErrorBanner, StatusPill, formatDate } from "../components/ui";
+import { codeFrom } from "../errors";
+import { useStreamAbort } from "../hooks/useStreamAbort";
+import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
 
+// User-facing names for the prep nodes — internal names (profile_builder,
+// job_analyzer, company_researcher) must never appear in the UI.
 const nodeLabels: Record<string, string> = {
-  profile_builder: "Profile builder",
-  job_analyzer: "Job analyzer",
-  company_researcher: "Company research",
+  profile_builder: "Reading your CV",
+  job_analyzer: "Analyzing the JD",
+  company_researcher: "Researching the company",
 };
 
 const nodeLoadingMessages: Record<string, string[]> = {
@@ -54,8 +60,13 @@ function asText(value: unknown): string {
 export function SetupPage() {
   const { token } = useAuth();
   const { refreshReadiness, isSetupComplete } = useOutletContext<SetupOutletContext>();
+  const { activeJobId, setActiveJobId, refresh: refreshActiveJob } = useActiveJob();
+  const prepAbort = useStreamAbort();
   const [docs, setDocs] = useState<DocumentItem[]>([]);
   const [jobs, setJobs] = useState<JobItem[]>([]);
+  // selectedJobId mirrors the active-job context; the SetupPage is just a
+  // view-of-context here. Kept as page-local state so the radio of JD cards
+  // stays responsive even while context is mid-refresh.
   const [selectedJobId, setSelectedJobId] = useState<string>("");
   const [status, setStatus] = useState<PrepStatus | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -64,7 +75,12 @@ export function SetupPage() {
   const [isPreparing, setIsPreparing] = useState(false);
   const [nodeState, setNodeState] = useState<Record<string, string>>({});
   const [mappingDocId, setMappingDocId] = useState<string | null>(null);
+  // F1 fix: doc id queued for mapping but waiting on profile_ready.
+  const [pendingMappingDocId, setPendingMappingDocId] = useState<string | null>(null);
   const [setupStep, setSetupStep] = useState(0);
+  // Poll prepare/status when profile_ready=false (e.g., right after CV
+  // upload) so the wizard advances without the user clicking anything.
+  const profilePollRef = useRef<number | null>(null);
 
   const selectedJob = useMemo(
     () => jobs.find((job) => job.id === selectedJobId) ?? null,
@@ -83,9 +99,11 @@ export function SetupPage() {
       const [nextDocs, nextJobs] = await Promise.all([api.listDocuments(token), api.listJobs(token)]);
       setDocs(nextDocs);
       setJobs(nextJobs);
-      setSelectedJobId((current) => current || nextJobs[0]?.id || "");
+      // Seed selectedJobId from active-job context first; fall back to most
+      // recent JD if no active job yet.
+      setSelectedJobId((current) => current || activeJobId || nextJobs[0]?.id || "");
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not load setup data.");
+      setError(codeFrom(err));
     } finally {
       setIsLoading(false);
     }
@@ -93,7 +111,15 @@ export function SetupPage() {
 
   useEffect(() => {
     void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  // Keep page selection in sync if the chip switches active job.
+  useEffect(() => {
+    if (activeJobId && activeJobId !== selectedJobId) {
+      setSelectedJobId(activeJobId);
+    }
+  }, [activeJobId, selectedJobId]);
 
   useEffect(() => {
     if (!token || !selectedJobId) {
@@ -112,6 +138,63 @@ export function SetupPage() {
     }
   }, [hasCv, isLoading, setupStep]);
 
+  // F1/F2 — Profile-readiness polling.
+  // After CV upload, profile_builder runs in the background. We poll
+  // prepare/status every 2s (capped) while it's false. Once it flips
+  // true, any queued project_doc mapping auto-opens its modal.
+  useEffect(() => {
+    if (!token || !selectedJobId) return;
+    if (status?.profile_ready) {
+      if (profilePollRef.current !== null) {
+        window.clearInterval(profilePollRef.current);
+        profilePollRef.current = null;
+      }
+      // Profile is ready — promote any queued mapping to the modal.
+      if (pendingMappingDocId) {
+        setMappingDocId(pendingMappingDocId);
+        setPendingMappingDocId(null);
+      }
+      return;
+    }
+    if (profilePollRef.current !== null) return;
+    let iterations = 0;
+    const MAX_ITERATIONS = 40; // ~80s
+    profilePollRef.current = window.setInterval(() => {
+      iterations += 1;
+      if (iterations >= MAX_ITERATIONS) {
+        if (profilePollRef.current !== null) {
+          window.clearInterval(profilePollRef.current);
+          profilePollRef.current = null;
+        }
+        return;
+      }
+      api
+        .prepStatus(token, selectedJobId)
+        .then(setStatus)
+        .catch(() => {
+          // best-effort
+        });
+    }, 2000);
+    return () => {
+      if (profilePollRef.current !== null) {
+        window.clearInterval(profilePollRef.current);
+        profilePollRef.current = null;
+      }
+    };
+  }, [token, selectedJobId, status?.profile_ready, pendingMappingDocId]);
+
+  const rebuildProfile = async () => {
+    if (!token) return;
+    const cv = docs.find((d) => d.kind === "cv");
+    if (!cv) return;
+    try {
+      await api.rebuildProfile(token, cv.id);
+      setMessage("Rebuilding your profile…");
+    } catch (err) {
+      setError(codeFrom(err));
+    }
+  };
+
   const upload = async (event: ChangeEvent<HTMLInputElement>, kind: DocumentItem["kind"]) => {
     if (!token || !event.target.files?.[0]) {
       return;
@@ -120,16 +203,26 @@ export function SetupPage() {
     setError(null);
     try {
       const doc = await api.uploadDocument(token, kind, event.target.files[0]);
-      setMessage(`Uploaded ${doc.filename}.`);
+      const verb = kind === "cv" ? "Got it — building your profile." : `Uploaded ${doc.filename}.`;
+      setMessage(verb);
       await load();
       if (kind === "cv") {
         setSetupStep(1);
+        // CV upload also auto-fires the profile_builder background task on
+        // the backend (Phase 18). The polling effect picks it up.
       }
       if (kind === "project_doc") {
-        setMappingDocId(doc.id);
+        // F1 fix: gate the mapping modal on profile_ready. If the profile
+        // isn't built yet, queue the doc id and let the polling effect
+        // promote it once profile_ready flips true.
+        if (status?.profile_ready) {
+          setMappingDocId(doc.id);
+        } else {
+          setPendingMappingDocId(doc.id);
+        }
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Upload failed.");
+      setError(codeFrom(err));
     } finally {
       event.target.value = "";
     }
@@ -143,7 +236,7 @@ export function SetupPage() {
     const form = new FormData(event.currentTarget);
     const text = String(form.get("jd_text") ?? "").trim();
     if (!text) {
-      setError("Paste a job description first.");
+      setError("empty_answer"); // closest existing translation
       return;
     }
     try {
@@ -151,10 +244,11 @@ export function SetupPage() {
       setMessage("Saved job description.");
       await load();
       setSelectedJobId(job.id);
+      setActiveJobId(job.id);
       setSetupStep(3);
       event.currentTarget.reset();
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not save job.");
+      setError(codeFrom(err));
     }
   };
 
@@ -166,7 +260,7 @@ export function SetupPage() {
     const form = new FormData(event.currentTarget);
     const url = String(form.get("jd_url") ?? "").trim();
     if (!url) {
-      setError("Enter a job URL first.");
+      setError("empty_answer");
       return;
     }
     try {
@@ -174,10 +268,11 @@ export function SetupPage() {
       setMessage("Fetched and saved job description.");
       await load();
       setSelectedJobId(job.id);
+      setActiveJobId(job.id);
       setSetupStep(3);
       event.currentTarget.reset();
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not fetch job.");
+      setError(codeFrom(err));
     }
   };
 
@@ -185,21 +280,34 @@ export function SetupPage() {
     if (!token) {
       return;
     }
-    await api.deleteDocument(token, id);
-    await load();
-    await refreshReadiness();
+    setError(null);
+    try {
+      await api.deleteDocument(token, id);
+      await load();
+      await refreshReadiness();
+    } catch (err) {
+      setError(codeFrom(err));
+    }
   };
 
   const deleteJob = async (id: string) => {
     if (!token) {
       return;
     }
-    await api.deleteJob(token, id);
-    setSelectedJobId("");
-    setStatus(null);
-    setSetupStep(2);
-    await load();
-    await refreshReadiness();
+    setError(null);
+    try {
+      await api.deleteJob(token, id);
+      setSelectedJobId("");
+      if (activeJobId === id) {
+        setActiveJobId(null);
+      }
+      setStatus(null);
+      setSetupStep(2);
+      await load();
+      await refreshReadiness();
+    } catch (err) {
+      setError(codeFrom(err));
+    }
   };
 
   const runPrep = async (forceRefresh: boolean) => {
@@ -214,31 +322,41 @@ export function SetupPage() {
     });
     setError(null);
     setMessage(null);
+    const signal = prepAbort.fresh();
     try {
-      await prepareSessionStream(token, selectedJobId, forceRefresh, (frame: SseFrame) => {
-        const data = frame.data as { node?: string; reason?: string; code?: string; detail?: string };
-        if (frame.event === "node_started" && data.node) {
-          setNodeState((current) => ({ ...current, [data.node!]: "running" }));
-        }
-        if (frame.event === "node_done" && data.node) {
-          setNodeState((current) => ({ ...current, [data.node!]: "done" }));
-        }
-        if (frame.event === "node_skipped" && data.node) {
-          setNodeState((current) => ({ ...current, [data.node!]: `cached ${data.reason ?? ""}` }));
-        }
-        if (frame.event === "error") {
-          setError(data.detail || data.code || "Preparation failed.");
-        }
-        if (frame.event === "done") {
-          setMessage("Ready for interview.");
-        }
-      });
+      await prepareSessionStream(
+        token,
+        selectedJobId,
+        forceRefresh,
+        (frame: SseFrame) => {
+          const data = frame.data as { node?: string; reason?: string; code?: string; detail?: string };
+          if (frame.event === "node_started" && data.node) {
+            setNodeState((current) => ({ ...current, [data.node!]: "running" }));
+          }
+          if (frame.event === "node_done" && data.node) {
+            setNodeState((current) => ({ ...current, [data.node!]: "done" }));
+          }
+          if (frame.event === "node_skipped" && data.node) {
+            setNodeState((current) => ({ ...current, [data.node!]: `cached ${data.reason ?? ""}` }));
+          }
+          if (frame.event === "error") {
+            setError(data.code || data.detail || "stream_interrupted");
+          }
+          if (frame.event === "done") {
+            setMessage("Ready for interview.");
+          }
+        },
+        signal,
+      );
       await load();
       const nextStatus = await api.prepStatus(token, selectedJobId);
       setStatus(nextStatus);
       await refreshReadiness();
+      // Pull a fresh JobDetail so the active-job chip in the header flips
+      // from "(role TBD)" → "{role} @ {company}" once analysis lands.
+      await refreshActiveJob();
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Preparation failed.");
+      setError(codeFrom(err));
     } finally {
       setIsPreparing(false);
     }
@@ -296,7 +414,7 @@ export function SetupPage() {
         </div>
         {isLoading ? <p>Loading setup...</p> : null}
         {message ? <div className="success-banner">{message}</div> : null}
-        {error ? <div className="error-banner">{error}</div> : null}
+        <ErrorBanner code={error} />
 
         {setupStep === 0 ? (
           <div className="step-pane">
@@ -332,29 +450,34 @@ export function SetupPage() {
                 onChange={(event) => upload(event, "project_doc")}
               />
             </label>
-            <div className="coming-soon-grid">
-              <label>
-                GitHub URL
-                <span className="input-with-icon disabled-field">
-                  <LinkIcon size={17} />
-                  <input type="url" placeholder="Coming later" disabled />
-                </span>
-              </label>
-              <label>
-                Portfolio URL
-                <span className="input-with-icon disabled-field">
-                  <LinkIcon size={17} />
-                  <input type="url" placeholder="Coming later" disabled />
-                </span>
-              </label>
-            </div>
+            {/* F1: if a project_doc is queued for mapping but profile isn't
+                built yet, surface a deferred-mapping card so the user
+                understands why the mapping modal hasn't opened. */}
+            {pendingMappingDocId && !status?.profile_ready ? (
+              <div className="deferred-mapping-card">
+                <RefreshCw size={16} className="spin" />
+                <div>
+                  <strong>Profile is still building.</strong>
+                  <span>
+                    {" "}
+                    Mapping will open as soon as it's ready — usually 15–30s after CV upload.
+                  </span>
+                </div>
+              </div>
+            ) : null}
             {technicalDocs.length === 0 ? (
               <EmptyState title="Optional for now" body="Add supporting docs if you have them, or skip to the job." />
             ) : (
               <DocumentList
                 docs={technicalDocs}
                 onDelete={deleteDocument}
-                onMap={(id) => setMappingDocId(id)}
+                onMap={(id) => {
+                  if (status?.profile_ready) {
+                    setMappingDocId(id);
+                  } else {
+                    setPendingMappingDocId(id);
+                  }
+                }}
               />
             )}
             <div className="wizard-actions">
@@ -403,7 +526,10 @@ export function SetupPage() {
                   <button
                     className={`job-option ${selectedJobId === job.id ? "selected" : ""}`}
                     key={job.id}
-                    onClick={() => setSelectedJobId(job.id)}
+                    onClick={() => {
+                      setSelectedJobId(job.id);
+                      setActiveJobId(job.id);
+                    }}
                   >
                     <span>{job.source_url || "Pasted job description"}</span>
                     <small>
@@ -443,15 +569,37 @@ export function SetupPage() {
                     <CheckCircle2 size={18} />
                     {isPreparing ? "Preparing..." : "Process setup"}
                   </button>
-                  <button className="secondary-button" onClick={() => runPrep(true)} disabled={isPreparing}>
+                  <button
+                    className="secondary-button"
+                    onClick={() => runPrep(true)}
+                    disabled={isPreparing}
+                    title="Re-runs only the company researcher; keeps your profile and JD analysis as-is."
+                  >
                     <RefreshCw size={18} />
-                    Re-research
+                    Refresh company info
                   </button>
-                  <button className="ghost-button danger" onClick={() => deleteJob(selectedJob.id)}>
-                    <Trash2 size={17} />
-                    Delete JD
-                  </button>
+                  {hasCv && !status?.profile_ready ? (
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={rebuildProfile}
+                      title="Re-run the profile builder from your current CV."
+                    >
+                      Rebuild profile
+                    </button>
+                  ) : null}
+                  <ArmedDeleteButton
+                    label="Delete JD"
+                    icon={<Trash2 size={17} />}
+                    onConfirm={() => deleteJob(selectedJob.id)}
+                  />
                 </div>
+                <small className="delete-caption">
+                  Deleting a JD also drops its company snapshot. End any active sessions first.
+                </small>
+                <p className="setup-help-text">
+                  Reads your CV, analyzes the JD, researches the company. Takes ~20–40s.
+                </p>
                 {Object.keys(nodeState).length ? (
                   <div className="node-list">
                     {Object.entries(nodeLabels).map(([key, label]) => (
@@ -487,6 +635,24 @@ export function SetupPage() {
   );
 }
 
+function embeddingPillProps(status: EmbeddingStatus | undefined): {
+  tone: "good" | "warn" | "bad" | "neutral";
+  label: string;
+} | null {
+  switch (status) {
+    case "ready":
+      return { tone: "good", label: "Embeddings ready" };
+    case "pending":
+      return { tone: "warn", label: "Embedding…" };
+    case "failed":
+      return { tone: "bad", label: "Embedding failed" };
+    case "n_a":
+      return { tone: "neutral", label: "Not yet mapped" };
+    default:
+      return null;
+  }
+}
+
 function DocumentList({
   docs,
   onDelete,
@@ -498,27 +664,50 @@ function DocumentList({
 }) {
   return (
     <div className="list">
-      {docs.map((doc) => (
-        <article className="list-item" key={doc.id}>
-          <div>
-            <strong>{doc.filename}</strong>
-            <span>
-              {doc.kind === "cv" ? "CV" : "Technical doc"}
-              {doc.project_title ? ` · "${doc.project_title}"` : ""} · {doc.char_count.toLocaleString()} chars
-            </span>
-          </div>
-          <div className="list-actions">
-            {doc.kind === "project_doc" && onMap ? (
-              <button className="ghost-button" onClick={() => onMap(doc.id)} title="Re-map to profile">
-                Re-map
-              </button>
-            ) : null}
-            <button className="icon-button danger" onClick={() => onDelete(doc.id)} title="Delete">
-              <Trash2 size={17} />
-            </button>
-          </div>
-        </article>
-      ))}
+      {docs.map((doc) => {
+        const pill = embeddingPillProps(doc.embedding_status);
+        const deleteLabel = doc.kind === "cv" ? "Delete CV" : "Delete";
+        const deleteCaption =
+          doc.kind === "cv"
+            ? "Clears your profile; you'll need to re-upload to interview."
+            : "Removes its mapping and embeddings.";
+        return (
+          <article className="list-item" key={doc.id}>
+            <div>
+              <strong>{doc.filename}</strong>
+              <span>
+                {doc.kind === "cv" ? "CV" : "Technical doc"}
+                {doc.project_title ? ` · "${doc.project_title}"` : ""} ·{" "}
+                {doc.char_count.toLocaleString()} chars
+                {pill ? (
+                  <>
+                    {" "}
+                    · <StatusPill tone={pill.tone}>{pill.label}</StatusPill>
+                  </>
+                ) : null}
+              </span>
+              <small className="delete-caption">{deleteCaption}</small>
+            </div>
+            <div className="list-actions">
+              {doc.kind === "project_doc" && onMap ? (
+                <button
+                  className="ghost-button"
+                  onClick={() => onMap(doc.id)}
+                  title="Re-map to profile"
+                >
+                  Re-map
+                </button>
+              ) : null}
+              <ArmedDeleteButton
+                label={deleteLabel}
+                icon={<Trash2 size={17} />}
+                onConfirm={() => onDelete(doc.id)}
+                className="icon-button danger"
+              />
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }

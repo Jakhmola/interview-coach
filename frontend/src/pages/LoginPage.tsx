@@ -2,7 +2,8 @@ import { FormEvent, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { ArrowRight, LockKeyhole, Mail, Sparkles } from "lucide-react";
 
-import { ApiError } from "../api";
+import { ErrorBanner } from "../components/ui";
+import { codeFrom } from "../errors";
 import { useAuth } from "../state/auth";
 
 type Mode = "login" | "register";
@@ -30,7 +31,7 @@ export function LoginPage() {
         await register(email, password);
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not sign in.");
+      setError(codeFrom(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -88,7 +89,7 @@ export function LoginPage() {
               />
             </span>
           </label>
-          {error ? <div className="error-banner">{error}</div> : null}
+          <ErrorBanner code={error} />
           <button className="primary-button" type="submit" disabled={isSubmitting}>
             {isSubmitting ? "Working..." : mode === "login" ? "Log in" : "Create account"}
             <ArrowRight size={18} />

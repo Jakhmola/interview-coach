@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { X } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 
 import {
   ApiError,
@@ -8,6 +8,22 @@ import {
   MappingSuggestion,
   api,
 } from "../api";
+import { codeFrom } from "../errors";
+import { ErrorBanner } from "./ui";
+
+// Backend returns these as the 409 detail when profile_builder hasn't run.
+const PROFILE_NOT_READY_DETAILS = new Set([
+  "upload your CV and build a profile before adding project docs",
+  "apply_mapping needs a profile; upload your CV first",
+  "No profile yet",
+]);
+
+function isProfileNotReady(err: unknown): boolean {
+  if (err instanceof ApiError && err.status === 409) {
+    return PROFILE_NOT_READY_DETAILS.has(err.detail);
+  }
+  return false;
+}
 
 type Selection =
   | { kind: "highlight"; experienceIdx: number; highlightIdx: number }
@@ -68,11 +84,18 @@ export function DocMappingModal({
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // F1 fix: when the backend returns 409 ProfileMissing, we show a
+  // recoverable panel instead of a dead-end error. Caller (Setup) also
+  // polls prepare/status and shouldn't even open us pre-profile, but if
+  // the user navigated in via a stale state we still degrade gracefully.
+  const [profileNotReady, setProfileNotReady] = useState(false);
+  const [loadKey, setLoadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
     setError(null);
+    setProfileNotReady(false);
     api
       .getMappingSuggestion(token, documentId)
       .then((data) => {
@@ -93,7 +116,11 @@ export function DocMappingModal({
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(err instanceof ApiError ? err.detail : "Could not load mapping suggestion.");
+        if (isProfileNotReady(err)) {
+          setProfileNotReady(true);
+        } else {
+          setError(codeFrom(err));
+        }
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -101,7 +128,7 @@ export function DocMappingModal({
     return () => {
       cancelled = true;
     };
-  }, [token, documentId]);
+  }, [token, documentId, loadKey]);
 
   const topSuggestionKeys = useMemo(() => {
     if (!suggestion) return new Set<string>();
@@ -141,10 +168,19 @@ export function DocMappingModal({
       });
       onApplied();
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not save mapping.");
+      if (isProfileNotReady(err)) {
+        setProfileNotReady(true);
+        setSuggestion(null);
+      } else {
+        setError(codeFrom(err));
+      }
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const retry = () => {
+    setLoadKey((k) => k + 1);
   };
 
   return (
@@ -161,7 +197,20 @@ export function DocMappingModal({
         </header>
 
         {isLoading ? <p>Reading the doc and matching to your profile...</p> : null}
-        {error ? <div className="error-banner">{error}</div> : null}
+        <ErrorBanner code={error} />
+
+        {profileNotReady ? (
+          <div className="deferred-mapping-card" style={{ marginTop: 12 }}>
+            <RefreshCw size={16} className="spin" />
+            <div>
+              <strong>Profile is still building.</strong>
+              <span>
+                {" "}
+                Mapping needs your profile to be ready first — usually 15–30s after CV upload.
+              </span>
+            </div>
+          </div>
+        ) : null}
 
         {suggestion ? (
           <div className="modal-body">
@@ -311,13 +360,20 @@ export function DocMappingModal({
           <button className="ghost-button" onClick={onClose} disabled={isSubmitting}>
             Cancel
           </button>
-          <button
-            className="primary-button"
-            onClick={apply}
-            disabled={isSubmitting || isLoading || selections.size === 0}
-          >
-            {isSubmitting ? "Saving..." : `Save ${selections.size || ""} mapping${selections.size === 1 ? "" : "s"}`.trim()}
-          </button>
+          {profileNotReady ? (
+            <button className="primary-button" onClick={retry} disabled={isLoading}>
+              <RefreshCw size={16} />
+              Retry
+            </button>
+          ) : (
+            <button
+              className="primary-button"
+              onClick={apply}
+              disabled={isSubmitting || isLoading || selections.size === 0}
+            >
+              {isSubmitting ? "Saving..." : `Save ${selections.size || ""} mapping${selections.size === 1 ? "" : "s"}`.trim()}
+            </button>
+          )}
         </footer>
       </div>
     </div>

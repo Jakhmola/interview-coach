@@ -3,7 +3,6 @@ import { Loader2, Play, RotateCcw, Square } from "lucide-react";
 import Confetti from "react-confetti";
 
 import {
-  ApiError,
   JobItem,
   RoundType,
   Session,
@@ -14,8 +13,12 @@ import {
   api,
   nextQuestionStream,
 } from "../api";
+import { ArmedDeleteButton } from "../components/ArmedDeleteButton";
 import { LoadingStatus } from "../components/LoadingStatus";
-import { EmptyState, StatusPill, formatDate, shortId } from "../components/ui";
+import { EmptyState, ErrorBanner, StatusPill, formatDate, shortId } from "../components/ui";
+import { codeFrom } from "../errors";
+import { useStreamAbort } from "../hooks/useStreamAbort";
+import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
 
 const roundLabels: Record<RoundType, string> = {
@@ -25,6 +28,9 @@ const roundLabels: Record<RoundType, string> = {
 
 export function InterviewPage() {
   const { token } = useAuth();
+  const { activeJobId, activeJob, setActiveJobId } = useActiveJob();
+  const questionAbort = useStreamAbort();
+  const answerAbort = useStreamAbort();
   const windowSize = useWindowSize();
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -64,7 +70,9 @@ export function InterviewPage() {
     const [nextJobs, nextSessions] = await Promise.all([api.listJobs(token), api.listSessions(token)]);
     setJobs(nextJobs);
     setSessions(nextSessions);
-    setJobId((current) => current || nextJobs[0]?.id || "");
+    // Default jobId to the active job from context; fall back to most-recent
+    // JD if none. Keeps the round-creation form in sync with the topbar chip.
+    setJobId((current) => current || activeJobId || nextJobs[0]?.id || "");
     if (activeId) {
       setDetail(await api.getSession(token, activeId));
     }
@@ -72,9 +80,17 @@ export function InterviewPage() {
 
   useEffect(() => {
     refresh().catch((err: unknown) => {
-      setError(err instanceof ApiError ? err.detail : "Could not load interview data.");
+      setError(codeFrom(err));
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeId]);
+
+  // Keep the form's jobId in sync if the chip flips.
+  useEffect(() => {
+    if (activeJobId && activeJobId !== jobId) {
+      setJobId(activeJobId);
+    }
+  }, [activeJobId, jobId]);
 
   // Scroll to bottom whenever chat content changes
   useEffect(() => {
@@ -103,19 +119,25 @@ export function InterviewPage() {
     setIsBusy(true);
     setStreamQuestion("");
     setError(null);
+    const signal = questionAbort.fresh();
     try {
-      await nextQuestionStream(sessionToken, sessionId, (frame: SseFrame) => {
-        if (frame.event === "token" && typeof frame.data === "string") {
-          setStreamQuestion((current) => current + frame.data);
-        }
-        if (frame.event === "error") {
-          setError(extractStreamError(frame.data));
-        }
-      });
+      await nextQuestionStream(
+        sessionToken,
+        sessionId,
+        (frame: SseFrame) => {
+          if (frame.event === "token" && typeof frame.data === "string") {
+            setStreamQuestion((current) => current + frame.data);
+          }
+          if (frame.event === "error") {
+            setError(codeFrom(frame.data));
+          }
+        },
+        signal,
+      );
       setStreamQuestion("");
       setDetail(await api.getSession(sessionToken, sessionId));
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Question generation failed.");
+      setError(codeFrom(err));
     } finally {
       setIsBusy(false);
     }
@@ -130,16 +152,22 @@ export function InterviewPage() {
       setActiveId(session.id);
       setDetail(await api.getSession(token, session.id));
       await refresh();
-      // Auto-ask the first question immediately
+      // Auto-ask the first question immediately.
       await askNext(session.id, token);
     } catch (err) {
-      setError(err instanceof ApiError ? prereqHint(err.detail) : "Could not start the interview.");
+      setError(codeFrom(err));
     }
   };
 
   const abandon = async (id: string) => {
     if (!token) return;
-    await api.abandonSession(token, id);
+    try {
+      await api.abandonSession(token, id);
+    } catch (err) {
+      // Multi-tab: another tab may have already abandoned this session.
+      // Surface the translated message, but still reset our local view.
+      setError(codeFrom(err));
+    }
     setActiveId(null);
     setDetail(null);
     await refresh();
@@ -171,27 +199,34 @@ export function InterviewPage() {
     setStreamScore(null);
     setStreamPhase("evaluating");
     setError(null);
+    const signal = answerAbort.fresh();
     try {
-      await answerStream(token, detail.id, text, (frame: SseFrame) => {
-        if (frame.event === "score" && typeof frame.data === "object" && frame.data !== null) {
-          setStreamScore(Number((frame.data as { score?: number }).score));
-          setStreamPhase("feedback");
-        }
-        if (frame.event === "feedback_token" && typeof frame.data === "string") {
-          setStreamPhase("feedback");
-          setStreamFeedback((current) => current + frame.data);
-        }
-        if (frame.event === "model_answer_token" && typeof frame.data === "string") {
-          setStreamPhase("model_answer");
-          setStreamModelAnswer((current) => current + frame.data);
-        }
-        if (frame.event === "model_answer_error") {
-          setStreamModelAnswer("Model answer unavailable for this turn.");
-        }
-        if (frame.event === "error") {
-          setError(extractStreamError(frame.data));
-        }
-      });
+      await answerStream(
+        token,
+        detail.id,
+        text,
+        (frame: SseFrame) => {
+          if (frame.event === "score" && typeof frame.data === "object" && frame.data !== null) {
+            setStreamScore(Number((frame.data as { score?: number }).score));
+            setStreamPhase("feedback");
+          }
+          if (frame.event === "feedback_token" && typeof frame.data === "string") {
+            setStreamPhase("feedback");
+            setStreamFeedback((current) => current + frame.data);
+          }
+          if (frame.event === "model_answer_token" && typeof frame.data === "string") {
+            setStreamPhase("model_answer");
+            setStreamModelAnswer((current) => current + frame.data);
+          }
+          if (frame.event === "model_answer_error") {
+            setStreamModelAnswer("Model answer unavailable for this turn.");
+          }
+          if (frame.event === "error") {
+            setError(codeFrom(frame.data));
+          }
+        },
+        signal,
+      );
       setDetail(await api.getSession(token, detail.id));
       setPendingAnswer(null);
       setStreamFeedback("");
@@ -199,7 +234,7 @@ export function InterviewPage() {
       setStreamScore(null);
       setStreamPhase("idle");
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Evaluation failed.");
+      setError(codeFrom(err));
       setPendingAnswer(null);
       setStreamPhase("idle");
     } finally {
@@ -213,6 +248,17 @@ export function InterviewPage() {
   };
 
   if (!activeId || !detail) {
+    const parsed = activeJob?.parsed_json as
+      | { title?: string; company_name?: string }
+      | null
+      | undefined;
+    const role = parsed?.title;
+    const company = parsed?.company_name;
+    const activeJobInList = jobs.find((j) => j.id === jobId);
+    const jobChoiceLabel = activeJob
+      ? `${role || "(role TBD)"} @ ${company || "(company TBD)"}`
+      : activeJobInList?.source_url || "Pasted JD";
+
     return (
       <div className="page-grid">
         <section className="panel">
@@ -222,21 +268,25 @@ export function InterviewPage() {
               <h2>New interview round</h2>
             </div>
           </div>
-          {error ? <div className="error-banner">{error}</div> : null}
+          <ErrorBanner code={error} />
           {jobs.length === 0 ? (
             <EmptyState title="No job yet" body="Save and prepare a job on the Setup page first." />
           ) : (
             <form className="form-stack" onSubmit={startSession}>
-              <label>
-                Job description
-                <select value={jobId} onChange={(event) => setJobId(event.target.value)}>
-                  {jobs.map((job) => (
-                    <option value={job.id} key={job.id}>
-                      {(job.source_url || "Pasted JD").slice(0, 90)}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <div className="interview-active-job">
+                <span className="eyebrow">Interviewing for</span>
+                <strong>{jobChoiceLabel}</strong>
+                <small>Use the chip in the header to switch active job.</small>
+                {jobs.length > 1 && jobId !== activeJobId ? (
+                  <button
+                    type="button"
+                    className="ghost-button small"
+                    onClick={() => setActiveJobId(jobId)}
+                  >
+                    Make this the active job
+                  </button>
+                ) : null}
+              </div>
               <label>
                 Round type
                 <select value={roundType} onChange={(event) => setRoundType(event.target.value as RoundType)}>
@@ -257,7 +307,7 @@ export function InterviewPage() {
                   onChange={(event) => setNQuestions(Number(event.target.value))}
                 />
               </label>
-              <button className="primary-button" type="submit" disabled={isBusy}>
+              <button className="primary-button" type="submit" disabled={isBusy || !jobId}>
                 {isBusy ? <Loader2 size={18} className="spin" /> : <Play size={18} />}
                 {isBusy ? "Preparing your first question..." : "Start interview"}
               </button>
@@ -325,12 +375,15 @@ export function InterviewPage() {
           <span>
             {detail.turns.length} / {detail.n_questions} questions
           </span>
-          <button className="ghost-button danger" onClick={() => abandon(detail.id)}>
-            <Square size={15} />
-            End
-          </button>
+          <ArmedDeleteButton
+            label="End session"
+            icon={<Square size={15} />}
+            onConfirm={() => abandon(detail.id)}
+            className="ghost-button danger small"
+          />
         </div>
-        {error ? <div className="error-banner">{error}</div> : null}
+        <small className="delete-caption">You can still view it in History.</small>
+        <ErrorBanner code={error} />
         <div className="chat-stack">
           {detail.turns.map((turn) => (
             <TurnView key={turn.id} turn={turn} />
@@ -338,7 +391,7 @@ export function InterviewPage() {
 
           {/* Streaming: question being generated */}
           {streamQuestion ? (
-            <div className="chat-bubble coach stream-in">
+            <div className="chat-bubble coach stream-in" aria-live="polite" aria-atomic="false">
               <strong>Q{nextQuestionIndex}</strong>
               <p>{streamQuestion}<span className="cursor-blink" /></p>
             </div>
@@ -381,7 +434,7 @@ export function InterviewPage() {
           ) : null}
 
           {streamFeedback || streamScore !== null ? (
-            <div className="chat-bubble coach stream-in">
+            <div className="chat-bubble coach stream-in" aria-live="polite" aria-atomic="false">
               <strong>
                 {streamScore !== null ? `Score: ${streamScore}/10` : (
                   <span className="score-loading">
@@ -504,19 +557,3 @@ function TurnView({ turn }: { turn: Turn }) {
   );
 }
 
-function prereqHint(detail: string) {
-  const hints: Record<string, string> = {
-    profile_missing: "No profile yet. Go to Setup and prepare this job.",
-    job_not_analyzed: "This JD has not been analyzed yet. Go to Setup and prepare it.",
-    company_snapshot_missing: "Company research is missing. Go to Setup and prepare this job.",
-  };
-  return hints[detail] ?? detail;
-}
-
-function extractStreamError(data: unknown) {
-  if (typeof data === "object" && data !== null) {
-    const payload = data as { detail?: unknown; code?: unknown };
-    return String(payload.detail || payload.code || "Stream failed.");
-  }
-  return "Stream failed.";
-}

@@ -26,6 +26,14 @@ export const ERRORS: Record<string, ErrorEntry> = {
     message: "Your profile is still being built.",
     hint: "This usually takes 15–30s after CV upload.",
   },
+  "upload your CV and build a profile before adding project docs": {
+    message: "Your profile is still being built.",
+    hint: "This usually takes 15–30s after CV upload — the mapping will open as soon as it's ready.",
+  },
+  "apply_mapping needs a profile; upload your CV first": {
+    message: "Your profile is still being built.",
+    hint: "Wait a moment, then try saving the mapping again.",
+  },
   job_not_analyzed: {
     message: "This JD hasn't been analyzed yet.",
     hint: "Open Setup and click 'Process setup' for this JD.",
