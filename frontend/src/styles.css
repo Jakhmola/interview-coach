@@ -1191,3 +1191,160 @@ summary {
     grid-template-columns: 1fr;
   }
 }
+
+/* ---- Phase 18: active-job chip, armed-delete, error-banner hint ---- */
+
+.active-job-chip-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.active-job-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(119, 197, 147, 0.32);
+  background: rgba(119, 197, 147, 0.08);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  transition: background 120ms ease-out, border-color 120ms ease-out;
+}
+.active-job-chip:hover {
+  background: rgba(119, 197, 147, 0.14);
+  border-color: rgba(119, 197, 147, 0.5);
+}
+.active-job-chip.muted {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--muted);
+}
+.active-job-chip .chip-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.active-job-chip .chip-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.active-job-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 260px;
+  max-width: 360px;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  padding: 6px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.active-job-menu-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 100ms ease-out;
+}
+.active-job-menu-item:hover {
+  background: var(--paper-strong);
+}
+.active-job-menu-item.current {
+  background: rgba(119, 197, 147, 0.10);
+  color: var(--accent);
+}
+.active-job-menu-item.clear {
+  color: var(--coral);
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding-top: 10px;
+}
+.active-job-menu-empty {
+  padding: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.active-job-menu-date {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Armed-delete button */
+.ghost-button.armed,
+.secondary-button.armed,
+.icon-button.armed {
+  background: rgba(240, 120, 100, 0.18);
+  border-color: rgba(240, 120, 100, 0.6);
+  color: #ffb5a4;
+  animation: armed-pulse 1.4s ease-in-out infinite;
+}
+@keyframes armed-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(240, 120, 100, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(240, 120, 100, 0);
+  }
+}
+
+/* Error-banner hint sub-text */
+.error-banner-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: rgba(255, 154, 134, 0.75);
+  font-weight: 400;
+}
+
+/* Inline destruction caption under armed buttons */
+.delete-caption {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Phase 18: prep-status row used by SetupPage Stage 3 deferred mapping */
+.deferred-mapping-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: var(--paper-strong);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Phase 18: workspace-header tweak so the chip has breathing room */
+.workspace-header {
+  gap: 16px;
+}
+@media (max-width: 720px) {
+  .active-job-chip .chip-label {
+    display: none;
+  }
+  .active-job-chip {
+    padding: 6px 10px;
+  }
+}
+

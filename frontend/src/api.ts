@@ -11,6 +11,17 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Raised on any 401. A top-level handler in App.tsx listens for these,
+ * clears auth state, and routes to /login. Subclass of ApiError so
+ * existing `instanceof ApiError` catches still work.
+ */
+export class AuthExpiredError extends ApiError {
+  constructor() {
+    super(401, "auth_expired");
+  }
+}
+
 export type User = {
   id: string;
   email: string;
@@ -166,6 +177,16 @@ async function unwrap<T>(response: Response): Promise<T> {
     return (await response.json()) as T;
   }
 
+  if (response.status === 401) {
+    // Fire a global event so App-level can route to /login without each
+    // call site needing to know about it. Page-level catches still get
+    // the typed AuthExpiredError to handle cleanup.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("auth-expired"));
+    }
+    throw new AuthExpiredError();
+  }
+
   const text = await response.text();
   let detail = text;
   try {
@@ -247,6 +268,8 @@ export const api = {
   getSession: (token: string, id: string) => apiFetch<SessionDetail>(`/sessions/${id}`, { token }),
   abandonSession: (token: string, id: string) =>
     apiFetch<Session>(`/sessions/${id}/abandon`, { method: "POST", token }),
+  rebuildProfile: (token: string, cvId: string) =>
+    apiFetch<{ status: string }>(`/documents/${cvId}/rebuild-profile`, { method: "POST", token }),
 };
 
 export function parseSseText(text: string): SseFrame[] {
@@ -291,16 +314,30 @@ async function streamPost(
   token: string,
   body: unknown,
   onFrame: (frame: SseFrame) => void,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "text/event-stream",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "text/event-stream",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (err) {
+    // AbortError on the handshake — caller initiated cleanup. Don't surface.
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return;
+    }
+    // Other fetch failures (CORS, DNS, etc.) — surface as a stream-interrupted
+    // event so the caller can render a translated message rather than blowing up.
+    onFrame({ event: "error", data: { code: "stream_interrupted" } });
+    return;
+  }
   if (!response.ok) {
     await unwrap(response);
     return;
@@ -312,25 +349,40 @@ async function streamPost(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      const splitAt = buffer.lastIndexOf("\n\n");
+      if (splitAt === -1) {
+        continue;
+      }
+      const ready = buffer.slice(0, splitAt + 2);
+      buffer = buffer.slice(splitAt + 2);
+      for (const frame of parseSseText(ready)) {
+        onFrame(frame);
+      }
     }
-    buffer += decoder.decode(value, { stream: true });
-    const splitAt = buffer.lastIndexOf("\n\n");
-    if (splitAt === -1) {
-      continue;
-    }
-    const ready = buffer.slice(0, splitAt + 2);
-    buffer = buffer.slice(splitAt + 2);
-    for (const frame of parseSseText(ready)) {
+    buffer += decoder.decode();
+    for (const frame of parseSseText(buffer)) {
       onFrame(frame);
     }
-  }
-  buffer += decoder.decode();
-  for (const frame of parseSseText(buffer)) {
-    onFrame(frame);
+  } catch (err) {
+    // Mid-stream disconnect or abort. AbortError → caller is unmounting,
+    // stay silent. Anything else → surface as a recoverable error event.
+    if (err instanceof DOMException && err.name === "AbortError") {
+      return;
+    }
+    onFrame({ event: "error", data: { code: "stream_interrupted" } });
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // already released
+    }
   }
 }
 
@@ -339,16 +391,24 @@ export function prepareSessionStream(
   jobId: string,
   forceRefresh: boolean,
   onFrame: (frame: SseFrame) => void,
+  signal?: AbortSignal,
 ) {
-  return streamPost("/sessions/prepare", token, { job_id: jobId, force_refresh: forceRefresh }, onFrame);
+  return streamPost(
+    "/sessions/prepare",
+    token,
+    { job_id: jobId, force_refresh: forceRefresh },
+    onFrame,
+    signal,
+  );
 }
 
 export function nextQuestionStream(
   token: string,
   sessionId: string,
   onFrame: (frame: SseFrame) => void,
+  signal?: AbortSignal,
 ) {
-  return streamPost(`/sessions/${sessionId}/next_question`, token, {}, onFrame);
+  return streamPost(`/sessions/${sessionId}/next_question`, token, {}, onFrame, signal);
 }
 
 export function answerStream(
@@ -356,6 +416,7 @@ export function answerStream(
   sessionId: string,
   answer: string,
   onFrame: (frame: SseFrame) => void,
+  signal?: AbortSignal,
 ) {
-  return streamPost(`/sessions/${sessionId}/answer`, token, { answer }, onFrame);
+  return streamPost(`/sessions/${sessionId}/answer`, token, { answer }, onFrame, signal);
 }

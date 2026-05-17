@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, api } from "../api";
 import { useAuth } from "../state/auth";
+import { ActiveJobChip } from "./ActiveJobChip";
+import { ErrorBanner } from "./ui";
 
 const navItems = [
   { to: "/setup", label: "Setup", icon: FileText },
@@ -62,6 +64,7 @@ export function AppShell() {
             <span>Practice studio</span>
           </div>
         </div>
+        <ActiveJobChip />
         <div className="user-menu">
           <span>{user?.email}</span>
           <button className="icon-button" onClick={logout} title="Log out">
@@ -102,7 +105,9 @@ export function AppShell() {
             );
           })}
           </nav>
-          {readinessError ? <div className="error-banner compact">{readinessError}</div> : null}
+          <ErrorBanner code={readinessError} />
+          {/* readinessError holds a raw code/detail string from the catch in
+              refreshReadiness; ErrorBanner translates it (or renders null). */}
         </section>
         <header className="topbar">
           <div>
