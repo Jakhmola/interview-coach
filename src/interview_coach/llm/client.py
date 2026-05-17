@@ -43,24 +43,44 @@ DEFAULT_TEMPERATURE = 0.2
 _RETRYABLE_EXC = (httpx.ConnectError, httpx.ReadTimeout)
 
 
-def chat_model(temperature: float = DEFAULT_TEMPERATURE, **overrides: Any) -> BaseChatModel:
+def chat_model(
+    temperature: float = DEFAULT_TEMPERATURE,
+    *,
+    enable_thinking: bool = True,
+    **overrides: Any,
+) -> BaseChatModel:
     """Build a `ChatOpenAI` configured from `Settings`.
 
     Agent code MUST pass `temperature` explicitly — different agents/prompts
     want different values (e.g., 0.0 for evaluator, 0.7 for question generator).
 
+    `enable_thinking` (default True) controls qwen3's ``<think>...</think>``
+    blocks via the chat-template kwarg forwarded to llama.cpp. Default-on
+    after the Phase 19 hand-off showed eval quality regressed without it.
+    Pass ``enable_thinking=False`` to disable thinking for a specific call
+    where the token cost outweighs the quality lift.
+
     `overrides` forwards extra kwargs to `ChatOpenAI` (e.g., `max_tokens`,
-    `top_p`, `model_kwargs`).
+    `top_p`, `model_kwargs`). Existing `model_kwargs["extra_body"]
+    ["chat_template_kwargs"]` entries from the caller are preserved.
 
     The `api_key` value is irrelevant for local servers but the OpenAI client
     library requires it to be non-empty.
     """
+    model_kwargs = dict(overrides.pop("model_kwargs", {}) or {})
+    extra_body = dict(model_kwargs.pop("extra_body", {}) or {})
+    template_kwargs = dict(extra_body.pop("chat_template_kwargs", {}) or {})
+    template_kwargs.setdefault("enable_thinking", enable_thinking)
+    extra_body["chat_template_kwargs"] = template_kwargs
+    model_kwargs["extra_body"] = extra_body
+
     return ChatOpenAI(
         base_url=settings.llm_base_url,
         api_key=settings.llm_api_key or "not-needed",
         model=settings.model_name,
         temperature=temperature,
         stream_usage=True,
+        model_kwargs=model_kwargs,
         **overrides,
     )
 

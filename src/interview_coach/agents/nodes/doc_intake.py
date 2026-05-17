@@ -15,6 +15,7 @@ Workflow:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import Any
@@ -29,6 +30,8 @@ from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
 from interview_coach.llm.client import chat_model_structured
 from interview_coach.llm.telemetry import set_node_context
+from interview_coach.rag.concurrency import ingest_sema
+from interview_coach.rag.ingest import embed_and_store_document
 
 logger = logging.getLogger(__name__)
 
@@ -363,13 +366,17 @@ async def apply_mapping(
         )
 
     # Chunking is deferred until mapping is confirmed (so chunks carry the
-    # final user-edited project_title).
-    from interview_coach.rag.ingest import embed_and_store_document
+    # final user-edited project_title). Fire-and-forget under the shared
+    # ingest sema so the apply-mapping POST returns immediately; the UI
+    # polls `embedding_status` to discover when the chunks land.
+    async def _embed_swallow(doc_id: uuid.UUID) -> None:
+        async with ingest_sema:
+            try:
+                await embed_and_store_document(doc_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("embed_and_store_document failed for doc=%s", doc_id)
 
-    try:
-        await embed_and_store_document(document_id)
-    except Exception:  # noqa: BLE001
-        logger.exception("embed_and_store_document failed for doc=%s", document_id)
+    asyncio.create_task(_embed_swallow(document_id))
 
     return len(stamped)
 

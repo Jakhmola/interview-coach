@@ -20,6 +20,12 @@ services:
     # Bind-mount the host's models dir; override with MODELS_DIR if it lives elsewhere.
     volumes:
       - ${MODELS_DIR:-${HOME}/models}:/models:ro
+    # CPU budget for llama-server's non-GPU work: sampler, KV-cache offload
+    # management, tokenization, HTTP/grammar layer. Without this cap, llama
+    # defaults --threads to host CPU count and can pin the box during streamed
+    # generation. Belt-and-braces with the --threads flag below so the
+    # process respects its own cap AND the cgroup enforces it.
+    cpus: ${LLAMA_CPUS:-4}
     command:
       - "-m"
       - "/models/${MODEL_FILE:-Qwen3-8B-IQ4_XS.gguf}"
@@ -31,6 +37,10 @@ services:
       - "99"
       - "--ctx-size"
       - "8192"
+      - "--threads"
+      - "${LLAMA_THREADS:-4}"
+      - "--threads-batch"
+      - "${LLAMA_THREADS:-4}"
       - "--jinja"
       - "--alias"
       - "${MODEL_NAME:-qwen3-8b}"
@@ -49,11 +59,14 @@ services:
     build:
       context: ./services/embedder
       dockerfile: Dockerfile
-    # Single CPU cap: EMBED_THREADS drives torch.set_num_threads AND propagates
-    # to OMP/MKL/OPENBLAS inside the process (see embedder/main.py). One knob,
-    # no drift between compose-level CFS quotas and in-process thread caps.
+    # Two complementary caps: a compose-level CFS quota (`cpus`) and an
+    # in-process torch thread count. EMBED_THREADS drives torch.set_num_threads
+    # AND propagates to OMP/MKL/OPENBLAS inside the process (see
+    # embedder/main.py). Keep EMBED_THREADS <= EMBED_CPUS so the OS scheduler
+    # never has to over-subscribe the quota.
+    cpus: ${EMBED_CPUS:-4}
     environment:
-      EMBED_THREADS: ${EMBED_THREADS:-8}
+      EMBED_THREADS: ${EMBED_THREADS:-4}
       TOKENIZERS_PARALLELISM: "false"
       HF_HOME: /cache/hf
     volumes:
@@ -93,6 +106,14 @@ services:
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
       LANGFUSE_HOST: ${LANGFUSE_HOST:-}
+      # Phase 19: cap native thread pools used by transformers/numpy/blas
+      # inside the api container. Without these, a CV-upload-time
+      # tokenizer/encode burst pegs every core and starves other host apps,
+      # even though `cpus:` already CFS-throttles the cgroup.
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
+      TOKENIZERS_PARALLELISM: "false"
     volumes:
       - graph_data:/data
     ports:

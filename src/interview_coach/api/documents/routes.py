@@ -20,6 +20,7 @@ from interview_coach.db.models import User
 from interview_coach.db.session import get_db
 from interview_coach.ingestion import extract_text
 from interview_coach.ingestion.errors import ExtractionFailed, UnsupportedFormat
+from interview_coach.rag.concurrency import ingest_sema
 
 logger = logging.getLogger(__name__)
 
@@ -28,13 +29,18 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 
 async def _embed_in_background(document_id: uuid.UUID) -> None:
     """Best-effort: log and swallow any embedding failure so a flaky
-    embedder doesn't break document upload."""
-    try:
-        from interview_coach.rag.ingest import embed_and_store_document
+    embedder doesn't break document upload.
 
-        await embed_and_store_document(document_id)
-    except Exception:  # noqa: BLE001
-        logger.exception("background embedding failed for document %s", document_id)
+    Acquires the shared ``ingest_sema`` so embed and profile-build don't
+    parallelise inside the api container (see Phase 19 plan).
+    """
+    async with ingest_sema:
+        try:
+            from interview_coach.rag.ingest import embed_and_store_document
+
+            await embed_and_store_document(document_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("background embedding failed for document %s", document_id)
 
 
 # Single-flight guard for profile builds. Process-local — adequate for the
@@ -50,14 +56,17 @@ async def _profile_build_in_background(user_id: uuid.UUID) -> None:
     multiple builds. Errors are logged and swallowed — a failed build is
     surfaced to the UI as ``profile_ready=false`` via /sessions/prepare/status.
     """
+    # Single-flight check OUTSIDE the sema: a duplicate call should fast-no-op,
+    # not park on the sema waiting on itself.
     if user_id in _profile_build_in_flight:
         logger.info("profile build already in flight for user=%s; skipping", user_id)
         return
     _profile_build_in_flight.add(user_id)
     try:
-        from interview_coach.agents.nodes.profile_builder import build_profile
+        async with ingest_sema:
+            from interview_coach.agents.nodes.profile_builder import build_profile
 
-        await build_profile(user_id)
+            await build_profile(user_id)
     except Exception:  # noqa: BLE001
         logger.exception("background profile build failed for user %s", user_id)
     finally:

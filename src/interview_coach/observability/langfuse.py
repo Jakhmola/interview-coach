@@ -161,9 +161,7 @@ def trace_attributes(
             tags=tags,
         )
     except Exception:
-        logger.exception(
-            "Langfuse trace_attributes setup failed; running without attributes"
-        )
+        logger.exception("Langfuse trace_attributes setup failed; running without attributes")
         yield
         return
     with cm:

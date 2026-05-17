@@ -148,6 +148,11 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 17    | Embeddings service extraction (sidecar)        | ✅          |
 | 18    | UI infra rework (errors, active-job, abort, guards) | ✅      |
 | 18b   | UI/UX redesign (Copper Aquamarine, sidebar, wizard) | ✅      |
+| 19    | Perf P1 — CPU caps (api/embedder/llama) + ingest sema + ctx/thinking tuning | ✅ |
+| 20    | Perf P2 — prompt trimming + retrieval overlap  | ⏳          |
+| 21    | Perf P3 — prep-graph checkpointer + mapping fold-in | ⏳     |
+| 22    | Correctness P4 — CV-replace guard, checkpoint GC, FE drift | ⏳ |
+| 23    | Cleanup P5 — dead deps (streamlit/litellm/a2a/deepeval), pyproject `ui` | ⏳ |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
 | 15    | GitHub ingestion                               | ⏳          |
@@ -376,6 +381,135 @@ Arc (warm dark base), Perplexity (answer-focused practice surface).
   state; deleting a CV clears the profile so the wizard re-asks for one;
   answering a question parks on the feedback until the user clicks the
   advance CTA; one-job dropdown no longer shows a phantom scrollbar.
+
+### Phase 19 — Perf P1: thinking-mode off + CPU contention
+
+First phase of a five-phase performance + cleanup track, ordered smallest-risk
+first. Stops the two daily-felt pains: qwen3 burning tokens on `<think>` blocks
+on every call, and the api + embedder collectively spiking host CPU during CV
+upload so other apps choke.
+
+- **Thinking off everywhere** — `llm/client.py` `chat_model()` injects
+  `extra_body={"chat_template_kwargs": {"enable_thinking": False}}` by default.
+  Verified zero references to thinking config anywhere in the repo today, so
+  every LLM call currently pays the thinking tax (Qwen3 default-on).
+- **CPU caps for the api container** — add `OMP_NUM_THREADS=2`,
+  `MKL_NUM_THREADS=2`, `TOKENIZERS_PARALLELISM=false` to the api env in
+  `docker-compose.yml`. Cap embedder host CPU with a new `cpus:` quota
+  (default 4) and drop `EMBED_THREADS` default to 4.
+- **Bounded background concurrency** — module-level `asyncio.Semaphore(1)`
+  shared by `_embed_in_background` + `_profile_build_in_background` in
+  `api/documents/routes.py`, so the two CV-upload background tasks run
+  sequentially not in parallel. The Sema is held inside each wrapper, the
+  outer `asyncio.create_task` call shape is unchanged.
+- **Symmetric apply_mapping** — swap the inline `await
+  embed_and_store_document` in `agents/nodes/doc_intake.py:apply_mapping` for
+  `asyncio.create_task(_embed_in_background(document_id))` using the same
+  wrapper as the CV path. The UI already drives off `embedding_status`
+  polling, so no FE change.
+- **Smoke test:** end-to-end session post-fixes; `llm_calls` rows show
+  materially lower `completion_tokens` per call (target: ≥30% drop on the
+  question_generator and model_answer calls); per-turn wall time falls by
+  several seconds; uploading a CV during a host build does not pin CPU.
+
+### Phase 20 — Perf P2: prompt trimming + retrieval overlap
+
+Latency lever that's visible per question. Higher semantic risk than 19, so
+lands after P1's measurements.
+
+- **Focused profile in prompts** — `question_generator` and `evaluator`
+  payloads carry only the picked focus's experience/project + a compact index
+  of the rest, not the full profile JSON. The deterministic focus picker
+  already knows the target.
+- **Hydrate InterviewState once** — `next_question` populates
+  `state["profile"]`, `state["job"]`, `state["company"]` from a single
+  Postgres read at turn 0, then subsequent turns reuse them. Drops 3 of the 5
+  per-turn round trips.
+- **Overlap retrieval with judge call** — in `evaluator.stream_evaluation`,
+  kick off `_retrieve_for_turn` as an `asyncio.create_task` immediately before
+  the judge call, then `await` it just before constructing the model-answer
+  message. They use disjoint resources (GPU vs embedder + pgvector).
+- **Smoke test:** run a session, inspect `llm_calls.prompt_tokens` — should
+  fall noticeably on `question_generator` and `evaluator_judge`. Per-question
+  TTFT should improve. Manual eval check: questions still feel grounded in
+  the candidate's profile.
+
+### Phase 21 — Perf P3: prep-graph checkpointer + mapping fold-in
+
+Implements the structural change to setup flow. Lands after 19+20 so the
+perf wins are in place before we add a new node.
+
+- **Checkpointer on prep_graph** — reuse the same `AsyncSqliteSaver` opened
+  in `api/main.py:lifespan`. `thread_id = "prep:{user_id}:{job_id}"` —
+  well-defined because the JD row exists before `prep_graph` is ever invoked
+  (CV upload runs profile-build as a standalone task, not via the graph).
+  Killing api mid-prep and restarting resumes from the last completed node.
+- **Project_doc intake folded into prep_graph** — a new `doc_intake_fanout`
+  node runs after `profile_builder`, calls `run_intake` (LLM) in parallel for
+  each unmapped project_doc the user has, and emits `mapping_suggestion`
+  SSE events. **HITL preserved**: the modal still opens for user confirmation,
+  but the suggestion is precomputed during prep so the modal opens instantly.
+- **Fix profile cache key (G4)** — `apply_mapping` updates the profile's
+  `source_doc_ids` to include the project_doc id. Without this, the
+  `profile_builder` cache check in `graph_nodes.py:71-77` always misses after
+  the first project_doc upload — re-running a full LLM call on every prep.
+  Silent regression today.
+- **Drop MCP `get_job` for direct Postgres reads** — `job_analyzer` and
+  `company_researcher` call `repos.get_job` directly instead of going through
+  the MCP `get_job` tool. Per CLAUDE.md boundary rule, MCP wraps external-
+  world I/O, not app-owned CRUD. Cuts a subprocess JSON-encode/decode hop
+  per prep run.
+- **Slim `/sessions/prepare/status` payload** — drop the `profile`/`job`/
+  `company` fields from the response unless `?detail=true`. SetupPage polls
+  every 2s and never uses them. Raise the poll interval to 4s in
+  `SetupPage.tsx` since profile_builder takes 10–30s anyway.
+- **CV re-embedding affordance** — `/documents/{cv_id}/rebuild-profile` also
+  re-embeds (idempotent: `embed_and_store_document` already deletes prior
+  chunks). Today only the profile is rebuilt — a CV with
+  `embedding_status='failed'` has no UI affordance.
+- **Smoke test:** kill api mid-prep, restart, reopen Setup → prep resumes
+  from the last completed node. Upload a project_doc → mapping modal opens
+  populated (no extra LLM wait). Re-run prep after a project_doc upload →
+  `profile_builder` correctly skipped (`node_skipped: cached`).
+
+### Phase 22 — Correctness P4: CV-replace guard, checkpoint GC, FE drift
+
+Bag of one-line correctness fixes uncovered during the audit. Small footprint
+across many files.
+
+- **Block CV replace mid-session (G3)** — `upload_document` for `kind='cv'`
+  refuses with 409 `cv_in_use` if the user has active sessions, matching the
+  DELETE guard.
+- **Garbage-collect graph checkpoints (J4)** — a lifespan startup pass (or
+  background tick) drops checkpoints whose session is `complete`/`abandoned`
+  and older than 7 days, via `AsyncSqliteSaver.adelete_thread`.
+- **Fix `submitJobText` empty-error code (E2)** — replace
+  `setError("empty_answer")` with a JD-specific code in `errors.ts`.
+- **Drop unused turn fields (E4)** — stop returning `anchors_json` /
+  `metadata_json` from `GET /sessions/{id}` unless we surface them in the UI.
+  Defer the surfacing decision; for now, trim the wire payload.
+- **Fix `activeJob` localStorage clearing (E7)** — call the public
+  `setActiveJobId(null)` in `state/activeJob.tsx:104-107` instead of the
+  state setter directly, so localStorage stays in sync.
+- **Smoke test:** unit-test the 409. Manual verify rest.
+
+### Phase 23 — Cleanup P5: dead deps + dead config
+
+Pure hygiene — zero behavior change, shrinks api image by ~200MB.
+
+- **Remove `ui` from `pyproject.toml`** — both `[tool.hatch.build.targets.
+  wheel].packages` and `[tool.ruff].src`. The `ui/` directory was deleted in
+  Phase 18 but `pyproject.toml` still references it.
+- **`uv remove streamlit`** — Phase 18 deleted Streamlit; the dep lingers,
+  pulling tons of transitive baggage into the api image.
+- **`uv remove a2a-sdk`** — reserved post-v1, never imported. Re-add when
+  the A2A wrapping phase actually starts.
+- **`uv remove litellm`** — we use `langchain-openai` exclusively, no
+  litellm import anywhere.
+- **Move `deepeval` to `[dependency-groups].dev`** — only used by the
+  integration eval harness, not by runtime code.
+- **Smoke test:** `make up`, full session works. `docker images
+  interview_coach-api` shrinks materially.
 
 ### Phase 14b — RAG grounding (Tavily tech-spec corpus, optional)
 Only if Phase 14 questions feel grounded in the candidate's voice but still technically vague.
