@@ -27,6 +27,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from interview_coach.agents.profile_view import profile_slice_for_focus
 from interview_coach.agents.prompts import (
     QUESTION_BEHAVIORAL_STAR_SYSTEM,
     QUESTION_RESUME_WALKTHROUGH_SYSTEM,
@@ -50,32 +51,48 @@ class GenerationPrereqsMissing(Exception):
     """Phase 8 routes raise 400 from this; profile / job analysis / snapshot absent."""
 
 
-async def _load_context(session_row: SessionRow) -> dict[str, Any]:
-    """Pull profile, job analysis, company snapshot, prior turns from Postgres."""
+async def _load_context(
+    session_row: SessionRow,
+    *,
+    profile: dict[str, Any] | None = None,
+    job_analysis: dict[str, Any] | None = None,
+    company_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Pull profile, job analysis, company snapshot, prior turns from Postgres.
+
+    Phase 20: any of ``profile`` / ``job_analysis`` / ``company_snapshot``
+    pre-loaded by the route layer is accepted and skips its DB round-trip.
+    Missing values fall back to the per-session DB read so this function
+    remains usable from unit tests / lone-node callers.
+    """
     user_id = session_row.user_id
     job_id = session_row.job_id
 
     async with AsyncSessionLocal() as s:
-        profile_row = await repos.get_profile(s, user_id)
-        if profile_row is None:
-            raise GenerationPrereqsMissing("profile_missing")
-
-        job = await repos.get_job(s, job_id, user_id)
-        if job is None:
-            raise GenerationPrereqsMissing("job_not_found")
-        if not job.parsed_json:
-            raise GenerationPrereqsMissing("job_not_analyzed")
-
-        snapshot_row = await repos.get_company_snapshot_by_job(s, job_id)
-        if snapshot_row is None:
-            raise GenerationPrereqsMissing("company_snapshot_missing")
+        if profile is None:
+            profile_row = await repos.get_profile(s, user_id)
+            if profile_row is None:
+                raise GenerationPrereqsMissing("profile_missing")
+            profile = profile_row.profile_json
+        if job_analysis is None:
+            job = await repos.get_job(s, job_id, user_id)
+            if job is None:
+                raise GenerationPrereqsMissing("job_not_found")
+            if not job.parsed_json:
+                raise GenerationPrereqsMissing("job_not_analyzed")
+            job_analysis = job.parsed_json
+        if company_snapshot is None:
+            snapshot_row = await repos.get_company_snapshot_by_job(s, job_id)
+            if snapshot_row is None:
+                raise GenerationPrereqsMissing("company_snapshot_missing")
+            company_snapshot = snapshot_row.snapshot_json
 
         turns = await repos.list_turns_for_session(s, session_row.id)
 
     return {
-        "profile": profile_row.profile_json,
-        "job_analysis": job.parsed_json,
-        "company_snapshot": snapshot_row.snapshot_json,
+        "profile": profile,
+        "job_analysis": job_analysis,
+        "company_snapshot": company_snapshot,
         "prior_turns": [{"question": t.question, "answer": t.answer or ""} for t in turns],
     }
 
@@ -268,12 +285,19 @@ async def stream_question(
     session_id: uuid.UUID,
     user_id: uuid.UUID,
     temperature: float = 0.7,
+    profile: dict[str, Any] | None = None,
+    job: dict[str, Any] | None = None,
+    company: dict[str, Any] | None = None,
 ) -> AsyncIterator[tuple[str, Any]]:
     """Generate, stream, and persist one question for `session_id`.
 
     Yields:
         ("token", str) — a chunk of the user-visible question text.
         ("done", {"question_id": str, "turn_index": int}) — once at end.
+
+    Phase 20: ``profile`` / ``job`` / ``company`` may be pre-loaded by the
+    route layer and forwarded here via state. When provided, DB reads for
+    them are skipped.
 
     Raises:
         GenerationPrereqsMissing: profile/job-analysis/snapshot not ready.
@@ -292,7 +316,12 @@ async def stream_question(
     if turn_index >= session_row.n_questions:
         raise ValueError("session_complete")
 
-    context = await _load_context(session_row)
+    context = await _load_context(
+        session_row,
+        profile=profile,
+        job_analysis=job,
+        company_snapshot=company,
+    )
 
     round_type: RoundType = session_row.round_type  # type: ignore[assignment]
 
@@ -326,11 +355,16 @@ async def stream_question(
     ).strip() or "the hiring company"
     role_title = (context["job_analysis"].get("title") or "").strip() or "this role"
 
+    # Phase 20: ship only the focus-anchored slice of the profile to the
+    # LLM, not the full 6-12 KB JSON. The picker's focus_key (or None)
+    # selects the right anchor; behavioral signals fall through to a
+    # name+headline+top-bullets stub.
+    profile_for_prompt = profile_slice_for_focus(context["profile"], focus_key)
     user_msg = _build_user_message(
         role_title=role_title,
         company_name=company_name,
         focus_label=focus_label,
-        profile=context["profile"],
+        profile=profile_for_prompt,
         prior_turns=context["prior_turns"],
         turn_index=turn_index,
     )

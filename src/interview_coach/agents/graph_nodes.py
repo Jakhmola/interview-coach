@@ -179,7 +179,13 @@ async def node_question_generator(state: InterviewState) -> dict[str, Any]:
 
     done_payload: dict[str, Any] | None = None
     try:
-        async for kind, data in stream_question(session_id=session_id, user_id=user_id):
+        async for kind, data in stream_question(
+            session_id=session_id,
+            user_id=user_id,
+            profile=state.get("profile"),
+            job=state.get("job"),
+            company=state.get("company"),
+        ):
             if kind == "token":
                 writer({"event": "token", "data": data})
             elif kind == "done":
@@ -220,7 +226,10 @@ async def node_evaluator(state: InterviewState) -> dict[str, Any]:
 
     done_payload: dict[str, Any] | None = None
     async for kind, data in stream_evaluation(
-        session_id=session_id, user_id=user_id, turn_id=turn_id
+        session_id=session_id,
+        user_id=user_id,
+        turn_id=turn_id,
+        profile=state.get("profile"),
     ):
         if kind == "score":
             writer({"event": "score", "data": data})

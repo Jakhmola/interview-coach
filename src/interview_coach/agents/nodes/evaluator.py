@@ -22,6 +22,7 @@ the partial-persist path on failure).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -30,6 +31,7 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from interview_coach.agents.profile_view import profile_slice_for_focus
 from interview_coach.agents.prompts import (
     EVALUATOR_JUDGE_SYSTEM,
     MODEL_ANSWER_SYSTEM,
@@ -57,8 +59,17 @@ class TurnNotAnswered(Exception):
 
 
 async def _load_eval_inputs(
-    session_id: uuid.UUID, user_id: uuid.UUID, turn_id: uuid.UUID
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+    turn_id: uuid.UUID,
+    *,
+    profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Load session, turn, and (when not state-hydrated) profile.
+
+    Phase 20: ``profile`` may be forwarded from interview_graph state and
+    skips its DB round-trip when provided.
+    """
     async with AsyncSessionLocal() as s:
         sess = await repos.get_session(s, session_id, user_id)
         if sess is None:
@@ -68,12 +79,14 @@ async def _load_eval_inputs(
             raise TurnNotFound(f"turn {turn_id} not in session {session_id}")
         if not turn.answer:
             raise TurnNotAnswered(f"turn {turn_id} has no answer yet")
-        profile_row = await repos.get_profile(s, user_id)
+        if profile is None:
+            profile_row = await repos.get_profile(s, user_id)
+            profile = profile_row.profile_json if profile_row is not None else {}
 
     return {
         "session": sess,
         "turn": turn,
-        "profile": profile_row.profile_json if profile_row is not None else {},
+        "profile": profile,
     }
 
 
@@ -224,15 +237,32 @@ async def stream_evaluation(
     user_id: uuid.UUID,
     turn_id: uuid.UUID,
     temperature: float = 0.0,
+    profile: dict[str, Any] | None = None,
 ) -> AsyncIterator[tuple[str, Any]]:
-    """Run judge call → model-answer call sequentially. See module docstring."""
-    inputs = await _load_eval_inputs(session_id, user_id, turn_id)
+    """Run judge call (streaming) with retrieval kicked off in parallel,
+    then the model-answer call. See module docstring.
+
+    Phase 20:
+
+    * ``profile`` may be forwarded from interview_graph state to skip the
+      per-turn profile DB read.
+    * Prompts ship only the focus-anchored slice of the profile (via
+      ``profile_slice_for_focus``), not the full 6-12 KB JSON.
+    * Retrieval is started concurrently with the judge stream — embedder
+      + pgvector and llama.cpp use different resources, so the wall-clock
+      cost overlaps with judge token streaming instead of stacking.
+    """
+    inputs = await _load_eval_inputs(session_id, user_id, turn_id, profile=profile)
     sess = inputs["session"]
     turn = inputs["turn"]
-    profile = inputs["profile"]
+    full_profile = inputs["profile"]
 
     if turn.score is not None:
         raise TurnNotFound(f"turn {turn_id} already evaluated")
+
+    metadata = turn.metadata_json or {}
+    focus_key = metadata.get("focus_key")
+    slim_profile = profile_slice_for_focus(full_profile, focus_key)
 
     logger.info(
         "Evaluator: session=%s turn=%s (turn_index=%d)",
@@ -241,17 +271,38 @@ async def stream_evaluation(
         turn.turn_index,
     )
 
+    # Kick off retrieval BEFORE starting the judge stream. Judge runs on
+    # the llama.cpp service (GPU + small CPU footprint), retrieval hits the
+    # embedder sidecar + pgvector (CPU + DB) — different resources, fully
+    # overlappable. If the judge fails we cancel the task to avoid a
+    # dangling coroutine.
+    retrieve_task: asyncio.Task[list[GroundingHit]] = asyncio.create_task(
+        _retrieve_for_turn(user_id=user_id, turn=turn)
+    )
+
     # --- Call 1: judge ---
     judgment: Judgment | None = None
-    async for event, data in _run_judge_call(turn=turn, profile=profile, temperature=temperature):
-        if event == "__parsed__":
-            judgment = data
-        else:
-            yield (event, data)
+    try:
+        async for event, data in _run_judge_call(
+            turn=turn, profile=slim_profile, temperature=temperature
+        ):
+            if event == "__parsed__":
+                judgment = data
+            else:
+                yield (event, data)
+    except BaseException:
+        retrieve_task.cancel()
+        raise
     assert judgment is not None  # _run_judge_call raises otherwise
 
-    # --- Call 2: model answer (with grounding) ---
-    hits = await _retrieve_for_turn(user_id=user_id, turn=turn)
+    # --- Wait on the (most likely already-finished) retrieval task ---
+    try:
+        hits = await retrieve_task
+    except Exception:  # noqa: BLE001
+        # _retrieve_for_turn already swallows exceptions to []; this is a
+        # belt-and-braces guard in case asyncio plumbing surfaces one.
+        logger.exception("retrieve task raised unexpectedly; degrading to []")
+        hits = []
     logger.info(
         "Evaluator grounding: turn=%s hits=%d (kinds=%s)",
         turn_id,
@@ -267,7 +318,7 @@ async def stream_evaluation(
     model_answer_failed_reason: str | None = None
     try:
         async for event, data in _run_model_answer_call(
-            turn=turn, profile=profile, hits=hits, temperature=temperature
+            turn=turn, profile=slim_profile, hits=hits, temperature=temperature
         ):
             if event == "__parsed__":
                 model_answer = data.model_answer

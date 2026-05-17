@@ -30,7 +30,9 @@ class InterviewState(TypedDict, total=False):
     round_type: RoundType
     n_questions: int
 
-    # --- prep outputs ---
+    # --- prep outputs (also hydrated into interview_graph initial_state
+    # by api/sessions/routes.py so question_generator and evaluator can
+    # skip per-turn DB reads — Phase 20). ---
     profile: dict[str, Any] | None
     job: dict[str, Any] | None
     company: dict[str, Any] | None

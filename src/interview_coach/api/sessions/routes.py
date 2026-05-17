@@ -9,6 +9,7 @@ events to SSE events.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -282,6 +283,29 @@ def _with_callbacks(config: dict[str, Any]) -> dict[str, Any]:
     return new
 
 
+async def _hydrate_interview_context(
+    session: AsyncSession, *, user_id: uuid.UUID, job_id: uuid.UUID
+) -> dict[str, Any | None]:
+    """Phase 20: pre-load profile / job analysis / company snapshot once per
+    request so the graph nodes can skip per-turn DB round-trips.
+
+    All three are gathered concurrently against the same session. Missing
+    rows surface as ``None`` — the graph nodes still raise
+    ``GenerationPrereqsMissing`` if a required value is absent, so this
+    helper stays liberal.
+    """
+    profile_row, job_row, snap_row = await asyncio.gather(
+        repos.get_profile(session, user_id),
+        repos.get_job(session, job_id, user_id),
+        repos.get_company_snapshot_by_job(session, job_id),
+    )
+    return {
+        "profile": profile_row.profile_json if profile_row is not None else None,
+        "job": job_row.parsed_json if job_row is not None else None,
+        "company": snap_row.snapshot_json if snap_row is not None else None,
+    }
+
+
 @router.post("/{session_id}/next_question")
 async def next_question(
     session_id: uuid.UUID,
@@ -306,6 +330,7 @@ async def next_question(
         raise HTTPException(status.HTTP_409_CONFLICT, "session_complete")
 
     turn_index = len(turns)
+    hydrated = await _hydrate_interview_context(session, user_id=user.id, job_id=row.job_id)
     interview_graph = request.app.state.interview_graph
     config = _with_callbacks(_thread_config(session_id, turn_index))
     initial_state: dict[str, Any] = {
@@ -314,6 +339,9 @@ async def next_question(
         "round_type": row.round_type,
         "n_questions": row.n_questions,
         "turn_index": turn_index,
+        "profile": hydrated["profile"],
+        "job": hydrated["job"],
+        "company": hydrated["company"],
     }
     trace_meta = {
         "graph": "interview",
