@@ -1,5 +1,7 @@
 # Interview Coach — Master Plan
 
+> **Note (Phase 18):** the user-facing UI is now a React + TypeScript app under `frontend/` (built by `Dockerfile.ui`). The old Streamlit `ui/` directory was removed in Phase 18. Mentions of Streamlit, `ui/pages/*.py`, and `st.*` in earlier phase descriptions below are historical — see `frontend/src/` for the live UI.
+
 ## Context
 
 Greenfield project (only `requirements.txt` + `uv.lock` exist) to build a webapp that helps a candidate prepare for a specific job. Flow: candidate uploads CV/project docs, supplies a job description (raw or URL), the system researches the company, then runs a per-round interview where it asks personalized questions, scores answers, gives feedback, and shows a model answer. v1 targets two round types — **Resume / Project Deep-Dive** and **Behavioral / STAR**.
