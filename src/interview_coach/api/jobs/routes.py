@@ -105,6 +105,17 @@ async def delete_job(
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> Response:
+    """Delete a JD. Refuses with 409 ``job_in_use`` if any active session
+    references it — deleting then would orphan the session's job context."""
+    # 404 before 409: don't leak existence of someone else's job.
+    job = await repos.get_job(session, job_id, user.id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+
+    active = await repos.count_active_sessions_for_job(session, job_id)
+    if active > 0:
+        raise HTTPException(status.HTTP_409_CONFLICT, "job_in_use")
+
     deleted = await repos.delete_job(session, job_id, user.id)
     if not deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")

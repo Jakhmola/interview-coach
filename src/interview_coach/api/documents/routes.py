@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
@@ -8,7 +9,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from interview_coach.api.auth.deps import get_current_user
-from interview_coach.api.documents.schemas import DocumentKind, DocumentListItem, DocumentOut
+from interview_coach.api.documents.schemas import (
+    DocumentKind,
+    DocumentListItem,
+    DocumentOut,
+    EmbeddingStatus,
+)
 from interview_coach.db import repos
 from interview_coach.db.models import User
 from interview_coach.db.session import get_db
@@ -29,6 +35,59 @@ async def _embed_in_background(document_id: uuid.UUID) -> None:
         await embed_and_store_document(document_id)
     except Exception:  # noqa: BLE001
         logger.exception("background embedding failed for document %s", document_id)
+
+
+# Single-flight guard for profile builds. Process-local — adequate for the
+# single-worker compose setup; a multi-worker deploy would want a row-lock
+# on profiles.user_id.
+_profile_build_in_flight: set[uuid.UUID] = set()
+
+
+async def _profile_build_in_background(user_id: uuid.UUID) -> None:
+    """Run the standalone profile_builder for a user. Idempotent + best-effort.
+
+    Skips re-entrant calls so a user mashing the upload button can't queue
+    multiple builds. Errors are logged and swallowed — a failed build is
+    surfaced to the UI as ``profile_ready=false`` via /sessions/prepare/status.
+    """
+    if user_id in _profile_build_in_flight:
+        logger.info("profile build already in flight for user=%s; skipping", user_id)
+        return
+    _profile_build_in_flight.add(user_id)
+    try:
+        from interview_coach.agents.nodes.profile_builder import build_profile
+
+        await build_profile(user_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("background profile build failed for user %s", user_id)
+    finally:
+        _profile_build_in_flight.discard(user_id)
+
+
+# Doc is "pending" until this many seconds after creation, then flips to
+# "failed" if no chunks landed. Generous to absorb chunker latency on big docs.
+EMBED_PENDING_GRACE_S = 60
+
+
+async def _embedding_status_for(doc: Any, session: AsyncSession) -> EmbeddingStatus:
+    """Derive a document's embedding_status from chunk-count + age.
+
+    project_doc reports ``n_a`` until mapping is confirmed — its chunking is
+    deferred until ``apply_mapping`` runs, so the absence of chunks then is
+    expected, not a failure.
+    """
+    if doc.kind == "project_doc":
+        n_mappings = len(await repos.list_document_mappings(session, doc.id))
+        if n_mappings == 0:
+            return "n_a"
+    chunks = await repos.count_grounding_chunks_for_document(session, doc.id)
+    if chunks > 0:
+        return "ready"
+    created = doc.created_at
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    age_s = (datetime.now(UTC) - created).total_seconds()
+    return "pending" if age_s < EMBED_PENDING_GRACE_S else "failed"
 
 
 MAX_BYTES = 10 * 1024 * 1024  # 10 MB
@@ -130,12 +189,15 @@ async def upload_document(
         raw_text=text,
     )
     if kind == DocumentKind.cv:
-        # CV: kick off RAG embedding immediately. Profile rebuild happens
-        # via the existing /sessions/prepare flow.
+        # CV: kick off RAG embedding AND profile build in parallel so the
+        # workspace wizard can advance past Stage 1 without a separate click.
         asyncio.create_task(_embed_in_background(doc.id))
+        asyncio.create_task(_profile_build_in_background(user.id))
     # project_doc: chunking deferred until /mapping confirms (so chunks
     # carry the final user-edited project_title).
-    return DocumentOut.model_validate(doc)
+    out = DocumentOut.model_validate(doc)
+    out.embedding_status = await _embedding_status_for(doc, session)
+    return out
 
 
 @router.get("", response_model=list[DocumentListItem])
@@ -144,20 +206,23 @@ async def list_documents(
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[DocumentListItem]:
     docs = await repos.list_documents_for_user(session, user.id)
-    return [
-        DocumentListItem(
-            id=d.id,
-            user_id=d.user_id,
-            kind=DocumentKind(d.kind),
-            filename=d.filename,
-            content_type=d.content_type,
-            byte_size=d.byte_size,
-            created_at=d.created_at,
-            char_count=len(d.raw_text),
-            project_title=d.project_title,
+    items: list[DocumentListItem] = []
+    for d in docs:
+        items.append(
+            DocumentListItem(
+                id=d.id,
+                user_id=d.user_id,
+                kind=DocumentKind(d.kind),
+                filename=d.filename,
+                content_type=d.content_type,
+                byte_size=d.byte_size,
+                created_at=d.created_at,
+                char_count=len(d.raw_text),
+                project_title=d.project_title,
+                embedding_status=await _embedding_status_for(d, session),
+            )
         )
-        for d in docs
-    ]
+    return items
 
 
 @router.get("/{document_id}", response_model=DocumentOut)
@@ -169,7 +234,9 @@ async def get_document(
     doc = await repos.get_document(session, document_id, user.id)
     if doc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
-    return DocumentOut.model_validate(doc)
+    out = DocumentOut.model_validate(doc)
+    out.embedding_status = await _embedding_status_for(doc, session)
+    return out
 
 
 @router.get(
@@ -289,6 +356,28 @@ async def post_mapping(
     return ApplyMappingResponse(document_id=document_id, title=title, n_rows=n)
 
 
+@router.post("/{document_id}/rebuild-profile", status_code=status.HTTP_202_ACCEPTED)
+async def rebuild_profile(
+    document_id: uuid.UUID,
+    user: Annotated[User, Depends(get_current_user)],
+    session: Annotated[AsyncSession, Depends(get_db)],
+) -> dict[str, str]:
+    """Re-schedule the standalone profile build for this user's CV.
+
+    Idempotent + single-flight (a concurrent rebuild is a no-op). The
+    document_id must reference the user's CV; project_doc rebuilds aren't
+    supported here — those go through the mapping flow.
+    """
+    doc = await repos.get_document(session, document_id, user.id)
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+    if doc.kind != "cv":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "rebuild only applies to CV")
+
+    asyncio.create_task(_profile_build_in_background(user.id))
+    return {"status": "scheduled"}
+
+
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(
     document_id: uuid.UUID,
@@ -297,10 +386,18 @@ async def delete_document(
 ) -> Response:
     """Delete the document. Reverts profile enrichments first (best effort)
     so the highlights this doc enriched go back to their bare CV state.
+
+    Refuses with 409 ``cv_in_use`` if the user has active sessions — replacing
+    the CV mid-session would orphan the session's profile context.
     """
     doc = await repos.get_document(session, document_id, user.id)
     if doc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+
+    if doc.kind == "cv":
+        active = await repos.count_active_sessions_for_user(session, user.id)
+        if active > 0:
+            raise HTTPException(status.HTTP_409_CONFLICT, "cv_in_use")
 
     if doc.kind == "project_doc":
         try:

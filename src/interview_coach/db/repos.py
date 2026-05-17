@@ -2,7 +2,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from interview_coach.db.models import (
@@ -459,6 +459,34 @@ async def delete_grounding_chunks_for_document(
     )
     await session.commit()
     return result.rowcount or 0
+
+
+async def count_grounding_chunks_for_document(session: AsyncSession, document_id: uuid.UUID) -> int:
+    """Return the chunk count for a document. Used to derive embedding_status."""
+    result = await session.execute(
+        select(func.count(GroundingChunk.id)).where(GroundingChunk.document_id == document_id)
+    )
+    return int(result.scalar_one() or 0)
+
+
+async def count_active_sessions_for_job(session: AsyncSession, job_id: uuid.UUID) -> int:
+    """Active sessions referencing this job — gates DELETE /jobs/{id}."""
+    result = await session.execute(
+        select(func.count(SessionRow.id)).where(
+            SessionRow.job_id == job_id, SessionRow.status == "active"
+        )
+    )
+    return int(result.scalar_one() or 0)
+
+
+async def count_active_sessions_for_user(session: AsyncSession, user_id: uuid.UUID) -> int:
+    """Active sessions owned by this user — gates DELETE /documents/{cv_id}."""
+    result = await session.execute(
+        select(func.count(SessionRow.id)).where(
+            SessionRow.user_id == user_id, SessionRow.status == "active"
+        )
+    )
+    return int(result.scalar_one() or 0)
 
 
 async def insert_grounding_chunks(
