@@ -149,7 +149,7 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 18    | UI infra rework (errors, active-job, abort, guards) | ✅      |
 | 18b   | UI/UX redesign (Copper Aquamarine, sidebar, wizard) | ✅      |
 | 19    | Perf P1 — CPU caps (api/embedder/llama) + ingest sema + ctx/thinking tuning | ✅ |
-| 20    | Perf P2 — prompt trimming + retrieval overlap  | ⏳          |
+| 20    | Perf P2 — prompt trimming + retrieval overlap  | ✅          |
 | 21    | Perf P3 — prep-graph checkpointer + mapping fold-in | ⏳     |
 | 22    | Correctness P4 — CV-replace guard, checkpoint GC, FE drift | ⏳ |
 | 23    | Cleanup P5 — dead deps (streamlit/litellm/a2a/deepeval), pyproject `ui` | ⏳ |
