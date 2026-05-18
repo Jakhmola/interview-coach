@@ -63,13 +63,28 @@ _HOLDER = _ModelHolder()
 
 
 def _load_model_sync() -> Any:
-    """Blocking model load — invoked from a thread via run_in_executor."""
+    """Blocking model load — invoked from a thread via run_in_executor.
+
+    Threading model: ``EMBED_THREADS`` (and the BLAS env vars we set
+    alongside it at module import) caps the *intra-op* parallelism — how
+    many threads each BLAS matmul uses. We pin *inter-op* threads to 1
+    so torch can't also dispatch independent ops in parallel; pipeline
+    parallelism doesn't help a single-model sidecar and just lets the
+    process fan out N×M threads under load, which the OS scheduler then
+    has to fight through the cgroup ``cpus`` quota. Pinning interop=1
+    makes the wall-clock spike at the start of each ``encode()`` match
+    the cgroup budget instead of overshooting it.
+
+    ``set_num_interop_threads`` raises ``RuntimeError`` if torch has
+    already started its thread pool (e.g. a previous import); a no-op
+    in that path is correct because the previously-set value sticks.
+    """
     import torch
     from sentence_transformers import SentenceTransformer
 
     torch.set_num_threads(_THREAD_CAP)
     try:
-        torch.set_num_interop_threads(max(1, _THREAD_CAP // 2))
+        torch.set_num_interop_threads(1)
     except RuntimeError:
         pass
     return SentenceTransformer(MODEL_NAME, trust_remote_code=True)

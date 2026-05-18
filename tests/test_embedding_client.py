@@ -171,3 +171,41 @@ async def test_4xx_does_not_retry_and_raises_http_error() -> None:
         await client.embed_query("x")
     assert calls["n"] == 1  # no retry on 4xx
     await client.aclose()
+
+
+# --- Phase 21 follow-up: per-call retries override ---------------------
+
+
+async def test_embed_query_per_call_retries_overrides_instance_default() -> None:
+    """Per-call ``retries=1`` must short-circuit the instance default.
+
+    Used by the evaluator's hot-path retrieval to fail fast on a slow
+    embedder instead of piling 3 retries on an already-thrashing process.
+    """
+    calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(503, text="still loading")
+
+    # Instance default is 2 retries; per-call override must win.
+    client = _client_with_transport(handler)
+    with pytest.raises(EmbedderUnavailable):
+        await client.embed_query("x", retries=1)
+    assert calls["n"] == 1
+    await client.aclose()
+
+
+async def test_embed_query_retries_none_falls_back_to_instance_default() -> None:
+    """``retries=None`` (default) uses the instance default (=2 here)."""
+    calls = {"n": 0}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(503, text="still loading")
+
+    client = _client_with_transport(handler)
+    with pytest.raises(EmbedderUnavailable):
+        await client.embed_query("x")
+    assert calls["n"] == 2  # instance default
+    await client.aclose()

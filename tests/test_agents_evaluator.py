@@ -317,3 +317,36 @@ async def test_anchors_and_question_threaded_into_prompt(
     assert "specifics" in user_msg.content
     assert "tradeoffs" in user_msg.content
     assert "I'd start by clarifying requirements." in user_msg.content
+
+
+async def test_retrieve_for_turn_uses_single_attempt(
+    agent_session: AsyncSession,
+    alice: User,
+    seeded_job: Job,
+    seeded_profile: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 21 follow-up: the evaluator's in-turn grounding retrieval
+    must pass ``retries=1`` to ``retrieve_grounding``. Default 3 retries
+    pile up wall-clock on an already-overloaded embedder; retrieval
+    failure already degrades gracefully to no-grounding, so failing fast
+    is strictly better than the old behaviour.
+    """
+    sess, turn_id = await _make_session_with_turn(agent_session, alice, seeded_job)
+
+    _patch_streaming_llm(monkeypatch, ['{"score": 5, "feedback": "x", "model_answer": "y"}'])
+
+    captured: dict[str, Any] = {}
+
+    async def fake_retrieve_grounding(**kwargs: Any) -> list[Any]:
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(evaluator, "retrieve_grounding", fake_retrieve_grounding)
+
+    async for _ in evaluator.stream_evaluation(
+        session_id=sess.id, user_id=alice.id, turn_id=turn_id
+    ):
+        pass
+
+    assert captured.get("retries") == 1

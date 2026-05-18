@@ -92,11 +92,21 @@ class EmbeddingClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def _embed(self, texts: list[str], task: Task) -> list[list[float]]:
+    async def _embed(
+        self, texts: list[str], task: Task, *, retries: int | None = None
+    ) -> list[list[float]]:
+        """Embed ``texts``. Per-call ``retries`` override the instance
+        default — used by hot-path callers (e.g. evaluator's grounding
+        retrieval) that prefer fast graceful degradation over piling
+        retries on an already-overloaded embedder. ``None`` means use
+        ``self._retries`` (set from ``settings.embedder_retries`` at
+        construction).
+        """
         if not texts:
             return []
+        retry_attempts = max(1, retries if retries is not None else self._retries)
         retrying = AsyncRetrying(
-            stop=stop_after_attempt(self._retries),
+            stop=stop_after_attempt(retry_attempts),
             wait=wait_exponential(multiplier=0.5, min=0.5, max=5.0),
             retry=retry_if_exception_type(
                 (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError)
@@ -136,11 +146,16 @@ class EmbeddingClient:
         ):
             return await self._embed(texts, "retrieval.passage")
 
-    async def embed_query(self, text: str) -> list[float]:
+    async def embed_query(self, text: str, *, retries: int | None = None) -> list[float]:
+        """Embed a query for retrieval. ``retries`` overrides the instance
+        default; callers in the per-turn hot path (evaluator) pass 1 so
+        a transiently slow embedder fails fast and the model-answer call
+        falls back to no-grounding (already a graceful path in
+        ``retrieve_grounding``)."""
         with span(
             "embed.query",
             input={"query": text},
             metadata={"model": EXPECTED_MODEL_NAME, "task": "retrieval.query"},
         ):
-            vectors = await self._embed([text], "retrieval.query")
+            vectors = await self._embed([text], "retrieval.query", retries=retries)
             return vectors[0] if vectors else []

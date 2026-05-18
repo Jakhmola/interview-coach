@@ -223,7 +223,18 @@ async def _retrieve_for_turn(*, user_id: uuid.UUID, turn: Any) -> list[Grounding
         doc_ids = tuple(parsed)
     query = f"{turn.question} {focus_label or ''}".strip()
     try:
-        return await retrieve_grounding(user_id=user_id, query=query, k=4, document_ids=doc_ids)
+        # Phase 21 follow-up: single-attempt on the in-turn hot path so a
+        # transiently slow embedder fails fast and the model-answer call
+        # falls back to no-grounding (already a graceful path). The full
+        # retry policy still applies to ingest-side callers (CV /
+        # project_doc embed) where wall-clock doesn't matter.
+        return await retrieve_grounding(
+            user_id=user_id,
+            query=query,
+            k=4,
+            document_ids=doc_ids,
+            retries=1,
+        )
     except Exception:  # noqa: BLE001
         # Retrieval failure should not derail the evaluation — fall back
         # to profile-only model answer.

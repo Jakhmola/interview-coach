@@ -49,6 +49,7 @@ async def retrieve_grounding(
     source_kinds: tuple[str, ...] = ("project_doc",),
     document_ids: tuple[uuid.UUID, ...] = (),
     min_score: float = MIN_GROUNDING_SCORE,
+    retries: int | None = None,
 ) -> list[GroundingHit]:
     """Embed the query, then return the top-k chunks belonging to `user_id`
     whose `source_doc_kind` is in `source_kinds`. When `document_ids` is
@@ -76,7 +77,7 @@ async def retrieve_grounding(
     ) as obs:
         client = await get_embedding_client()
         try:
-            qvec = await client.embed_query(query)
+            qvec = await client.embed_query(query, retries=retries)
         except EmbedderUnavailable:
             # Degrade gracefully: the evaluator can still produce a
             # non-grounded model answer rather than 500-ing the turn.
