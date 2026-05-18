@@ -1,12 +1,18 @@
-"""LangGraph supervisor graphs (Phase 10).
+"""LangGraph supervisor graphs (Phase 10, extended Phase 21.1).
 
 Two graphs, not one — see `plan/master.md` Phase 10 and the design
 notes in `plan/current-phase.md`:
 
-* ``prep_graph`` — ``profile_builder → job_analyzer → company_researcher → END``.
-  No checkpointer (each node is idempotent against Postgres).
+* ``prep_graph`` (Phase 21.1) — ``profile_builder → doc_mapping_loop
+  → job_analyzer → company_researcher → END`` where ``doc_mapping_loop``
+  is three nodes (prepare_mapping_suggestion → await_mapping_confirm
+  → apply_or_skip_mapping) that loop back until every unmapped
+  project_doc has been confirmed or skipped. Checkpointed by the
+  same ``AsyncSqliteSaver`` used by the interview graph,
+  ``thread_id = "prep:{user_id}:{job_id}"`` — a mid-prep api crash
+  resumes from the last completed node on the next ``/prepare`` POST.
 * ``interview_graph`` — ``question_generator → (interrupt) → evaluator → loop``.
-  Checkpointed by AsyncSqliteSaver, ``thread_id = str(session_id)``.
+  Checkpointed by AsyncSqliteSaver, ``thread_id = "{session_id}:turn_{n}"``.
   Survives api restarts.
 
 The streaming model: nodes write opaque event dicts via
@@ -28,32 +34,72 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
 from interview_coach.agents.graph_nodes import (
+    node_apply_or_skip_mapping,
     node_await_answer,
+    node_await_mapping_confirm,
     node_company_researcher,
     node_evaluator,
     node_job_analyzer,
+    node_prepare_mapping_suggestion,
     node_profile_builder,
     node_question_generator,
 )
 from interview_coach.agents.state import InterviewState
 
 
-def build_prep_graph() -> Any:
-    """Compile the prep graph (no checkpointer).
+def build_prep_graph(checkpointer: BaseCheckpointSaver | None) -> Any:
+    """Compile the prep graph with the given checkpointer.
 
-    Linear pipeline: profile_builder → job_analyzer → company_researcher.
-    Each node short-circuits on cache.
+    Topology:
+
+        START
+          → profile_builder
+          → prepare_mapping_suggestion ─┐
+              ↑                         │ (when no more unmapped docs)
+              │                         ↓
+              ├── await_mapping_confirm
+              │       ↓
+              └── apply_or_skip_mapping
+                              │
+                              ↓ (cond: more unmapped → loop, else → job)
+          → job_analyzer
+          → company_researcher
+          → END
+
+    Phase 21.1 swapped the parallel ``doc_intake_fanout`` for a strict
+    one-at-a-time HITL loop. Each unmapped project_doc surfaces a
+    ``mapping_suggestion`` SSE event, halts on an interrupt for user
+    confirmation, then either persists via ``apply_mapping`` or marks
+    the doc as skipped and continues.
+
+    Checkpointing isn't optional here — ``interrupt(...)`` requires it.
     """
     g: StateGraph = StateGraph(InterviewState)
     g.add_node("profile_builder", node_profile_builder)
+    g.add_node("prepare_mapping_suggestion", node_prepare_mapping_suggestion)
+    g.add_node("await_mapping_confirm", node_await_mapping_confirm)
+    g.add_node("apply_or_skip_mapping", node_apply_or_skip_mapping)
     g.add_node("job_analyzer", node_job_analyzer)
     g.add_node("company_researcher", node_company_researcher)
 
     g.add_edge(START, "profile_builder")
-    g.add_edge("profile_builder", "job_analyzer")
+    g.add_edge("profile_builder", "prepare_mapping_suggestion")
+    # prepare_mapping_suggestion returns next_step ∈
+    #   {"job_analyzer", "await_mapping_confirm", "apply_or_skip_mapping"}
+    g.add_conditional_edges(
+        "prepare_mapping_suggestion",
+        lambda s: s.get("next_step") or "await_mapping_confirm",
+        {
+            "await_mapping_confirm": "await_mapping_confirm",
+            "apply_or_skip_mapping": "apply_or_skip_mapping",
+            "job_analyzer": "job_analyzer",
+        },
+    )
+    g.add_edge("await_mapping_confirm", "apply_or_skip_mapping")
+    g.add_edge("apply_or_skip_mapping", "prepare_mapping_suggestion")
     g.add_edge("job_analyzer", "company_researcher")
     g.add_edge("company_researcher", END)
-    return g.compile()
+    return g.compile(checkpointer=checkpointer) if checkpointer is not None else g.compile()
 
 
 def build_interview_graph(checkpointer: BaseCheckpointSaver | None) -> Any:

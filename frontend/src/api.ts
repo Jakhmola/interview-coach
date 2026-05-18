@@ -79,6 +79,9 @@ export type ProfileExperience = {
   highlights: ProfileHighlight[];
 };
 
+/** Payload of a ``mapping_suggestion`` SSE event from /sessions/prepare.
+ * The FE renders this inline in Stage 4 of the wizard and POSTs the
+ * user's decision to /sessions/prepare/resume. */
 export type MappingSuggestion = {
   document_id: string;
   title: string;
@@ -86,6 +89,8 @@ export type MappingSuggestion = {
   extracted: DocIntakeExtracted;
   suggestions: DocIntakeSuggestion[];
   experiences: ProfileExperience[];
+  /** How many unmapped docs remain in this prep run, including this one. */
+  remaining: number;
 };
 
 export type MappingRow = {
@@ -93,12 +98,6 @@ export type MappingRow = {
   experience_idx?: number | null;
   highlight_idx?: number | null;
   project_idx?: number | null;
-};
-
-export type ApplyMappingResponse = {
-  document_id: string;
-  title: string;
-  n_rows: number;
 };
 
 export type JobItem = {
@@ -240,18 +239,6 @@ export const api = {
   getDocument: (token: string, id: string) => apiFetch<DocumentDetail>(`/documents/${id}`, { token }),
   deleteDocument: (token: string, id: string) =>
     apiFetch<void>(`/documents/${id}`, { method: "DELETE", token }),
-  getMappingSuggestion: (token: string, documentId: string) =>
-    apiFetch<MappingSuggestion>(`/documents/${documentId}/mapping-suggestion`, { token }),
-  postDocumentMapping: (
-    token: string,
-    documentId: string,
-    body: { title?: string; rows: MappingRow[]; extracted: DocIntakeExtracted },
-  ) =>
-    apiFetch<ApplyMappingResponse>(`/documents/${documentId}/mapping`, {
-      method: "POST",
-      token,
-      body: JSON.stringify(body),
-    }),
   submitJobText: (token: string, text: string) =>
     apiFetch<JobDetail>("/jobs", { method: "POST", token, body: JSON.stringify({ text }) }),
   submitJobUrl: (token: string, url: string) =>
@@ -271,8 +258,6 @@ export const api = {
   getSession: (token: string, id: string) => apiFetch<SessionDetail>(`/sessions/${id}`, { token }),
   abandonSession: (token: string, id: string) =>
     apiFetch<Session>(`/sessions/${id}/abandon`, { method: "POST", token }),
-  rebuildProfile: (token: string, cvId: string) =>
-    apiFetch<{ status: string }>(`/documents/${cvId}/rebuild-profile`, { method: "POST", token }),
 };
 
 export function parseSseText(text: string): SseFrame[] {
@@ -403,6 +388,25 @@ export function prepareSessionStream(
     onFrame,
     signal,
   );
+}
+
+/** Resume prep_graph after the user confirms or skips a project_doc
+ * mapping. The backend threads the body into the paused
+ * ``await_mapping_confirm`` interrupt and the graph advances to the
+ * next unmapped doc (or to job_analyzer if none remain). */
+export function prepareSessionResumeStream(
+  token: string,
+  body: {
+    job_id: string;
+    action: "apply" | "skip";
+    rows?: MappingRow[];
+    title?: string;
+    extracted?: DocIntakeExtracted;
+  },
+  onFrame: (frame: SseFrame) => void,
+  signal?: AbortSignal,
+) {
+  return streamPost("/sessions/prepare/resume", token, body, onFrame, signal);
 }
 
 export function nextQuestionStream(

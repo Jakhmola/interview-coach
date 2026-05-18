@@ -132,6 +132,54 @@ def _resolve_extracted_payload(
     return fallback or {}
 
 
+def reapply_existing_mappings(
+    profile: Profile, mapping_rows: list[dict[str, Any]]
+) -> Profile:
+    """Phase 21.1: re-apply every persisted ``document_mappings`` row to a
+    freshly-built profile so a CV re-extract doesn't silently wipe prior
+    project_doc enrichments.
+
+    ``mapping_rows`` shape (one row per persisted ``document_mappings``):
+        ``{document_id: uuid, mapping_kind, experience_idx?, highlight_idx?,
+           project_idx?, extracted_json?}``
+
+    Each row is grouped by ``document_id`` and fed through the same
+    ``_mutate_profile_apply`` pipeline ``apply_mapping`` uses — same
+    semantics, same result. Rows whose indices no longer resolve against
+    the rebuilt profile (e.g. the user removed an experience from their
+    CV) are skipped with a log line, not raised — losing a mapping is
+    recoverable, blowing up the whole profile build is not.
+    """
+    if not mapping_rows:
+        return profile
+
+    by_doc: dict[uuid.UUID, list[dict[str, Any]]] = {}
+    for r in mapping_rows:
+        by_doc.setdefault(r["document_id"], []).append(r)
+
+    current = profile
+    for doc_id, rows in by_doc.items():
+        doc_extracted = next(
+            (r["extracted_json"] for r in rows if r.get("extracted_json")),
+            {},
+        ) or {}
+        try:
+            current = _mutate_profile_apply(
+                profile=current,
+                doc_id=doc_id,
+                rows=rows,
+                doc_extracted=doc_extracted,
+            )
+        except ValueError as e:
+            logger.warning(
+                "reapply_existing_mappings: dropping mappings for doc=%s — indices no "
+                "longer resolve after CV rebuild (%s)",
+                doc_id,
+                e,
+            )
+    return current
+
+
 def _mutate_profile_apply(
     *,
     profile: Profile,
@@ -350,6 +398,15 @@ async def apply_mapping(
                 proj["name"] = project_title
     new_profile = Profile.model_validate(new_dict)
 
+    # Phase 21 (G4 fix): the profile_builder cache key in
+    # `graph_nodes.node_profile_builder` compares the user's current
+    # document set against `source_doc_ids`. Without folding the new
+    # project_doc id in here, every subsequent prep run sees a mismatch
+    # and re-runs profile_builder unnecessarily.
+    new_source_ids = sorted(
+        {*(str(x) for x in (profile_row.source_doc_ids or [])), str(document_id)}
+    )
+
     async with AsyncSessionLocal() as s:
         await repos.replace_document_mappings(
             s,
@@ -361,7 +418,7 @@ async def apply_mapping(
             s,
             user_id=user_id,
             profile_json=new_profile.model_dump(mode="json"),
-            source_doc_ids=list(profile_row.source_doc_ids or []),
+            source_doc_ids=new_source_ids,
             model_name=settings.model_name,
         )
 
@@ -410,12 +467,19 @@ async def revert_mapping(*, document_id: uuid.UUID, user_id: uuid.UUID) -> None:
         profile=profile, doc_id=document_id, mapping_rows=rows_as_dict
     )
 
+    # Phase 21 (G4 fix): drop the project_doc id from source_doc_ids so the
+    # profile_builder cache key stays in sync with the user's documents
+    # after this doc is deleted.
+    new_source_ids = sorted(
+        str(x) for x in (profile_row.source_doc_ids or []) if str(x) != str(document_id)
+    )
+
     async with AsyncSessionLocal() as s:
         await repos.upsert_profile(
             s,
             user_id=user_id,
             profile_json=new_profile.model_dump(mode="json"),
-            source_doc_ids=list(profile_row.source_doc_ids or []),
+            source_doc_ids=new_source_ids,
             model_name=settings.model_name,
         )
     # mapping rows + chunks cascade-delete with the document row.

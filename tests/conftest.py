@@ -75,8 +75,11 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
 
     from interview_coach.agents.graph import build_interview_graph, build_prep_graph
 
-    app.state.prep_graph = build_prep_graph()
-    app.state.interview_graph = build_interview_graph(MemorySaver())
+    # Phase 21: prep_graph is now checkpointed. Share the same MemorySaver
+    # across both graphs (matches production's shared AsyncSqliteSaver).
+    checkpointer = MemorySaver()
+    app.state.prep_graph = build_prep_graph(checkpointer)
+    app.state.interview_graph = build_interview_graph(checkpointer)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:

@@ -1025,22 +1025,60 @@ summary {
   line-height: 1.4;
 }
 
-.extracted-block {
-  background: #11120f;
-  border-radius: 8px;
-  padding: 12px 14px;
+/* Phase 21.1: inline mapping HITL panel (lives inside Stage 4 of the
+   setup wizard). Visual vocabulary mirrors the rest of the wizard. */
+.wizard-mapping-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-bg, #14151233);
+}
+
+.wizard-mapping-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wizard-mapping-header h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.wizard-label {
+  display: block;
+  font-size: 12px;
+  opacity: 0.7;
+  margin-bottom: 4px;
+}
+
+.wizard-mapping-extracted,
+.wizard-mapping-targets {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 12px 14px;
+  background: #11120f;
+  border-radius: 8px;
 }
 
-.chip-row {
+.wizard-mapping-desc {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.wizard-chip-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.chip {
+.wizard-chip {
   background: rgba(116, 169, 200, 0.18);
   border: 1px solid rgba(116, 169, 200, 0.32);
   border-radius: 999px;
@@ -1048,59 +1086,29 @@ summary {
   font-size: 12px;
 }
 
-.url-list {
+.wizard-url-list {
   margin: 0;
   padding-left: 18px;
   font-size: 13px;
 }
 
-.mapping-tree {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.mapping-exp {
+.wizard-mapping-exp {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 14px;
-}
-
-.mapping-exp header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 6px;
-}
-
-.mapping-exp ul {
-  list-style: none;
-  margin: 0;
-  padding-left: 8px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.mapping-standalone {
-  border: 1px dashed var(--line-strong);
-  border-radius: 8px;
-  padding: 10px 14px;
+.wizard-mapping-exp header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
 }
 
-.suggested-tag {
-  font-style: italic;
-  font-size: 11px;
-  opacity: 0.75;
-  margin-left: 4px;
-}
-
-.hint {
-  font-size: 12px;
-  opacity: 0.72;
-}
-
-.checkbox-row {
+.wizard-checkbox-row {
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -1109,9 +1117,26 @@ summary {
   line-height: 1.45;
 }
 
-.checkbox-row input[type="checkbox"] {
+.wizard-checkbox-row input[type="checkbox"] {
   width: auto;
   margin-top: 3px;
+}
+
+.wizard-checkbox-row--indent {
+  padding-left: 22px;
+}
+
+.wizard-checkbox-row--standalone {
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+.wizard-suggested-tag {
+  font-style: italic;
+  font-size: 11px;
+  opacity: 0.75;
+  margin-left: 4px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1320,19 +1345,6 @@ summary {
   margin-top: 4px;
   font-size: 12px;
   color: var(--muted);
-}
-
-/* Phase 18: prep-status row used by SetupPage Stage 3 deferred mapping */
-.deferred-mapping-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px dashed var(--line-strong);
-  border-radius: 8px;
-  background: var(--paper-strong);
-  color: var(--muted);
-  font-size: 13px;
 }
 
 /* Phase 18: workspace-header tweak so the chip has breathing room */
@@ -1973,13 +1985,6 @@ select:focus {
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: none;
-}
-
-.deferred-mapping-card {
-  background: var(--bg-2);
-  border: 1px dashed var(--border-strong);
-  color: var(--text-1);
-  border-radius: 8px;
 }
 
 .interview-active-job {

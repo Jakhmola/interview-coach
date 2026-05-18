@@ -317,22 +317,37 @@ async def test_prepare_status_reports_missing_cv(
 async def test_prepare_status_ready_includes_compact_artifacts(
     client: AsyncClient, auth_token: str, db_session: AsyncSession
 ) -> None:
+    """Phase 21: detail payload is opt-in via ?detail=true so SetupPage's
+    poll loop doesn't ship the full profile/job/company every 4 s.
+    """
     seeds = await _seed_status_case(client, auth_token, db_session)
 
+    # Default response drops the detail payload.
     r = await client.get(
         "/sessions/prepare/status",
         headers=_auth(auth_token),
         params={"job_id": seeds["job_id"]},
     )
-
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["can_start"] is True
     assert body["missing"] == []
-    assert body["profile"]["summary"] == "Backend engineer focused on reliable APIs."
-    assert body["job"]["title"] == "Senior Backend Engineer"
-    assert body["company"]["company_name"] == "Acme"
-    assert body["company"]["snapshot"]["mission"] == "Build dependable tools."
+    assert body["profile"] is None
+    assert body["job"] is None
+    assert body["company"] is None
+
+    # Opt-in detail includes the full payloads.
+    r2 = await client.get(
+        "/sessions/prepare/status",
+        headers=_auth(auth_token),
+        params={"job_id": seeds["job_id"], "detail": "true"},
+    )
+    assert r2.status_code == 200, r2.text
+    body2 = r2.json()
+    assert body2["profile"]["summary"] == "Backend engineer focused on reliable APIs."
+    assert body2["job"]["title"] == "Senior Backend Engineer"
+    assert body2["company"]["company_name"] == "Acme"
+    assert body2["company"]["snapshot"]["mission"] == "Build dependable tools."
 
 
 # --- streaming ---
@@ -957,8 +972,12 @@ async def test_prepare_skips_when_all_cached(
     )
 
     skipped = [d for ev, d in events if ev == "node_skipped"]
+    # Phase 21.1: prepare_mapping_suggestion (emits node="doc_mapping")
+    # short-circuits when the user has no unmapped project_docs (only a
+    # CV was seeded here).
     assert [d["node"] for d in skipped] == [
         "profile_builder",
+        "doc_mapping",
         "job_analyzer",
         "company_researcher",
     ]

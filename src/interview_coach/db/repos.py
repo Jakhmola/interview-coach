@@ -43,6 +43,46 @@ async def list_documents_for_user(session: AsyncSession, user_id: uuid.UUID) -> 
     return result.scalars().all()
 
 
+async def list_unmapped_project_docs_for_user(
+    session: AsyncSession, user_id: uuid.UUID
+) -> Sequence[Document]:
+    """Phase 21.1: project_docs for a user that have no document_mappings rows.
+
+    Used by ``node_doc_mapping`` in prep_graph to pick the next project_doc
+    to surface to the user for HITL confirmation. Returned oldest-first so
+    multi-doc setups feel sequential ("doc 1 of 3, doc 2 of 3, …").
+    """
+    mapped_doc_ids = select(DocumentMapping.document_id).distinct().scalar_subquery()
+    result = await session.execute(
+        select(Document)
+        .where(
+            Document.user_id == user_id,
+            Document.kind == "project_doc",
+            Document.id.notin_(mapped_doc_ids),
+        )
+        .order_by(Document.created_at.asc())
+    )
+    return result.scalars().all()
+
+
+async def list_document_mappings_for_user(
+    session: AsyncSession, user_id: uuid.UUID
+) -> Sequence[DocumentMapping]:
+    """All ``document_mappings`` rows for a user, oldest-first.
+
+    Phase 21.1: ``build_profile`` consumes these after re-extracting from
+    the CV so the freshly-built profile inherits prior project_doc
+    enrichments. Without this, a CV re-extract would silently wipe every
+    mapping the user had previously confirmed.
+    """
+    result = await session.execute(
+        select(DocumentMapping)
+        .where(DocumentMapping.user_id == user_id)
+        .order_by(DocumentMapping.created_at.asc())
+    )
+    return result.scalars().all()
+
+
 async def get_document(
     session: AsyncSession, document_id: uuid.UUID, user_id: uuid.UUID
 ) -> Document | None:

@@ -33,7 +33,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # both graphs once. The compiled graphs are stashed on app.state so
     # the route layer can pick them up without re-compiling per request.
     async with open_checkpointer(settings.graph_db_path) as checkpointer:
-        app.state.prep_graph = build_prep_graph()
+        # Phase 21: both graphs share the same AsyncSqliteSaver instance.
+        # prep_graph uses thread_id "prep:{user_id}:{job_id}";
+        # interview_graph uses "{session_id}:turn_{n}". Distinct prefixes
+        # mean the two namespaces never collide.
+        app.state.prep_graph = build_prep_graph(checkpointer)
         app.state.interview_graph = build_interview_graph(checkpointer)
 
         # Phase 17: stand up the embedder client and lock the model name +
@@ -48,11 +52,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         try:
             yield
         finally:
-            # Shutdown: flush Langfuse + drop cached MCP client (if any).
+            # Shutdown: flush Langfuse + close embedder HTTP client.
             await flush_langfuse()
-            from interview_coach.mcp.client import reset_client
-
-            await reset_client()
             await embedding_client.aclose()
 
 

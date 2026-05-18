@@ -1,17 +1,30 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, CheckCircle2, FileUp, LinkIcon, RefreshCw } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check as CheckIcon,
+  CheckCircle2,
+  FileUp,
+  LinkIcon,
+  RefreshCw,
+  SkipForward,
+} from "lucide-react";
 import { Link, useNavigate, useOutletContext } from "react-router-dom";
 
 import {
+  DocIntakeExtracted,
+  DocIntakeSuggestion,
   DocumentItem,
   EmbeddingStatus,
   JobItem,
+  MappingRow,
+  MappingSuggestion,
   PrepStatus,
   SseFrame,
   api,
+  prepareSessionResumeStream,
   prepareSessionStream,
 } from "../api";
-import { DocMappingModal } from "../components/DocMappingModal";
 import { LoadingStatus } from "../components/LoadingStatus";
 import { ErrorBanner, StatusPill } from "../components/ui";
 import { codeFrom } from "../errors";
@@ -21,15 +34,35 @@ import { useAuth } from "../state/auth";
 
 const nodeLabels: Record<string, string> = {
   profile_builder: "Reading your CV",
+  doc_mapping: "Mapping supporting docs",
   job_analyzer: "Analyzing the JD",
   company_researcher: "Researching the company",
 };
 
 const nodeLoadingMessages: Record<string, string[]> = {
-  profile_builder: ["Reading your CV", "Finding signal in your projects", "Building candidate profile"],
-  job_analyzer: ["Parsing role expectations", "Extracting must-have skills", "Mapping interview focus"],
-  company_researcher: ["Scanning company context", "Collecting recent signals", "Preparing company notes"],
+  profile_builder: [
+    "Reading your CV",
+    "Finding signal in your projects",
+    "Building candidate profile",
+  ],
+  doc_mapping: [
+    "Reading your supporting docs",
+    "Suggesting where each one fits",
+    "Waiting for your confirmation",
+  ],
+  job_analyzer: [
+    "Parsing role expectations",
+    "Extracting must-have skills",
+    "Mapping interview focus",
+  ],
+  company_researcher: [
+    "Scanning company context",
+    "Collecting recent signals",
+    "Preparing company notes",
+  ],
 };
+
+const PREP_NODE_KEYS = ["profile_builder", "doc_mapping", "job_analyzer", "company_researcher"];
 
 type SetupOutletContext = {
   refreshReadiness: () => Promise<void>;
@@ -48,8 +81,10 @@ const STEP_BLURBS: Record<Step, string> = {
   cv: "We'll read it once and use it to ground every question.",
   jd: "Role, company, must-haves — we'll extract them automatically.",
   docs: "Architecture notes, take-homes, or project write-ups. Skip if you don't have any.",
-  prep: "Reads your CV, analyzes the JD, researches the company. Can take a minute or two.",
+  prep: "Reads your CV, walks supporting docs, analyzes the JD, researches the company.",
 };
+
+// ─────────────────────────── Page ─────────────────────────────────────────
 
 export function SetupPage() {
   const { token } = useAuth();
@@ -66,8 +101,10 @@ export function SetupPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isPreparing, setIsPreparing] = useState(false);
   const [nodeState, setNodeState] = useState<Record<string, string>>({});
-  const [mappingDocId, setMappingDocId] = useState<string | null>(null);
-  const [pendingMappingDocId, setPendingMappingDocId] = useState<string | null>(null);
+  // The mapping suggestion the prep_graph paused on, if any. When non-null,
+  // <StepPrep /> renders the inline MappingPanel; on user submit we POST
+  // /sessions/prepare/resume which re-opens the SSE stream.
+  const [pendingMapping, setPendingMapping] = useState<MappingSuggestion | null>(null);
   const [step, setStep] = useState<Step>("cv");
   // When the user clicks "Add another job" from the ReadyLanding, we
   // bypass the ready-landing for the rest of the session so the wizard
@@ -75,8 +112,11 @@ export function SetupPage() {
   const [overrideReady, setOverrideReady] = useState(false);
   const [didInitStep, setDidInitStep] = useState(false);
   const [jdMode, setJdMode] = useState<"paste" | "url">("paste");
-  const profilePollRef = useRef<number | null>(null);
   const messageTimerRef = useRef<number | null>(null);
+  // Phase 21.1: Stage 2 (JD save) auto-fires /prepare once so profile +
+  // job + company kick off without the user clicking through to Stage 4.
+  // Tracked per active job so we don't re-trigger on re-mounts.
+  const autoPrepFiredRef = useRef<Set<string>>(new Set());
 
   const hasCv = docs.some((doc) => doc.kind === "cv");
   const cv = docs.find((doc) => doc.kind === "cv");
@@ -94,7 +134,10 @@ export function SetupPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const [nextDocs, nextJobs] = await Promise.all([api.listDocuments(token), api.listJobs(token)]);
+      const [nextDocs, nextJobs] = await Promise.all([
+        api.listDocuments(token),
+        api.listJobs(token),
+      ]);
       setDocs(nextDocs);
       setJobs(nextJobs);
       if (!activeJobId && nextJobs[0]) {
@@ -123,28 +166,18 @@ export function SetupPage() {
       .catch(() => setStatus(null));
   }, [token, activeJobId]);
 
-  // One-shot initial step picker — runs once after the first load so
-  // returning users land on the right step. After that, the user drives
-  // navigation via Back / Continue and we don't override their choice.
+  // One-shot initial step picker — runs once after the first load.
   useEffect(() => {
     if (isLoading || didInitStep) return;
-    if (!hasCv) {
-      setStep("cv");
-    } else if (!selectedJob) {
-      setStep("jd");
-    } else if (!status?.can_start) {
-      setStep("prep");
-    }
+    if (!hasCv) setStep("cv");
+    else if (!selectedJob) setStep("jd");
+    else if (!status?.can_start) setStep("prep");
     setDidInitStep(true);
   }, [isLoading, didInitStep, hasCv, selectedJob, status?.can_start]);
 
-  // Auto-dismiss success messages after 3.5s. Also clears when the step
-  // changes so a "saved" toast from step 2 doesn't bleed into step 3.
   useEffect(() => {
     if (!message) return;
-    if (messageTimerRef.current !== null) {
-      window.clearTimeout(messageTimerRef.current);
-    }
+    if (messageTimerRef.current !== null) window.clearTimeout(messageTimerRef.current);
     messageTimerRef.current = window.setTimeout(() => {
       setMessage(null);
       messageTimerRef.current = null;
@@ -156,49 +189,122 @@ export function SetupPage() {
       }
     };
   }, [message]);
-  useEffect(() => {
-    // Clear stale message on step change.
-    setMessage(null);
-  }, [step]);
+  useEffect(() => setMessage(null), [step]);
 
-  // Profile-readiness polling.
-  useEffect(() => {
-    if (!token || !activeJobId) return;
-    if (status?.profile_ready) {
-      if (profilePollRef.current !== null) {
-        window.clearInterval(profilePollRef.current);
-        profilePollRef.current = null;
-      }
-      if (pendingMappingDocId) {
-        setMappingDocId(pendingMappingDocId);
-        setPendingMappingDocId(null);
-      }
-      return;
-    }
-    if (profilePollRef.current !== null) return;
-    let iterations = 0;
-    const MAX_ITERATIONS = 40;
-    profilePollRef.current = window.setInterval(() => {
-      iterations += 1;
-      if (iterations >= MAX_ITERATIONS) {
-        if (profilePollRef.current !== null) {
-          window.clearInterval(profilePollRef.current);
-          profilePollRef.current = null;
-        }
-        return;
-      }
-      api
-        .prepStatus(token, activeJobId)
-        .then(setStatus)
-        .catch(() => {});
-    }, 2000);
-    return () => {
-      if (profilePollRef.current !== null) {
-        window.clearInterval(profilePollRef.current);
-        profilePollRef.current = null;
-      }
+  const handlePrepFrame = (frame: SseFrame) => {
+    const data = frame.data as {
+      node?: string;
+      reason?: string;
+      code?: string;
+      detail?: string;
+      document_id?: string;
+      payload?: MappingSuggestion;
+      remaining?: number;
+      n_rows?: number;
     };
-  }, [token, activeJobId, status?.profile_ready, pendingMappingDocId]);
+    if (frame.event === "node_started" && data.node) {
+      setNodeState((c) => ({ ...c, [data.node!]: "running" }));
+    } else if (frame.event === "node_done" && data.node) {
+      setNodeState((c) => ({ ...c, [data.node!]: "done" }));
+    } else if (frame.event === "node_skipped" && data.node) {
+      setNodeState((c) => ({ ...c, [data.node!]: "cached" }));
+    } else if (frame.event === "mapping_suggestion" && data.payload) {
+      // Mark doc_mapping as running and show the inline mapping panel.
+      setNodeState((c) => ({ ...c, doc_mapping: "running" }));
+      setPendingMapping(data.payload);
+    } else if (frame.event === "mapping_suggestion_failed") {
+      // The intake LLM call failed for this doc; the graph already
+      // skiplisted it. Surface a soft warning; the loop carries on.
+      setMessage(`Couldn't read one of your project docs. Skipped.`);
+    } else if (frame.event === "mapping_applied") {
+      setPendingMapping(null);
+    } else if (frame.event === "mapping_skipped") {
+      setPendingMapping(null);
+    } else if (frame.event === "mapping_apply_failed") {
+      setPendingMapping(null);
+      setError(data.code || data.detail || "mapping_apply_failed");
+    } else if (frame.event === "awaiting_mapping") {
+      // Stream ended pending user input; pendingMapping already set above.
+    } else if (frame.event === "done") {
+      setNodeState((c) => {
+        const next = { ...c };
+        for (const k of PREP_NODE_KEYS) {
+          if (!next[k]) next[k] = "done";
+        }
+        return next;
+      });
+      setPendingMapping(null);
+    } else if (frame.event === "error") {
+      setError(data.code || data.detail || "stream_interrupted");
+    }
+  };
+
+  const runPrep = async (forceRefresh: boolean) => {
+    if (!token || !activeJobId) return;
+    setIsPreparing(true);
+    setNodeState({
+      profile_builder: "pending",
+      doc_mapping: "pending",
+      job_analyzer: "pending",
+      company_researcher: "pending",
+    });
+    setError(null);
+    setMessage(null);
+    setPendingMapping(null);
+    const signal = prepAbort.fresh();
+    try {
+      await prepareSessionStream(token, activeJobId, forceRefresh, handlePrepFrame, signal);
+      await load();
+      const nextStatus = await api.prepStatus(token, activeJobId);
+      setStatus(nextStatus);
+      await refreshReadiness();
+      await refreshActiveJob();
+    } catch (err) {
+      setError(codeFrom(err));
+    } finally {
+      setIsPreparing(false);
+    }
+  };
+
+  const resumeMapping = async (decision:
+    | { action: "apply"; rows: MappingRow[]; title: string; extracted: DocIntakeExtracted }
+    | { action: "skip" }) => {
+    if (!token || !activeJobId) return;
+    setIsPreparing(true);
+    setPendingMapping(null);
+    const signal = prepAbort.fresh();
+    try {
+      await prepareSessionResumeStream(
+        token,
+        { job_id: activeJobId, ...decision },
+        handlePrepFrame,
+        signal,
+      );
+      await load();
+      const nextStatus = await api.prepStatus(token, activeJobId);
+      setStatus(nextStatus);
+      await refreshReadiness();
+    } catch (err) {
+      setError(codeFrom(err));
+    } finally {
+      setIsPreparing(false);
+    }
+  };
+
+  // Phase 21.1: auto-fire /prepare once per (active job) when entering
+  // Stage 2 or later. Skips if prep is already complete OR already
+  // in-flight. The fire-once Set is keyed by job id so switching jobs
+  // re-arms the trigger.
+  useEffect(() => {
+    if (!token || !activeJobId || !hasCv) return;
+    if (status?.can_start) return;
+    if (isPreparing) return;
+    if (autoPrepFiredRef.current.has(activeJobId)) return;
+    if (step === "cv") return; // wait until the user has acknowledged Stage 1
+    autoPrepFiredRef.current.add(activeJobId);
+    void runPrep(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, activeJobId, hasCv, status?.can_start, step]);
 
   const uploadCv = async (event: ChangeEvent<HTMLInputElement>) => {
     if (!token || !event.target.files?.[0]) return;
@@ -206,7 +312,7 @@ export function SetupPage() {
     setError(null);
     try {
       await api.uploadDocument(token, "cv", event.target.files[0]);
-      setMessage("Got it — building your profile.");
+      setMessage("Got it.");
       await load();
       setStep(jobs.length === 0 ? "jd" : "prep");
     } catch (err) {
@@ -222,13 +328,8 @@ export function SetupPage() {
     setError(null);
     try {
       const doc = await api.uploadDocument(token, "project_doc", event.target.files[0]);
-      setMessage(`Uploaded ${doc.filename}.`);
+      setMessage(`Uploaded ${doc.filename}. We'll ask where it fits during prep.`);
       await load();
-      if (status?.profile_ready) {
-        setMappingDocId(doc.id);
-      } else {
-        setPendingMappingDocId(doc.id);
-      }
     } catch (err) {
       setError(codeFrom(err));
     } finally {
@@ -276,54 +377,6 @@ export function SetupPage() {
     }
   };
 
-  const runPrep = async (forceRefresh: boolean) => {
-    if (!token || !activeJobId) return;
-    setIsPreparing(true);
-    setNodeState({
-      profile_builder: "pending",
-      job_analyzer: "pending",
-      company_researcher: "pending",
-    });
-    setError(null);
-    setMessage(null);
-    const signal = prepAbort.fresh();
-    try {
-      await prepareSessionStream(
-        token,
-        activeJobId,
-        forceRefresh,
-        (frame: SseFrame) => {
-          const data = frame.data as { node?: string; reason?: string; code?: string; detail?: string };
-          if (frame.event === "node_started" && data.node) {
-            setNodeState((c) => ({ ...c, [data.node!]: "running" }));
-          }
-          if (frame.event === "node_done" && data.node) {
-            setNodeState((c) => ({ ...c, [data.node!]: "done" }));
-          }
-          if (frame.event === "node_skipped" && data.node) {
-            setNodeState((c) => ({ ...c, [data.node!]: `cached ${data.reason ?? ""}` }));
-          }
-          if (frame.event === "error") {
-            setError(data.code || data.detail || "stream_interrupted");
-          }
-          if (frame.event === "done") {
-            setMessage("Ready for interview.");
-          }
-        },
-        signal,
-      );
-      await load();
-      const nextStatus = await api.prepStatus(token, activeJobId);
-      setStatus(nextStatus);
-      await refreshReadiness();
-      await refreshActiveJob();
-    } catch (err) {
-      setError(codeFrom(err));
-    } finally {
-      setIsPreparing(false);
-    }
-  };
-
   const goNext = () => {
     const idx = STEPS.indexOf(step);
     if (idx < STEPS.length - 1) setStep(STEPS[idx + 1]);
@@ -341,8 +394,6 @@ export function SetupPage() {
     );
   }
 
-  // Returning-user landing: CV + JD + prep done. Show a focused summary
-  // card instead of dumping them back in the wizard.
   if (setupReady && !isPreparing && !overrideReady) {
     return (
       <ReadyLanding
@@ -368,19 +419,6 @@ export function SetupPage() {
 
   return (
     <div className="wizard">
-      {mappingDocId && token ? (
-        <DocMappingModal
-          token={token}
-          documentId={mappingDocId}
-          onClose={() => setMappingDocId(null)}
-          onApplied={async () => {
-            setMappingDocId(null);
-            setMessage("Project mapping saved.");
-            await load();
-          }}
-        />
-      ) : null}
-
       <header className="wizard-header">
         <div className="wizard-progress">
           {STEPS.map((s, i) => (
@@ -417,18 +455,7 @@ export function SetupPage() {
           />
         ) : null}
 
-        {step === "docs" ? (
-          <StepDocs
-            docs={technicalDocs}
-            onPick={uploadProjectDoc}
-            profileReady={status?.profile_ready ?? false}
-            pendingMappingDocId={pendingMappingDocId}
-            onMap={(id) => {
-              if (status?.profile_ready) setMappingDocId(id);
-              else setPendingMappingDocId(id);
-            }}
-          />
-        ) : null}
+        {step === "docs" ? <StepDocs docs={technicalDocs} onPick={uploadProjectDoc} /> : null}
 
         {step === "prep" ? (
           <StepPrep
@@ -437,6 +464,8 @@ export function SetupPage() {
             onPrep={() => runPrep(false)}
             onRefreshCompany={() => runPrep(true)}
             nodeState={nodeState}
+            pendingMapping={pendingMapping}
+            onMappingDecision={resumeMapping}
           />
         ) : null}
       </div>
@@ -483,12 +512,7 @@ export function SetupPage() {
               Continue <ArrowRight size={14} />
             </button>
           ) : (
-            <button
-              className="btn-primary"
-              type="button"
-              onClick={goNext}
-              disabled={!hasCv}
-            >
+            <button className="btn-primary" type="button" onClick={goNext} disabled={!hasCv}>
               Continue <ArrowRight size={14} />
             </button>
           )}
@@ -517,9 +541,7 @@ function StepCv({
     <div className="wizard-body">
       <label className="dropzone">
         <FileUp size={28} />
-        <span className="dropzone-title">
-          {cv ? "Replace your CV" : "Upload your CV"}
-        </span>
+        <span className="dropzone-title">{cv ? "Replace your CV" : "Upload your CV"}</span>
         <span className="dropzone-sub">PDF or DOCX</span>
         <input type="file" accept=".pdf,.docx" onChange={onPick} hidden />
       </label>
@@ -570,12 +592,7 @@ function StepJd({
 
       {mode === "paste" ? (
         <form className="wizard-form" onSubmit={onPaste}>
-          <textarea
-            name="jd_text"
-            rows={10}
-            placeholder="Paste the role description here…"
-            autoFocus
-          />
+          <textarea name="jd_text" rows={10} placeholder="Paste the role description here…" autoFocus />
           <button className="btn-secondary" type="submit">
             Save JD
           </button>
@@ -611,9 +628,7 @@ function StepJd({
                 onClick={() => onSelectJob(j.id)}
               >
                 <span className="wizard-job-item-label">{headline}</span>
-                <span className="wizard-job-item-meta">
-                  {j.char_count.toLocaleString()} chars
-                </span>
+                <span className="wizard-job-item-meta">{j.char_count.toLocaleString()} chars</span>
               </button>
             );
           })}
@@ -626,15 +641,9 @@ function StepJd({
 function StepDocs({
   docs,
   onPick,
-  profileReady,
-  pendingMappingDocId,
-  onMap,
 }: {
   docs: DocumentItem[];
   onPick: (e: ChangeEvent<HTMLInputElement>) => void;
-  profileReady: boolean;
-  pendingMappingDocId: string | null;
-  onMap: (id: string) => void;
 }) {
   return (
     <div className="wizard-body">
@@ -645,16 +654,6 @@ function StepDocs({
         <input type="file" accept=".pdf,.docx" onChange={onPick} hidden />
       </label>
 
-      {pendingMappingDocId && !profileReady ? (
-        <div className="deferred-mapping-card">
-          <RefreshCw size={16} className="spin" />
-          <div>
-            <strong>Profile is still building.</strong>
-            <span> Mapping will open as soon as it's ready.</span>
-          </div>
-        </div>
-      ) : null}
-
       {docs.length > 0 ? (
         <div className="wizard-doc-list">
           {docs.map((d) => {
@@ -663,12 +662,9 @@ function StepDocs({
               <div key={d.id} className="wizard-doc-item">
                 <strong>{d.filename}</strong>
                 <span className="wizard-doc-meta">
-                  {d.project_title ? `"${d.project_title}"` : "Unmapped"}
+                  {d.project_title ? `"${d.project_title}"` : "Unmapped — we'll ask in the next step"}
                 </span>
                 {pill ? <StatusPill tone={pill.tone}>{pill.label}</StatusPill> : null}
-                <button className="btn-quiet" type="button" onClick={() => onMap(d.id)}>
-                  Re-map
-                </button>
               </div>
             );
           })}
@@ -684,26 +680,38 @@ function StepPrep({
   onPrep,
   onRefreshCompany,
   nodeState,
+  pendingMapping,
+  onMappingDecision,
 }: {
   status: PrepStatus | null;
   isPreparing: boolean;
   onPrep: () => void;
   onRefreshCompany: () => void;
   nodeState: Record<string, string>;
+  pendingMapping: MappingSuggestion | null;
+  onMappingDecision: (
+    d:
+      | { action: "apply"; rows: MappingRow[]; title: string; extracted: DocIntakeExtracted }
+      | { action: "skip" },
+  ) => void;
 }) {
   const ready = status?.can_start ?? false;
   const showNodes = Object.keys(nodeState).length > 0;
 
   return (
     <div className="wizard-body">
+      {pendingMapping ? (
+        <MappingPanel suggestion={pendingMapping} onDecision={onMappingDecision} disabled={isPreparing} />
+      ) : null}
+
       {showNodes ? (
         <div className="node-list">
-          {Object.entries(nodeLabels).map(([key, label]) => (
+          {PREP_NODE_KEYS.map((key) => (
             <TaskStatus
               key={key}
-              label={label}
+              label={nodeLabels[key]}
               state={nodeState[key] ?? "pending"}
-              messages={nodeLoadingMessages[key] ?? [`Preparing ${label.toLowerCase()}`]}
+              messages={nodeLoadingMessages[key] ?? [`Preparing ${nodeLabels[key].toLowerCase()}`]}
             />
           ))}
         </div>
@@ -716,31 +724,272 @@ function StepPrep({
         </div>
       )}
 
-      <div className="wizard-actions">
-        {!ready ? (
+      {!pendingMapping ? (
+        <div className="wizard-actions">
+          {!ready ? (
+            <button className="btn-primary" type="button" onClick={onPrep} disabled={isPreparing}>
+              <CheckCircle2 size={14} />
+              {isPreparing ? "Preparing…" : "Run prep"}
+            </button>
+          ) : null}
           <button
-            className="btn-primary"
+            className="btn-ghost"
             type="button"
-            onClick={onPrep}
+            onClick={onRefreshCompany}
             disabled={isPreparing}
+            title="Re-runs only the company researcher; keeps your profile and JD analysis as-is."
           >
-            <CheckCircle2 size={14} />
-            {isPreparing ? "Preparing…" : "Run prep"}
+            <RefreshCw size={14} /> Refresh company info
           </button>
-        ) : null}
-        <button
-          className="btn-ghost"
-          type="button"
-          onClick={onRefreshCompany}
-          disabled={isPreparing}
-          title="Re-runs only the company researcher; keeps your profile and JD analysis as-is."
-        >
-          <RefreshCw size={14} /> Refresh company info
-        </button>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
+
+// ─────────────────────────── Mapping panel (inline HITL) ─────────────────
+
+type Selection =
+  | { kind: "highlight"; experienceIdx: number; highlightIdx: number }
+  | { kind: "experience"; experienceIdx: number }
+  | { kind: "project" };
+
+function selectionKey(sel: Selection): string {
+  if (sel.kind === "highlight") return `H:${sel.experienceIdx}:${sel.highlightIdx}`;
+  if (sel.kind === "experience") return `E:${sel.experienceIdx}`;
+  return "P";
+}
+
+function toMappingRow(sel: Selection): MappingRow {
+  if (sel.kind === "highlight") {
+    return {
+      mapping_kind: "highlight",
+      experience_idx: sel.experienceIdx,
+      highlight_idx: sel.highlightIdx,
+    };
+  }
+  if (sel.kind === "experience") {
+    return { mapping_kind: "experience", experience_idx: sel.experienceIdx };
+  }
+  return { mapping_kind: "project" };
+}
+
+function suggestionToSelection(s: DocIntakeSuggestion): Selection | null {
+  if (s.mapping_kind === "highlight" && s.experience_idx != null && s.highlight_idx != null) {
+    return { kind: "highlight", experienceIdx: s.experience_idx, highlightIdx: s.highlight_idx };
+  }
+  if (s.mapping_kind === "experience" && s.experience_idx != null) {
+    return { kind: "experience", experienceIdx: s.experience_idx };
+  }
+  if (s.mapping_kind === "project") return { kind: "project" };
+  return null;
+}
+
+/** Inline mapping HITL panel — Stage 4 of the wizard. Visual vocabulary
+ * matches the rest of the wizard (dropzone, btn-primary, wizard-body)
+ * instead of the standalone modal it replaces. */
+function MappingPanel({
+  suggestion,
+  onDecision,
+  disabled,
+}: {
+  suggestion: MappingSuggestion;
+  onDecision: (
+    d:
+      | { action: "apply"; rows: MappingRow[]; title: string; extracted: DocIntakeExtracted }
+      | { action: "skip" },
+  ) => void;
+  disabled: boolean;
+}) {
+  const [title, setTitle] = useState(suggestion.title);
+  const [selections, setSelections] = useState<Map<string, Selection>>(() => {
+    const seed = new Map<string, Selection>();
+    const top = [...suggestion.suggestions]
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 1);
+    for (const s of top) {
+      const sel = suggestionToSelection(s);
+      if (sel) seed.set(selectionKey(sel), sel);
+    }
+    return seed;
+  });
+
+  // Re-seed when the suggestion changes (graph loops to next unmapped doc).
+  useEffect(() => {
+    setTitle(suggestion.title);
+    const next = new Map<string, Selection>();
+    const top = [...suggestion.suggestions]
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, 1);
+    for (const s of top) {
+      const sel = suggestionToSelection(s);
+      if (sel) next.set(selectionKey(sel), sel);
+    }
+    setSelections(next);
+  }, [suggestion.document_id]);
+
+  const topSuggestionKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of suggestion.suggestions) {
+      const sel = suggestionToSelection(s);
+      if (sel) set.add(selectionKey(sel));
+    }
+    return set;
+  }, [suggestion]);
+
+  const toggle = (sel: Selection) => {
+    setSelections((prev) => {
+      const next = new Map(prev);
+      const key = selectionKey(sel);
+      if (next.has(key)) next.delete(key);
+      else next.set(key, sel);
+      return next;
+    });
+  };
+
+  const apply = () => {
+    if (selections.size === 0) return;
+    onDecision({
+      action: "apply",
+      rows: [...selections.values()].map(toMappingRow),
+      title: title.trim() || suggestion.title,
+      extracted: suggestion.extracted,
+    });
+  };
+
+  const skip = () => onDecision({ action: "skip" });
+
+  return (
+    <section className="wizard-mapping-panel">
+      <header className="wizard-mapping-header">
+        <div>
+          <span className="eyebrow">Project doc · {suggestion.remaining} remaining</span>
+          <h2>Where does this fit?</h2>
+          <p className="wizard-blurb">
+            We pulled out what looks like a project. Confirm the target on your CV (or skip if
+            it doesn't belong anywhere).
+          </p>
+        </div>
+      </header>
+
+      <label className="wizard-form">
+        <span className="wizard-label">Project title</span>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          maxLength={160}
+          disabled={disabled}
+        />
+      </label>
+
+      <div className="wizard-mapping-extracted">
+        <strong>Extracted</strong>
+        {suggestion.extracted.tech_stack.length > 0 ? (
+          <div className="wizard-chip-row">
+            {suggestion.extracted.tech_stack.map((t) => (
+              <span key={t} className="wizard-chip">{t}</span>
+            ))}
+          </div>
+        ) : null}
+        {suggestion.extracted.description ? (
+          <p className="wizard-mapping-desc">{suggestion.extracted.description}</p>
+        ) : null}
+        {suggestion.extracted.urls.length > 0 ? (
+          <ul className="wizard-url-list">
+            {suggestion.extracted.urls.map((u) => (
+              <li key={u}>
+                <a href={u} target="_blank" rel="noreferrer">{u}</a>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+
+      <div className="wizard-mapping-targets">
+        <strong>Maps to</strong>
+        {suggestion.experiences.length === 0 ? (
+          <p className="wizard-blurb">
+            Your CV had no experiences extracted. Save as a standalone project?
+          </p>
+        ) : (
+          suggestion.experiences.map((exp) => (
+            <article key={exp.experience_idx} className="wizard-mapping-exp">
+              <header>
+                <strong>{exp.role || "Role"}</strong> @ {exp.company || "Company"}
+              </header>
+              <label className="wizard-checkbox-row">
+                <input
+                  type="checkbox"
+                  checked={selections.has(selectionKey({ kind: "experience", experienceIdx: exp.experience_idx }))}
+                  onChange={() => toggle({ kind: "experience", experienceIdx: exp.experience_idx })}
+                  disabled={disabled}
+                />
+                <span>
+                  All highlights at this role
+                  {topSuggestionKeys.has(selectionKey({ kind: "experience", experienceIdx: exp.experience_idx })) ? (
+                    <em className="wizard-suggested-tag"> suggested</em>
+                  ) : null}
+                </span>
+              </label>
+              {exp.highlights.map((hl) => {
+                const sel: Selection = {
+                  kind: "highlight",
+                  experienceIdx: exp.experience_idx,
+                  highlightIdx: hl.highlight_idx,
+                };
+                const key = selectionKey(sel);
+                return (
+                  <label key={hl.highlight_idx} className="wizard-checkbox-row wizard-checkbox-row--indent">
+                    <input
+                      type="checkbox"
+                      checked={selections.has(key)}
+                      onChange={() => toggle(sel)}
+                      disabled={disabled}
+                    />
+                    <span>
+                      {hl.text}
+                      {topSuggestionKeys.has(key) ? (
+                        <em className="wizard-suggested-tag"> suggested</em>
+                      ) : null}
+                    </span>
+                  </label>
+                );
+              })}
+            </article>
+          ))
+        )}
+        <label className="wizard-checkbox-row wizard-checkbox-row--standalone">
+          <input
+            type="checkbox"
+            checked={selections.has("P")}
+            onChange={() => toggle({ kind: "project" })}
+            disabled={disabled}
+          />
+          <span>
+            Save as a standalone project
+            {topSuggestionKeys.has("P") ? <em className="wizard-suggested-tag"> suggested</em> : null}
+          </span>
+        </label>
+      </div>
+
+      <div className="wizard-actions">
+        <button
+          className="btn-primary"
+          type="button"
+          onClick={apply}
+          disabled={disabled || selections.size === 0}
+        >
+          <CheckIcon size={14} /> Confirm mapping
+        </button>
+        <button className="btn-ghost" type="button" onClick={skip} disabled={disabled}>
+          <SkipForward size={14} /> Skip this doc
+        </button>
+      </div>
+    </section>
+  );
+}
+
+// ─────────────────────────── Ready landing + helpers ─────────────────────
 
 function ReadyLanding({
   cv,
@@ -801,8 +1050,6 @@ function ReadyLanding({
     </div>
   );
 }
-
-// ─────────────────────────── small helpers ────────────────────────────────
 
 function Check({ label, ok }: { label: string; ok?: boolean }) {
   return (

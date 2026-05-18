@@ -44,6 +44,12 @@ from interview_coach.agents.nodes.company_researcher import (
     NoUsablePages,
     research_company,
 )
+from interview_coach.agents.nodes.doc_intake import (
+    DocIntakeError,
+    ProfileMissing,
+    apply_mapping,
+    run_intake,
+)
 from interview_coach.agents.nodes.evaluator import stream_evaluation
 from interview_coach.agents.nodes.job_analyzer import JobNotFoundError, analyze_job
 from interview_coach.agents.nodes.profile_builder import NoDocumentsError, build_profile
@@ -77,7 +83,7 @@ async def node_profile_builder(state: InterviewState) -> dict[str, Any]:
         writer({"event": "node_skipped", "node": "profile_builder", "reason": "cached"})
         return {
             "profile": existing.profile_json,
-            "next_step": "job_analyzer",
+            "next_step": "doc_intake_fanout",
         }
 
     writer({"event": "node_started", "node": "profile_builder"})
@@ -96,7 +102,244 @@ async def node_profile_builder(state: InterviewState) -> dict[str, Any]:
     writer({"event": "node_done", "node": "profile_builder"})
     return {
         "profile": profile.model_dump(),
-        "next_step": "job_analyzer",
+        "next_step": "doc_intake_fanout",
+    }
+
+
+async def node_prepare_mapping_suggestion(state: InterviewState) -> dict[str, Any]:
+    """Phase 21.1: pick the next unmapped project_doc and run ``run_intake``
+    against it. Three nodes form the per-doc HITL loop:
+
+        prepare_mapping_suggestion → await_mapping_confirm → apply_or_skip_mapping
+                       ↑__________________________________________│ (loop while unmapped)
+
+    Splitting "prepare" from "await" matters because LangGraph re-executes
+    an interrupted node on resume — running the LLM call in the same node
+    as the ``interrupt(...)`` would (a) waste an LLM call per resume and
+    (b) produce a different suggestion than the one the user actually
+    confirmed. Stashing the result in ``state.pending_mapping`` makes the
+    await/apply nodes deterministic on replay.
+
+    When zero unmapped docs remain, emits ``node_skipped`` and routes
+    straight to ``job_analyzer``.
+    """
+    user_id = uuid.UUID(state["user_id"])
+    writer = get_stream_writer()
+    skiplist = set(state.get("skipped_mapping_doc_ids") or [])
+
+    async with AsyncSessionLocal() as s:
+        unmapped_all = await repos.list_unmapped_project_docs_for_user(s, user_id)
+        profile_row = await repos.get_profile(s, user_id)
+
+    unmapped = [d for d in unmapped_all if str(d.id) not in skiplist]
+    if not unmapped:
+        writer(
+            {
+                "event": "node_skipped",
+                "node": "doc_mapping",
+                "reason": "no_unmapped_project_docs",
+            }
+        )
+        return {"pending_mapping": None, "next_step": "job_analyzer"}
+
+    next_doc = unmapped[0]
+    remaining = len(unmapped)
+    profile_json = profile_row.profile_json if profile_row is not None else None
+
+    writer(
+        {
+            "event": "node_started",
+            "node": "doc_mapping",
+            "document_id": str(next_doc.id),
+            "remaining": remaining,
+        }
+    )
+
+    try:
+        intake = await run_intake(next_doc.id, user_id)
+    except (DocIntakeError, ProfileMissing) as e:
+        # Per-doc failure: emit, skip this doc, loop. The doc stays
+        # unmapped in DB; user can delete + re-upload from ManagePage.
+        # We must NOT call interrupt() — there's nothing to confirm.
+        logger.warning("doc_mapping: run_intake failed for doc=%s: %s", next_doc.id, e)
+        writer(
+            {
+                "event": "mapping_suggestion_failed",
+                "document_id": str(next_doc.id),
+                "code": type(e).__name__,
+                "detail": str(e),
+            }
+        )
+        # Stash a sentinel so apply_or_skip_mapping knows to advance.
+        return {
+            "pending_mapping": {
+                "document_id": str(next_doc.id),
+                "skip_reason": "intake_failed",
+            },
+            "next_step": "apply_or_skip_mapping",
+        }
+
+    payload = _build_mapping_suggestion_payload(
+        document_id=next_doc.id,
+        intake=intake,
+        doc_raw_text=next_doc.raw_text,
+        profile_json=profile_json,
+        remaining=remaining,
+    )
+    writer({"event": "mapping_suggestion", "document_id": str(next_doc.id), "payload": payload})
+
+    # The await node reads `pending_mapping` to know which doc this
+    # interrupt is about. ``intake_extracted`` is what apply_mapping
+    # needs as its ``extracted`` arg — saved so we don't re-run the LLM.
+    return {
+        "pending_mapping": {
+            "document_id": str(next_doc.id),
+            "intake_extracted": intake.extracted.model_dump(),
+            "intake_title": intake.title,
+            "remaining": remaining,
+        },
+        "next_step": "await_mapping_confirm",
+    }
+
+
+def _build_mapping_suggestion_payload(
+    *,
+    document_id: uuid.UUID,
+    intake: Any,
+    doc_raw_text: str,
+    profile_json: dict[str, Any] | None,
+    remaining: int,
+) -> dict[str, Any]:
+    """Build the SSE ``mapping_suggestion`` payload. Mirrors the shape the
+    FE renders inline at Stage 4 of setup. ``remaining`` lets the FE show
+    "doc N of M" without a follow-up request."""
+    PREVIEW_CHARS = 500
+    experiences: list[dict[str, Any]] = []
+    if profile_json is not None:
+        for i, exp in enumerate(profile_json.get("experiences") or []):
+            if not isinstance(exp, dict):
+                continue
+            highlights_out: list[dict[str, Any]] = []
+            for j, hl in enumerate(exp.get("highlights") or []):
+                if isinstance(hl, dict):
+                    highlights_out.append(
+                        {"highlight_idx": j, "text": str(hl.get("text") or "")}
+                    )
+            experiences.append(
+                {
+                    "experience_idx": i,
+                    "company": str(exp.get("company") or ""),
+                    "role": str(exp.get("role") or ""),
+                    "highlights": highlights_out,
+                }
+            )
+    return {
+        "document_id": str(document_id),
+        "title": intake.title,
+        "preview": doc_raw_text[:PREVIEW_CHARS],
+        "extracted": intake.extracted.model_dump(),
+        "suggestions": [s.model_dump() for s in intake.suggestions],
+        "experiences": experiences,
+        "remaining": remaining,
+    }
+
+
+async def node_await_mapping_confirm(state: InterviewState) -> dict[str, Any]:
+    """Pure interrupt node — pauses until the user confirms or skips the
+    pending mapping. Mirror of ``node_await_answer`` in the interview
+    graph: no side-effects beyond the ``interrupt(...)`` call, so resume
+    replays are free.
+
+    Resume payload shape: ``{"action": "apply"|"skip", "rows": [...],
+    "title": str, "extracted": {...}}``. ``rows`` and ``title`` /
+    ``extracted`` are only required when ``action=="apply"``.
+    """
+    pending = state.get("pending_mapping") or {}
+    # Failed-intake doc: nothing to confirm — apply_or_skip_mapping will
+    # immediately advance. Don't burn an interrupt cycle on it.
+    if pending.get("skip_reason"):
+        return {"mapping_resume": None, "next_step": "apply_or_skip_mapping"}
+    resume = interrupt(
+        {
+            "awaiting": "mapping_confirm",
+            "document_id": pending.get("document_id"),
+        }
+    )
+    return {
+        "mapping_resume": resume if isinstance(resume, dict) else {"action": "skip"},
+        "next_step": "apply_or_skip_mapping",
+    }
+
+
+async def node_apply_or_skip_mapping(state: InterviewState) -> dict[str, Any]:
+    """Persist the user's mapping decision, then route back to
+    ``prepare_mapping_suggestion`` to handle the next unmapped doc (or
+    fall through to ``job_analyzer`` once they're all done).
+
+    Side-effects (``apply_mapping``) live here, not in the await node,
+    so a resume replay can never double-persist.
+    """
+    user_id = uuid.UUID(state["user_id"])
+    writer = get_stream_writer()
+    pending = state.get("pending_mapping") or {}
+    document_id_str = pending.get("document_id")
+    skiplist = list(state.get("skipped_mapping_doc_ids") or [])
+
+    # Intake-failed branch: the doc never made it to a suggestion. We
+    # add it to the skiplist so prepare_mapping_suggestion doesn't loop
+    # forever on the same broken doc.
+    if pending.get("skip_reason") == "intake_failed":
+        if document_id_str and document_id_str not in skiplist:
+            skiplist.append(document_id_str)
+        return {
+            "pending_mapping": None,
+            "mapping_resume": None,
+            "skipped_mapping_doc_ids": skiplist,
+            "next_step": "prepare_mapping_suggestion",
+        }
+
+    resume = state.get("mapping_resume") or {}
+    action = resume.get("action", "skip")
+
+    if action == "apply" and document_id_str:
+        rows = list(resume.get("rows") or [])
+        title = resume.get("title") or pending.get("intake_title") or "Project"
+        extracted = resume.get("extracted") or pending.get("intake_extracted") or {}
+        try:
+            n = await apply_mapping(
+                document_id=uuid.UUID(document_id_str),
+                user_id=user_id,
+                rows=rows,
+                extracted=extracted,
+                project_title=str(title),
+            )
+            writer({"event": "mapping_applied", "document_id": document_id_str, "n_rows": n})
+        except (ValueError, ProfileMissing) as e:
+            # Bad row indices etc. — treat as a skip so the loop advances;
+            # the doc stays unmapped in DB and the user can revisit it
+            # from ManagePage later.
+            logger.warning("doc_mapping: apply_mapping failed for doc=%s: %s", document_id_str, e)
+            writer(
+                {
+                    "event": "mapping_apply_failed",
+                    "document_id": document_id_str,
+                    "code": type(e).__name__,
+                    "detail": str(e),
+                }
+            )
+            if document_id_str not in skiplist:
+                skiplist.append(document_id_str)
+    else:
+        if document_id_str:
+            writer({"event": "mapping_skipped", "document_id": document_id_str})
+            if document_id_str not in skiplist:
+                skiplist.append(document_id_str)
+
+    return {
+        "pending_mapping": None,
+        "mapping_resume": None,
+        "skipped_mapping_doc_ids": skiplist,
+        "next_step": "prepare_mapping_suggestion",
     }
 
 

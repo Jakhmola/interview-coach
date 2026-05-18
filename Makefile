@@ -1,4 +1,4 @@
-.PHONY: help up down logs build rebuild ps sh-api sh-ui sh-db sh-embedder embedder-logs db-ui test fmt lint lock sync
+.PHONY: help up down logs build rebuild ps sh-api sh-ui sh-db sh-embedder embedder-logs db-ui test fmt lint lock sync wipe-checkpoints
 
 help:
 	@echo "make up        - docker compose up -d (build if needed)"
@@ -18,6 +18,7 @@ help:
 	@echo "make lint      - ruff check"
 	@echo "make lock      - uv lock"
 	@echo "make sync      - uv sync"
+	@echo "make wipe-checkpoints - drop the graph_data volume (LangGraph checkpoints). Required on prep_graph topology change."
 
 up:
 	docker compose up -d --build
@@ -74,3 +75,12 @@ lock:
 
 sync:
 	uv sync
+
+# Drop the named volume that stores LangGraph checkpoints. Run after any
+# graph topology change (node added/removed/renamed) — stale checkpoints
+# will try to resume from a node ID that no longer exists. Safe to run
+# at any time; the volume is recreated on the next `make up`.
+wipe-checkpoints:
+	docker compose down
+	docker volume rm interview_coach_graph_data 2>/dev/null || true
+	@echo "graph_data volume removed. Run 'make up' to recreate."

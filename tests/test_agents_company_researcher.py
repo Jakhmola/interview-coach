@@ -1,4 +1,9 @@
-"""CompanyResearcher unit tests with mocked MCP loader, Tavily, and LLM."""
+"""CompanyResearcher unit tests with mocked Tavily and LLM.
+
+Phase 21: MCP removed. ``_patch_loader`` is now a compat shim that
+writes ``parsed_json`` directly to the per-test SQLite row, since
+``company_researcher`` reads through ``repos.get_job``.
+"""
 
 from __future__ import annotations
 
@@ -88,28 +93,37 @@ def _patch_settings_key(monkeypatch: pytest.MonkeyPatch, value: str | None) -> N
     monkeypatch.setattr(company_researcher.settings, "tavily_api_key", value)
 
 
-def _patch_loader(
+async def _patch_loader(
     monkeypatch: pytest.MonkeyPatch,
     payload: dict[str, Any] | None = None,
     *,
     exc: Exception | None = None,
 ) -> None:
-    async def loader(_uid: str, _jid: str) -> dict[str, Any]:
-        if exc is not None:
-            raise exc
-        assert payload is not None
-        return payload
+    """Phase 21 compat shim — async because we now write straight to the
+    per-test SQLite session (company_researcher reads via repos.get_job).
 
-    monkeypatch.setattr(company_researcher, "_load_job", loader)
+    ``payload`` carries ``{"job_id", "user_id", "parsed"}``. ``exc=...``
+    is now a no-op — callers that want JobNotAnalyzed should pass a
+    fresh UUID that doesn't exist in the DB.
+    """
+    if payload is None:
+        return
+    factory = company_researcher.AsyncSessionLocal
+    async with factory() as s:
+        # repos.update_job_parsed_json normally expects a non-empty dict.
+        # An empty dict here keeps ``parsed_json`` falsy on the row, which
+        # is what the "not analyzed" branch in research_company checks.
+        await repos.update_job_parsed_json(
+            s, payload["job_id"], payload["user_id"], payload.get("parsed") or {}
+        )
 
 
 def _job_payload(job: Job, *, parsed: dict[str, Any] | None) -> dict[str, Any]:
+    """Identifiers the Phase-21 ``_patch_loader`` writes back to the DB."""
     return {
-        "id": str(job.id),
-        "raw_text": job.raw_text,
-        "parsed_json": parsed,
-        "source": "pasted",
-        "source_url": None,
+        "job_id": job.id,
+        "user_id": job.user_id,
+        "parsed": parsed,
     }
 
 
@@ -120,7 +134,7 @@ async def test_research_company_happy_path(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_settings_key(monkeypatch, "fake-key")
-    _patch_loader(
+    await _patch_loader(
         monkeypatch,
         _job_payload(
             analyzed_job,
@@ -192,7 +206,7 @@ async def test_research_company_cache_hit(
     )
 
     _patch_settings_key(monkeypatch, "fake-key")
-    _patch_loader(
+    await _patch_loader(
         monkeypatch,
         _job_payload(analyzed_job, parsed={"company_name": "Acme"}),
     )
@@ -235,7 +249,7 @@ async def test_force_refresh_bypasses_cache(
     )
 
     _patch_settings_key(monkeypatch, "fake-key")
-    _patch_loader(
+    await _patch_loader(
         monkeypatch,
         _job_payload(analyzed_job, parsed={"company_name": "Acme"}),
     )
@@ -270,7 +284,7 @@ async def test_company_name_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_settings_key(monkeypatch, "fake-key")
-    _patch_loader(
+    await _patch_loader(
         monkeypatch,
         _job_payload(analyzed_job, parsed={"company_name": None, "title": "X"}),
     )
@@ -286,7 +300,7 @@ async def test_job_not_analyzed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_settings_key(monkeypatch, "fake-key")
-    _patch_loader(
+    await _patch_loader(
         monkeypatch,
         _job_payload(analyzed_job, parsed=None),
     )
@@ -303,7 +317,7 @@ async def test_missing_tavily_key_surfaces(
 ) -> None:
     """Missing key bubbles up as KeyMissing from tavily_search (real helper)."""
     _patch_settings_key(monkeypatch, None)
-    _patch_loader(
+    await _patch_loader(
         monkeypatch,
         _job_payload(analyzed_job, parsed={"company_name": "Acme"}),
     )
@@ -319,7 +333,7 @@ async def test_no_search_hits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_settings_key(monkeypatch, "fake-key")
-    _patch_loader(
+    await _patch_loader(
         monkeypatch,
         _job_payload(analyzed_job, parsed={"company_name": "Acme"}),
     )
@@ -340,7 +354,7 @@ async def test_all_extracts_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_settings_key(monkeypatch, "fake-key")
-    _patch_loader(
+    await _patch_loader(
         monkeypatch,
         _job_payload(analyzed_job, parsed={"company_name": "Acme"}),
     )
@@ -366,7 +380,7 @@ async def test_research_unknown_job(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_settings_key(monkeypatch, "fake-key")
-    _patch_loader(
+    await _patch_loader(
         monkeypatch,
         exc=company_researcher.JobNotAnalyzed("nope"),
     )

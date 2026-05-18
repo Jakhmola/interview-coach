@@ -20,7 +20,6 @@ from interview_coach.db.session import AsyncSessionLocal
 from interview_coach.ingestion.errors import FetchFailed
 from interview_coach.llm.client import ainvoke_with_telemetry, chat_model
 from interview_coach.llm.telemetry import set_node_context
-from interview_coach.mcp.client import decode_tool_result, get_tools
 from interview_coach.providers.base import SearchResult
 from interview_coach.providers.tavily import fetch_url_text, tavily_search
 
@@ -43,16 +42,6 @@ class NoSearchHits(Exception):
 
 class NoUsablePages(Exception):
     """Raised when every candidate URL failed to extract."""
-
-
-async def _load_job(user_id: str, job_id: str) -> dict:
-    tools = {t.name: t for t in await get_tools()}
-    decoded = decode_tool_result(
-        await tools["get_job"].ainvoke({"job_id": job_id, "user_id": user_id})
-    )
-    if not decoded or decoded[0] is None:
-        raise JobNotAnalyzed(f"job {job_id} not found for user {user_id}")
-    return decoded[0]
 
 
 def _dedupe_by_url(results: list[SearchResult]) -> list[SearchResult]:
@@ -122,8 +111,11 @@ async def research_company(
         NoSearchHits: Tavily returned zero results.
         NoUsablePages: every candidate URL failed to extract.
     """
-    job = await _load_job(str(user_id), str(job_id))
-    parsed = job.get("parsed_json") or {}
+    async with AsyncSessionLocal() as session:
+        job = await repos.get_job(session, job_id, user_id)
+    if job is None:
+        raise JobNotAnalyzed(f"job {job_id} not found for user {user_id}")
+    parsed = job.parsed_json or {}
     if not parsed:
         raise JobNotAnalyzed(f"job {job_id} has no parsed_json; run JobAnalyzer first")
 

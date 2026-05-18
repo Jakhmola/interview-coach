@@ -1,4 +1,5 @@
-"""JobAnalyzer unit tests with mocked MCP loader and mocked LLM."""
+"""JobAnalyzer unit tests with direct repo read (Phase 21: MCP removed)
+and mocked LLM."""
 
 from collections.abc import AsyncIterator
 
@@ -56,18 +57,6 @@ async def test_analyze_job_persists_into_parsed_json(
     alice_job: Job,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def fake_loader(uid: str, jid: str) -> dict:
-        assert uid == str(alice.id)
-        assert jid == str(alice_job.id)
-        return {
-            "id": str(alice_job.id),
-            "raw_text": alice_job.raw_text,
-            "source": "pasted",
-            "source_url": None,
-        }
-
-    monkeypatch.setattr(job_analyzer, "_load_job", fake_loader)
-
     async def fake_chat_model_structured(_schema, _messages, *, temperature, **_overrides):
         return _fake_analysis()
 
@@ -91,14 +80,10 @@ async def test_analyze_job_persists_into_parsed_json(
 async def test_analyze_job_not_found(
     agent_session: AsyncSession,
     alice: User,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    async def raises(*_: object) -> dict:
-        raise job_analyzer.JobNotFoundError("nope")
-
-    monkeypatch.setattr(job_analyzer, "_load_job", raises)
-
     import uuid as _uuid
 
+    # No row in DB for this id ⇒ direct repos.get_job returns None ⇒
+    # analyze_job raises JobNotFoundError.
     with pytest.raises(job_analyzer.JobNotFoundError):
         await job_analyzer.analyze_job(_uuid.uuid4(), alice.id)

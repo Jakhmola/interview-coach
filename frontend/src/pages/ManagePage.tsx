@@ -76,17 +76,6 @@ export function ManagePage() {
     }
   };
 
-  const rebuildProfile = async () => {
-    if (!token || !cv) return;
-    setError(null);
-    try {
-      await api.rebuildProfile(token, cv.id);
-      setMessage("Rebuilding your profile…");
-    } catch (err) {
-      setError(codeFrom(err));
-    }
-  };
-
   return (
     <div className="manage-page">
       <header className="manage-header">
@@ -118,9 +107,6 @@ export function ManagePage() {
               ) : null}
             </div>
             <div className="manage-card-actions">
-              <button className="btn-ghost" type="button" onClick={rebuildProfile}>
-                Rebuild profile
-              </button>
               <ArmedDeleteButton
                 label="Delete CV"
                 icon={<Trash2 size={14} />}

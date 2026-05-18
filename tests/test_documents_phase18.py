@@ -1,12 +1,16 @@
-"""Phase 18 backend additions:
+"""Phase 18 + 21.1 — surviving subset of the original document tests.
 
-- Auto profile-build on CV upload (background task scheduled).
-- POST /documents/{cv_id}/rebuild-profile (idempotent, single-flight, 202).
-- embedding_status field on GET /documents and GET /documents/{id}.
-- DELETE /documents/{cv_id} refuses with 409 cv_in_use if active sessions exist.
+Phase 21.1 removed:
+- Auto profile-build on CV upload (prep_graph is the sole owner).
+- POST /documents/{cv_id}/rebuild-profile (call prep_graph with
+  force_refresh or delete + re-upload the CV instead).
 
-These tests stub the underlying ``profile_builder.build_profile`` and the
-RAG embedding helper so unit tests stay fast and hermetic.
+What remains and still matters:
+- CV upload still schedules background CV embedding (RAG corpus).
+- project_doc upload does NOT schedule embedding (deferred to apply_mapping).
+- ``embedding_status`` is computed correctly on upload.
+- DELETE /documents/{cv_id} refuses with 409 ``cv_in_use`` if active sessions
+  exist; deleting a CV also drops the profile.
 """
 
 from __future__ import annotations
@@ -24,33 +28,26 @@ def _auth(token: str) -> dict[str, str]:
 
 
 @pytest.fixture
-async def patched_bg_tasks() -> AsyncIterator[dict[str, AsyncMock]]:
-    """Patch the two background helpers so tests can assert on call counts
-    without actually doing embedding / LLM work."""
+async def patched_embed() -> AsyncIterator[AsyncMock]:
+    """Patch the background embedding helper so tests can assert on call
+    counts without hitting the embedder sidecar."""
     embed = AsyncMock()
-    build = AsyncMock()
-    with (
-        patch(
-            "interview_coach.api.documents.routes._embed_in_background",
-            new=embed,
-        ),
-        patch(
-            "interview_coach.api.documents.routes._profile_build_in_background",
-            new=build,
-        ),
-    ):
-        yield {"embed": embed, "build": build}
+    with patch("interview_coach.api.documents.routes._embed_in_background", new=embed):
+        yield embed
 
 
-# --- profile build scheduled on CV upload -----------------------------
+# --- CV upload: embedding scheduled, profile build NOT scheduled ------
 
 
-async def test_upload_cv_schedules_profile_build(
+async def test_upload_cv_schedules_embedding_only(
     client: AsyncClient,
     auth_token: str,
     sample_pdf: bytes,
-    patched_bg_tasks: dict[str, AsyncMock],
+    patched_embed: AsyncMock,
 ) -> None:
+    """Phase 21.1: ``upload_document`` schedules only the RAG embedding
+    task. Profile-building is owned by prep_graph — verifying we removed
+    the background trigger so the two paths can't race each other."""
     r = await client.post(
         "/documents",
         headers=_auth(auth_token),
@@ -59,16 +56,18 @@ async def test_upload_cv_schedules_profile_build(
     )
     assert r.status_code == 201, r.text
     await _drain_background()
-    assert patched_bg_tasks["embed"].await_count == 1
-    assert patched_bg_tasks["build"].await_count == 1
+    assert patched_embed.await_count == 1
 
 
-async def test_upload_project_doc_does_not_build_profile(
+async def test_upload_project_doc_schedules_nothing(
     client: AsyncClient,
     auth_token: str,
     sample_docx: bytes,
-    patched_bg_tasks: dict[str, AsyncMock],
+    patched_embed: AsyncMock,
 ) -> None:
+    """project_doc embedding is deferred until ``apply_mapping`` runs so
+    chunks carry the user-confirmed project_title. Upload should not
+    schedule any background task."""
     DOCX_CT = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     r = await client.post(
         "/documents",
@@ -78,71 +77,7 @@ async def test_upload_project_doc_does_not_build_profile(
     )
     assert r.status_code == 201, r.text
     await _drain_background()
-    assert patched_bg_tasks["embed"].await_count == 0
-    assert patched_bg_tasks["build"].await_count == 0
-
-
-# --- rebuild-profile endpoint -----------------------------------------
-
-
-async def test_rebuild_profile_endpoint(
-    client: AsyncClient,
-    auth_token: str,
-    sample_pdf: bytes,
-    patched_bg_tasks: dict[str, AsyncMock],
-) -> None:
-    r = await client.post(
-        "/documents",
-        headers=_auth(auth_token),
-        data={"kind": "cv"},
-        files={"file": ("cv.pdf", sample_pdf, "application/pdf")},
-    )
-    assert r.status_code == 201, r.text
-    cv_id = r.json()["id"]
-    await _drain_background()
-    assert patched_bg_tasks["build"].await_count == 1
-
-    r2 = await client.post(
-        f"/documents/{cv_id}/rebuild-profile",
-        headers=_auth(auth_token),
-    )
-    assert r2.status_code == 202, r2.text
-    assert r2.json() == {"status": "scheduled"}
-    await _drain_background()
-    assert patched_bg_tasks["build"].await_count == 2
-
-
-async def test_rebuild_profile_404_on_unknown_doc(
-    client: AsyncClient,
-    auth_token: str,
-) -> None:
-    r = await client.post(
-        f"/documents/{uuid.uuid4()}/rebuild-profile",
-        headers=_auth(auth_token),
-    )
-    assert r.status_code == 404
-
-
-async def test_rebuild_profile_rejects_project_doc(
-    client: AsyncClient,
-    auth_token: str,
-    sample_docx: bytes,
-) -> None:
-    DOCX_CT = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    r = await client.post(
-        "/documents",
-        headers=_auth(auth_token),
-        data={"kind": "project_doc"},
-        files={"file": ("proj.docx", sample_docx, DOCX_CT)},
-    )
-    assert r.status_code == 201
-    doc_id = r.json()["id"]
-
-    r2 = await client.post(
-        f"/documents/{doc_id}/rebuild-profile",
-        headers=_auth(auth_token),
-    )
-    assert r2.status_code == 400
+    assert patched_embed.await_count == 0
 
 
 # --- embedding_status field ------------------------------------------
@@ -152,7 +87,7 @@ async def test_embedding_status_present_on_upload(
     client: AsyncClient,
     auth_token: str,
     sample_pdf: bytes,
-    patched_bg_tasks: dict[str, AsyncMock],
+    patched_embed: AsyncMock,
 ) -> None:
     r = await client.post(
         "/documents",
@@ -168,7 +103,7 @@ async def test_embedding_status_n_a_for_unmapped_project_doc(
     client: AsyncClient,
     auth_token: str,
     sample_docx: bytes,
-    patched_bg_tasks: dict[str, AsyncMock],
+    patched_embed: AsyncMock,
 ) -> None:
     DOCX_CT = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     r = await client.post(
@@ -184,7 +119,7 @@ async def test_list_documents_includes_embedding_status(
     client: AsyncClient,
     auth_token: str,
     sample_pdf: bytes,
-    patched_bg_tasks: dict[str, AsyncMock],
+    patched_embed: AsyncMock,
 ) -> None:
     await client.post(
         "/documents",
@@ -208,7 +143,7 @@ async def test_delete_cv_blocked_by_active_session(
     auth_token: str,
     sample_pdf: bytes,
     db_session,  # noqa: ANN001 — sqlite async session from conftest
-    patched_bg_tasks: dict[str, AsyncMock],
+    patched_embed: AsyncMock,
 ) -> None:
     from interview_coach.db import repos
 
@@ -243,15 +178,12 @@ async def test_delete_cv_blocked_by_active_session(
     assert d.json()["detail"] == "cv_in_use"
 
 
-# --- delete-CV also drops profile ------------------------------------
-
-
 async def test_delete_cv_drops_profile(
     client: AsyncClient,
     auth_token: str,
     sample_pdf: bytes,
     db_session,  # noqa: ANN001
-    patched_bg_tasks: dict[str, AsyncMock],
+    patched_embed: AsyncMock,
 ) -> None:
     """When the CV is deleted, the profile that was grounded in it must
     also be dropped — otherwise the wizard sees stale profile_ready=True
@@ -269,7 +201,6 @@ async def test_delete_cv_drops_profile(
     me = await client.get("/auth/me", headers=_auth(auth_token))
     user_id = uuid.UUID(me.json()["id"])
 
-    # Seed a profile row directly (simulating profile_builder having run).
     await repos.upsert_profile(
         db_session,
         user_id=user_id,
@@ -290,9 +221,9 @@ async def test_delete_cv_drops_profile(
 
 
 async def _drain_background() -> None:
-    """Yield once so any ``asyncio.create_task(...)`` scheduled inside the
+    """Yield twice so any ``asyncio.create_task(...)`` scheduled inside the
     handler gets a chance to start (and complete, since our patched
-    AsyncMocks are instant). One ``asyncio.sleep(0)`` is enough."""
+    AsyncMocks are instant)."""
     import asyncio
 
     await asyncio.sleep(0)

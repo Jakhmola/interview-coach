@@ -46,6 +46,21 @@ class InterviewState(TypedDict, total=False):
     turn_index: int
     session_status: SessionStatus
 
+    # --- prep_graph doc-mapping loop (Phase 21.1) ---
+    # ``pending_mapping``: the intake-result the prepare node stashes for
+    # the await + apply nodes downstream. Persisted on state so a resume
+    # replay doesn't re-run the LLM (which would also produce a different
+    # suggestion than the one the user confirmed).
+    pending_mapping: dict[str, Any] | None
+    # ``mapping_resume``: the user's resume payload from the most recent
+    # interrupt — read by apply_or_skip, then cleared.
+    mapping_resume: dict[str, Any] | None
+    # ``skipped_mapping_doc_ids``: doc ids the user explicitly skipped
+    # during the *current* prep run. Scoped to the prep run via the
+    # ``prep:{user}:{job}`` thread; cleared by ``initial_state`` on each
+    # fresh ``/prepare`` POST so a returning user can re-decide.
+    skipped_mapping_doc_ids: list[str]
+
     # --- supervisor routing / observability ---
     next_step: str
 

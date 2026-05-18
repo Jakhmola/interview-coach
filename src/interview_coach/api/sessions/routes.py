@@ -35,6 +35,7 @@ from interview_coach.agents.streaming_json import StreamingJsonError
 from interview_coach.api.auth.deps import get_current_user
 from interview_coach.api.sessions.schemas import (
     AnswerSubmitRequest,
+    PrepareMappingResumeRequest,
     PrepareRequest,
     PrepStatusOut,
     RoundType,
@@ -144,8 +145,15 @@ async def prepare_status(
     job_id: uuid.UUID,
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
+    detail: bool = False,
 ) -> PrepStatusOut:
-    """Read-only readiness view for the frontend setup flow."""
+    """Read-only readiness view for the frontend setup flow.
+
+    Phase 21: default response is readiness booleans only. Pass
+    ``?detail=true`` to include the full profile / job / company
+    payloads (callers should pass that flag explicitly — SetupPage's
+    2-4 s poll loop doesn't need them).
+    """
     job = await repos.get_job(session, job_id, user.id)
     if job is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "job_not_found")
@@ -177,8 +185,8 @@ async def prepare_status(
         company_researched=company_researched,
         can_start=not missing,
         missing=missing,
-        profile=profile.profile_json if profile is not None else None,
-        job=job.parsed_json,
+        profile=(profile.profile_json if (detail and profile is not None) else None),
+        job=(job.parsed_json if detail else None),
         company=(
             {
                 "company_name": snapshot.company_name,
@@ -186,10 +194,82 @@ async def prepare_status(
                 "source_urls": snapshot.source_urls,
                 "updated_at": snapshot.updated_at,
             }
-            if snapshot is not None
+            if (detail and snapshot is not None)
             else None
         ),
     )
+
+
+PREP_FORWARDED_EVENTS = frozenset(
+    {
+        "node_started",
+        "node_done",
+        "node_skipped",
+        "mapping_suggestion",
+        "mapping_suggestion_failed",
+        "mapping_applied",
+        "mapping_skipped",
+        "mapping_apply_failed",
+    }
+)
+
+
+def _prep_event_stream(
+    *,
+    prep_graph: Any,
+    graph_input: Any,
+    prep_config: dict[str, Any],
+    user_id: uuid.UUID,
+    job_id: uuid.UUID,
+    trace_meta: dict[str, Any],
+) -> AsyncIterator[bytes]:
+    """Shared SSE pump for the prep_graph. Used by both the fresh
+    ``/prepare`` POST and the ``/prepare/resume`` POST that the FE sends
+    after the user confirms / skips a mapping suggestion.
+
+    The stream ends in one of three states:
+    * ``done``  — prep_graph reached END.
+    * ``awaiting_mapping`` — prep_graph hit a mapping interrupt; the FE
+      already received the ``mapping_suggestion`` event for the doc.
+    * ``error`` — a node-level failure surfaced before END.
+    """
+
+    async def gen() -> AsyncIterator[bytes]:
+        saw_mapping_interrupt = False
+        try:
+            with trace_attributes(
+                user_id=str(user_id),
+                metadata=trace_meta,
+                tags=["graph:prep"],
+            ):
+                async for chunk in prep_graph.astream(
+                    graph_input, config=prep_config, stream_mode="custom"
+                ):
+                    if chunk.get("event") == "mapping_suggestion":
+                        saw_mapping_interrupt = True
+                    event = chunk.get("event")
+                    if event in PREP_FORWARDED_EVENTS:
+                        yield sse_event(event, {k: v for k, v in chunk.items() if k != "event"})
+                    elif event == "error":
+                        yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
+                        return
+                # astream exit: either the graph reached END or it paused
+                # at a mapping interrupt. The interrupt path ends the
+                # generator without emitting a langgraph-internal frame
+                # because we run stream_mode="custom".
+                if saw_mapping_interrupt:
+                    yield sse_event(
+                        "awaiting_mapping",
+                        {"job_id": str(job_id)},
+                    )
+                else:
+                    yield sse_event("done", {"job_id": str(job_id), "ready": True})
+        except (NoDocumentsError, NoSearchHits, NoUsablePages, CompanyNameMissing) as e:
+            yield sse_event("error", {"code": type(e).__name__, "detail": str(e)})
+        finally:
+            await flush_langfuse()
+
+    return gen()
 
 
 @router.post("/prepare")
@@ -199,10 +279,12 @@ async def prepare_session(
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> StreamingResponse:
-    """Run profile_builder → job_analyzer → company_researcher.
+    """Start (or restart from scratch) the prep_graph run for a job.
 
-    SSE stream of node lifecycle events. Node-level errors come back as
-    ``event: error`` mid-stream; pre-stream input errors come back as
+    SSE stream of node lifecycle + mapping events. The graph pauses on
+    each unmapped project_doc — the FE then POSTs to ``/prepare/resume``
+    with the user's confirmation to advance. Node-level errors come back
+    as ``event: error`` mid-stream; pre-stream input errors come back as
     HTTP 4xx.
     """
     job = await repos.get_job(session, body.job_id, user.id)
@@ -217,42 +299,65 @@ async def prepare_session(
         "user_id": str(user.id),
         "job_id": str(body.job_id),
         "force_refresh": body.force_refresh,
+        # Phase 21.1: each fresh /prepare run starts with an empty
+        # skiplist; the user gets a fresh chance to confirm any
+        # previously-skipped project_doc.
+        "skipped_mapping_doc_ids": [],
+        "pending_mapping": None,
+        "mapping_resume": None,
     }
-    prep_config = _with_callbacks({})
+    prep_config = _with_callbacks(_thread_config_for_prep(user.id, body.job_id))
     trace_meta = {
         "graph": "prep",
         "user_id": str(user.id),
         "job_id": str(body.job_id),
-        # Langfuse v4 propagated-attribute values must be strings.
         "force_refresh": str(body.force_refresh),
     }
+    stream = _prep_event_stream(
+        prep_graph=prep_graph,
+        graph_input=initial_state,
+        prep_config=prep_config,
+        user_id=user.id,
+        job_id=body.job_id,
+        trace_meta=trace_meta,
+    )
+    return StreamingResponse(stream, media_type="text/event-stream", headers=SSE_HEADERS)
 
-    async def event_stream() -> AsyncIterator[bytes]:
-        try:
-            with trace_attributes(
-                user_id=str(user.id),
-                metadata=trace_meta,
-                tags=["graph:prep"],
-            ):
-                async for chunk in prep_graph.astream(
-                    initial_state, config=prep_config, stream_mode="custom"
-                ):
-                    # `chunk` is the dict our nodes wrote via get_stream_writer.
-                    event = chunk.get("event")
-                    if event in ("node_started", "node_done", "node_skipped"):
-                        yield sse_event(event, {k: v for k, v in chunk.items() if k != "event"})
-                    elif event == "error":
-                        yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
-                        return
-                yield sse_event("done", {"job_id": str(body.job_id), "ready": True})
-        except (NoDocumentsError, NoSearchHits, NoUsablePages, CompanyNameMissing) as e:
-            yield sse_event("error", {"code": type(e).__name__, "detail": str(e)})
-        finally:
-            # v4 SDK buffers spans; without an explicit flush, prep traces only
-            # appear when a later request (e.g. next_question) nudges the queue.
-            await flush_langfuse()
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+@router.post("/prepare/resume")
+async def prepare_session_resume(
+    body: PrepareMappingResumeRequest,
+    request: Request,
+    user: Annotated[User, Depends(get_current_user)],
+) -> StreamingResponse:
+    """Resume an interrupted prep_graph after the user confirms or skips
+    a mapping suggestion. The body carries the user's decision; LangGraph
+    threads it into the ``await_mapping_confirm`` interrupt and the graph
+    advances to the next unmapped doc (or to ``job_analyzer`` if none).
+    """
+    prep_graph = request.app.state.prep_graph
+    prep_config = _with_callbacks(_thread_config_for_prep(user.id, body.job_id))
+    trace_meta = {
+        "graph": "prep",
+        "phase": "resume_mapping",
+        "user_id": str(user.id),
+        "job_id": str(body.job_id),
+    }
+    resume_payload = {
+        "action": body.action,
+        "rows": [r.model_dump() for r in body.rows] if body.action == "apply" else [],
+        "title": body.title,
+        "extracted": body.extracted.model_dump() if body.extracted is not None else None,
+    }
+    stream = _prep_event_stream(
+        prep_graph=prep_graph,
+        graph_input=Command(resume=resume_payload),
+        prep_config=prep_config,
+        user_id=user.id,
+        job_id=body.job_id,
+        trace_meta=trace_meta,
+    )
+    return StreamingResponse(stream, media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 # --- Phase 8/9 routes, rewritten to drive interview_graph -----------
@@ -266,6 +371,16 @@ def _thread_config(session_id: uuid.UUID, turn_index: int) -> dict[str, Any]:
     cleanly without colliding with prior turn checkpoints.
     """
     return {"configurable": {"thread_id": f"{session_id}:turn_{turn_index}"}}
+
+
+def _thread_config_for_prep(user_id: uuid.UUID, job_id: uuid.UUID) -> dict[str, Any]:
+    """Phase 21: per-(user, job) prep_graph thread.
+
+    Mid-prep crash + resume reads the last completed checkpoint from
+    this thread. Distinct ``prep:`` prefix keeps the namespace clear of
+    interview-graph threads sharing the same AsyncSqliteSaver.
+    """
+    return {"configurable": {"thread_id": f"prep:{user_id}:{job_id}"}}
 
 
 def _with_callbacks(config: dict[str, Any]) -> dict[str, Any]:
