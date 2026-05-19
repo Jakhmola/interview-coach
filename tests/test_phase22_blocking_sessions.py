@@ -111,6 +111,69 @@ async def test_delete_job_swallows_checkpoint_cleanup_failure(
         app.state.checkpointer = prior
 
 
+async def test_prepare_post_resets_prep_thread(
+    client: AsyncClient,
+    auth_token: str,
+    sample_pdf: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 22 fix: a fresh ``POST /prepare`` deletes the prior prep
+    thread before re-streaming the graph. Without this, LangGraph
+    short-circuits ``astream`` on the same thread once it's reached
+    END — and the work-driven auto-prep that fires after a
+    project_doc upload silently no-ops."""
+    from unittest.mock import AsyncMock
+
+    from interview_coach.api.documents import routes as doc_routes
+    from interview_coach.api.main import app
+
+    monkeypatch.setattr(doc_routes, "_embed_in_background", AsyncMock(return_value=None))
+
+    class _RecordingSaver:
+        def __init__(self, real):  # noqa: ANN001
+            self._real = real
+            self.deleted: list[str] = []
+
+        async def adelete_thread(self, thread_id: str) -> None:
+            self.deleted.append(thread_id)
+            await self._real.adelete_thread(thread_id)
+
+        def __getattr__(self, name: str):  # noqa: ANN001, ANN204
+            # Delegate every other saver method to the real saver so
+            # the compiled prep_graph still works for the actual
+            # /prepare run inside this test.
+            return getattr(self._real, name)
+
+    prior = app.state.checkpointer
+    fake = _RecordingSaver(prior)
+    app.state.checkpointer = fake
+    try:
+        # Seed CV + JD so /prepare doesn't 400 on no_documents.
+        await client.post(
+            "/documents",
+            headers=_auth(auth_token),
+            data={"kind": "cv"},
+            files={"file": ("cv.pdf", sample_pdf, "application/pdf")},
+        )
+        j = await client.post("/jobs", headers=_auth(auth_token), json={"text": "JD body."})
+        job_id = j.json()["id"]
+        me = await client.get("/auth/me", headers=_auth(auth_token))
+        user_id = me.json()["id"]
+
+        r = await client.post(
+            "/sessions/prepare",
+            headers=_auth(auth_token),
+            json={"job_id": job_id, "force_refresh": False},
+        )
+        # Drain the SSE body so the route's startup work actually runs.
+        async for _ in r.aiter_bytes():
+            pass
+
+        assert f"prep:{user_id}:{job_id}" in fake.deleted
+    finally:
+        app.state.checkpointer = prior
+
+
 async def test_delete_cv_409_lists_blocking_sessions(
     client: AsyncClient,
     auth_token: str,

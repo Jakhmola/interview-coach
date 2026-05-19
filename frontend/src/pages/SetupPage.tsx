@@ -112,6 +112,16 @@ export function SetupPage() {
   const [pendingMapping, setPendingMapping] = useState<MappingSuggestion | null>(null);
   const [step, setStep] = useState<Step>("cv");
   const [didInitStep, setDidInitStep] = useState(false);
+  // Phase 22: when the user explicitly enters the wizard from
+  // ReadyLanding (?new_job=1 / ?add_doc=1) or by uploading a new
+  // supporting doc, we suppress the landing short-circuit so they
+  // can actually see the step they navigated to. Auto-cleared once
+  // prep completes and there's no outstanding work (the natural
+  // recompute then shows the landing). This is the targeted
+  // replacement for the deleted ``overrideReady`` flag — same intent
+  // (keep the wizard visible while there's pending wizard work),
+  // narrower scope (auto-clears, not sticky).
+  const [bypassLanding, setBypassLanding] = useState(false);
   const [jdMode, setJdMode] = useState<"paste" | "url">("paste");
   const messageTimerRef = useRef<number | null>(null);
   // Phase 22: auto-prep is work-driven, not fire-once. The ref stores a
@@ -190,6 +200,7 @@ export function SetupPage() {
     } else if (addDoc) {
       setStep("docs");
     }
+    setBypassLanding(true);
     setDidInitStep(true);
     const next = new URLSearchParams(searchParams);
     next.delete("new_job");
@@ -292,6 +303,13 @@ export function SetupPage() {
       setStatusJobId(activeJobId);
       await refreshReadiness();
       await refreshActiveJob();
+      // Phase 22: clear the wizard-bypass once prep is genuinely
+      // complete — the natural re-render then drops the user back on
+      // ReadyLanding. We don't clear on mapping-pending state because
+      // the MappingPanel lives inside the wizard.
+      if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
+        setBypassLanding(false);
+      }
     } catch (err) {
       setError(codeFrom(err));
     } finally {
@@ -318,6 +336,9 @@ export function SetupPage() {
       setStatus(nextStatus);
       setStatusJobId(activeJobId);
       await refreshReadiness();
+      if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
+        setBypassLanding(false);
+      }
     } catch (err) {
       setError(codeFrom(err));
     } finally {
@@ -450,15 +471,13 @@ export function SetupPage() {
     );
   }
 
-  // Phase 22: with `overrideReady` gone, the landing recomputes from
-  // real readiness state every render. "Add another job" /
-  // "Add supporting doc" navigate to `/setup?new_job=1` /
-  // `/setup?add_doc=1`; the query-param effect above flips the step
-  // and resets state on landing. No sticky-toggle to clear.
-  // Also gated on `unmapped_project_doc_count === 0` so an unmapped
-  // doc keeps the wizard surfaced even when `can_start` is true.
+  // Phase 22: landing recomputes from real readiness every render, but
+  // ``bypassLanding`` keeps the wizard visible while the user is in
+  // the middle of an explicit wizard task they navigated to (Add
+  // another job, Add supporting doc, mid-stream prep). Cleared when
+  // prep completes and there's no outstanding mapping work.
   const hasUnmapped = (status?.unmapped_project_doc_count ?? 0) > 0;
-  if (setupReady && !isPreparing && !hasUnmapped) {
+  if (setupReady && !isPreparing && !hasUnmapped && !bypassLanding) {
     return (
       <ReadyLanding
         cv={cv}

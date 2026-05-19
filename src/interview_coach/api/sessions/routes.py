@@ -297,6 +297,22 @@ async def prepare_session(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "no_documents")
 
     prep_graph = request.app.state.prep_graph
+    # Phase 22 fix: a fresh /prepare POST must start the graph from
+    # START, not pick up from a prior END checkpoint. LangGraph
+    # short-circuits ``astream(input, config=thread_at_end)`` when the
+    # input is structurally the same as the prior run, so running prep
+    # twice on the same job — exactly what the work-driven auto-prep
+    # does after a project_doc upload — silently no-ops without this
+    # reset. The resume path (POST /prepare/resume) deliberately keeps
+    # the thread so the interrupt() handshake survives the round-trip.
+    checkpointer = getattr(request.app.state, "checkpointer", None)
+    if checkpointer is not None:
+        thread_id = f"prep:{user.id}:{body.job_id}"
+        try:
+            await checkpointer.adelete_thread(thread_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("prep thread reset failed for %s", thread_id)
+
     initial_state: dict[str, Any] = {
         "user_id": str(user.id),
         "job_id": str(body.job_id),
