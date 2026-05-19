@@ -151,7 +151,7 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 19    | Perf P1 — CPU caps (api/embedder/llama) + ingest sema + ctx/thinking tuning | ✅ |
 | 20    | Perf P2 — prompt trimming + retrieval overlap  | ✅          |
 | 21    | Perf P3 — prep-graph checkpointer + HITL mapping loop + MCP gut | ✅ |
-| 22    | Correctness P4 — CV-replace guard, checkpoint GC, FE drift | ⏳ |
+| 22    | Correctness P4 — CV-replace guard, checkpoint GC, FE drift | ✅ |
 | 23    | Cleanup P5 — dead deps (streamlit/litellm/a2a/deepeval), pyproject `ui` | ⏳ |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
