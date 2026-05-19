@@ -129,6 +129,11 @@ export function SetupPage() {
   // outstanding work changes (e.g. user uploads a new project_doc and
   // `unmapped_project_doc_count` ticks up).
   const lastAutoPrepKeyRef = useRef<string | null>(null);
+  // Job ids whose most recent auto-prep ended in an error. We refuse
+  // to auto-refire for them until the user takes some explicit action
+  // (manual Run prep click, Re-analyze from Manage, etc.) — otherwise
+  // a CompanyNameMissing JD would re-fail every mount and look stuck.
+  const failedAutoPrepJobsRef = useRef<Set<string>>(new Set());
 
   const hasCv = docs.some((doc) => doc.kind === "cv");
   const cv = docs.find((doc) => doc.kind === "cv");
@@ -279,6 +284,24 @@ export function SetupPage() {
       setPendingMapping(null);
     } else if (frame.event === "error") {
       setError(data.code || data.detail || "stream_interrupted");
+      // Phase 22: a node-level error never emits ``node_done`` for the
+      // failed node, so the task pill would otherwise keep spinning
+      // forever even after the stream closes. Mark the failing node
+      // (when named) as failed and any remaining pending nodes as
+      // skipped so the UI settles instead of looking stuck. Also mark
+      // the job as auto-prep-failed so the work-driven effect doesn't
+      // re-fire the same failing run on every mount.
+      setNodeState((c) => {
+        const next = { ...c };
+        if (data.node) next[data.node] = "failed";
+        for (const k of PREP_NODE_KEYS) {
+          if (next[k] === "pending" || next[k] === "running") {
+            if (k !== data.node) next[k] = "skipped";
+          }
+        }
+        return next;
+      });
+      if (activeJobId) failedAutoPrepJobsRef.current.add(activeJobId);
     }
   };
 
@@ -294,6 +317,10 @@ export function SetupPage() {
     setError(null);
     setMessage(null);
     setPendingMapping(null);
+    // Clear any prior auto-prep failure flag for this job so an SSE
+    // error event during this run gets recorded freshly. (The flag is
+    // re-set inside `handlePrepFrame` on the next failure.)
+    failedAutoPrepJobsRef.current.delete(activeJobId);
     const signal = prepAbort.fresh();
     try {
       await prepareSessionStream(token, activeJobId, forceRefresh, handlePrepFrame, signal);
@@ -309,6 +336,7 @@ export function SetupPage() {
       // the MappingPanel lives inside the wizard.
       if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
         setBypassLanding(false);
+        failedAutoPrepJobsRef.current.delete(activeJobId);
       }
     } catch (err) {
       setError(codeFrom(err));
@@ -363,6 +391,9 @@ export function SetupPage() {
     if (step === "cv") return;
     if (statusJobId !== activeJobId) return;
     if (!status) return;
+    // Don't auto-refire on a job that just failed — let the user
+    // take an explicit action (manual Run prep, Re-analyze, etc.).
+    if (failedAutoPrepJobsRef.current.has(activeJobId)) return;
     const unmapped = status.unmapped_project_doc_count ?? 0;
     const needsPrep = !status.can_start || unmapped > 0;
     if (!needsPrep) return;
@@ -924,7 +955,11 @@ function TaskStatus({
         ? "Using cached result"
         : normalizedState === "running"
           ? "Working"
-          : "Queued";
+          : normalizedState === "failed"
+            ? "Failed"
+            : normalizedState === "skipped"
+              ? "Skipped"
+              : "Queued";
 
   return (
     <article className={`task-status task-${normalizedState}`}>

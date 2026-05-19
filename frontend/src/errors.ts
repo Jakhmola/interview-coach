@@ -46,11 +46,11 @@ export const ERRORS: Record<string, ErrorEntry> = {
   NoDocumentsError: { message: "Upload a CV first." },
   CompanyNameMissing: {
     message: "We couldn't extract the company name from the JD.",
-    hint: "Edit the JD text to include it, or paste a different JD.",
+    hint: "Open Manage → Re-analyze JD to paste a clearer version, or replace the JD entirely.",
   },
   NoSearchHits: {
     message: "No public info found about this company.",
-    hint: "Click 'Refresh company info' to try again.",
+    hint: "Try 'Refresh company info'; if it still fails, the JD's company name may be off — Re-analyze from Manage.",
   },
   NoUsablePages: {
     message: "Found search results but couldn't read them.",

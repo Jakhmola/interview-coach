@@ -748,6 +748,14 @@ select option {
   background: var(--accent);
 }
 
+.task-failed .task-status-dot {
+  background: var(--danger, #c56b62);
+}
+.task-skipped .task-status-dot {
+  background: #6f6a60;
+  opacity: 0.5;
+}
+
 .type-status {
   display: inline-block;
   min-height: 20px;
