@@ -755,6 +755,10 @@ select option {
   background: #6f6a60;
   opacity: 0.5;
 }
+.task-degraded .task-status-dot {
+  background: var(--amber, #e5b769);
+  opacity: 0.75;
+}
 
 .type-status {
   display: inline-block;

@@ -20,11 +20,6 @@ from fastapi.responses import StreamingResponse
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from interview_coach.agents.nodes.company_researcher import (
-    CompanyNameMissing,
-    NoSearchHits,
-    NoUsablePages,
-)
 from interview_coach.agents.nodes.evaluator import (
     TurnNotAnswered,
     TurnNotFound,
@@ -266,7 +261,13 @@ def _prep_event_stream(
                     )
                 else:
                     yield sse_event("done", {"job_id": str(job_id), "ready": True})
-        except (NoDocumentsError, NoSearchHits, NoUsablePages, CompanyNameMissing) as e:
+        except NoDocumentsError as e:
+            # Phase 22: company-research soft errors (CompanyNameMissing,
+            # NoSearchHits, NoUsablePages) are swallowed *inside* the
+            # graph node and surfaced as ``node_done {degraded: true}``,
+            # not as fatal stream errors — the user can still proceed
+            # with a placeholder snapshot. Only genuinely fatal prep
+            # exceptions terminate the stream here.
             yield sse_event("error", {"code": type(e).__name__, "detail": str(e)})
         finally:
             await flush_langfuse()

@@ -129,10 +129,14 @@ export function SetupPage() {
   // outstanding work changes (e.g. user uploads a new project_doc and
   // `unmapped_project_doc_count` ticks up).
   const lastAutoPrepKeyRef = useRef<string | null>(null);
-  // Job ids whose most recent auto-prep ended in an error. We refuse
-  // to auto-refire for them until the user takes some explicit action
-  // (manual Run prep click, Re-analyze from Manage, etc.) — otherwise
-  // a CompanyNameMissing JD would re-fail every mount and look stuck.
+  // Job ids whose most recent auto-prep ended in an SSE ``error``
+  // event. Phase 22: company-research soft errors no longer surface
+  // here (they're swallowed inside the graph node and reported as a
+  // degraded ``node_done``), so this set fills only on genuinely
+  // fatal errors — ``NoDocumentsError`` or downstream LLM failures.
+  // We refuse to auto-refire for jobs in the set until the user
+  // takes an explicit action (manual Run prep click, Re-analyze from
+  // Manage, etc.).
   const failedAutoPrepJobsRef = useRef<Set<string>>(new Set());
 
   const hasCv = docs.some((doc) => doc.kind === "cv");
@@ -249,11 +253,26 @@ export function SetupPage() {
       payload?: MappingSuggestion;
       remaining?: number;
       n_rows?: number;
+      degraded?: boolean;
     };
     if (frame.event === "node_started" && data.node) {
       setNodeState((c) => ({ ...c, [data.node!]: "running" }));
     } else if (frame.event === "node_done" && data.node) {
-      setNodeState((c) => ({ ...c, [data.node!]: "done" }));
+      // Phase 22: a node_done with ``degraded: true`` is a soft-fail
+      // (currently only company_researcher when the JD has no
+      // company_name or no search hits). Mark the pill differently
+      // and surface a non-blocking message so the user knows to fix
+      // it via Manage → Re-analyze if they want, but can still
+      // proceed.
+      const pill = data.degraded ? "degraded" : "done";
+      setNodeState((c) => ({ ...c, [data.node!]: pill }));
+      if (data.degraded && data.code) {
+        setMessage(
+          data.code === "CompanyNameMissing"
+            ? "Couldn't extract a company name from this JD — questions will be less company-specific. Fix it any time via Manage → Re-analyze."
+            : "Company research came up empty — questions will be less company-specific. Try again later from Manage.",
+        );
+      }
     } else if (frame.event === "node_skipped" && data.node) {
       setNodeState((c) => ({ ...c, [data.node!]: "cached" }));
     } else if (frame.event === "mapping_suggestion" && data.payload) {
@@ -959,7 +978,9 @@ function TaskStatus({
             ? "Failed"
             : normalizedState === "skipped"
               ? "Skipped"
-              : "Queued";
+              : normalizedState === "degraded"
+                ? "Completed with warnings"
+                : "Queued";
 
   return (
     <article className={`task-status task-${normalizedState}`}>

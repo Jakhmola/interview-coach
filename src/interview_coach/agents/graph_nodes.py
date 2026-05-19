@@ -325,6 +325,26 @@ async def node_job_analyzer(state: InterviewState) -> dict[str, Any]:
 
 
 async def node_company_researcher(state: InterviewState) -> dict[str, Any]:
+    """Phase 22: company research is best-effort, not a setup blocker.
+
+    The three soft failure modes (``CompanyNameMissing``,
+    ``NoSearchHits``, ``NoUsablePages``) used to surface as
+    ``event: error`` and propagate, leaving the user stuck on a
+    half-prepped JD with no way to start the interview. None of those
+    are actually fatal — ``question_generator`` already degrades
+    cleanly when ``company_snapshot`` is empty (``mission`` falls back
+    to ``"—"``, ``values_and_signals`` is empty, ``company_name``
+    becomes ``"the hiring company"``).
+
+    So we now catch the three soft modes, persist a placeholder
+    snapshot (so ``company_researched`` flips true and the user can
+    actually proceed), and emit a ``node_done`` with ``degraded: true``
+    + a reason code. The FE renders that as a warning instead of an
+    error and points the user at Manage → Re-analyze JD if they want
+    to fix it. Only genuinely fatal exceptions (e.g.
+    ``JobNotAnalyzed``, which means a logic bug upstream) still
+    propagate.
+    """
     user_id = uuid.UUID(state["user_id"])
     job_id = uuid.UUID(state["job_id"])
     force_refresh = bool(state.get("force_refresh", False))
@@ -344,7 +364,8 @@ async def node_company_researcher(state: InterviewState) -> dict[str, Any]:
     writer({"event": "node_started", "node": "company_researcher"})
     try:
         snapshot = await research_company(job_id, user_id, force_refresh=force_refresh)
-    except (JobNotAnalyzed, CompanyNameMissing, NoSearchHits, NoUsablePages) as e:
+    except JobNotAnalyzed as e:
+        # Indicates upstream pipeline bug — analyzer should have run first.
         writer(
             {
                 "event": "error",
@@ -354,6 +375,56 @@ async def node_company_researcher(state: InterviewState) -> dict[str, Any]:
             }
         )
         raise
+    except (CompanyNameMissing, NoSearchHits, NoUsablePages) as e:
+        logger.warning(
+            "company_researcher: soft-degrading job=%s — %s: %s",
+            job_id,
+            type(e).__name__,
+            e,
+        )
+        from interview_coach.agents.schemas import CompanySnapshot
+
+        # Pull the analyzed company_name (may be empty for
+        # CompanyNameMissing) so the placeholder row still ties to a
+        # usable label.
+        async with AsyncSessionLocal() as s:
+            job = await repos.get_job(s, job_id, user_id)
+        company_name = ""
+        if job is not None and (job.parsed_json or {}).get("company_name"):
+            company_name = str(job.parsed_json["company_name"])  # type: ignore[index]
+        if not company_name:
+            company_name = "Unknown company"
+        placeholder = CompanySnapshot(
+            mission="", products=[], recent_news=[], values_and_signals=[]
+        )
+        async with AsyncSessionLocal() as s:
+            await repos.upsert_company_snapshot(
+                s,
+                job_id=job_id,
+                company_name=company_name,
+                # Embed the degrade reason in the persisted JSON so the
+                # FE can render a "company info incomplete" badge later.
+                # Pydantic ignores unknown keys on model_validate, so
+                # round-tripping through CompanySnapshot drops it — but
+                # that's fine, the FE reads the raw row, not the model.
+                snapshot_json=placeholder.model_dump() | {"_degraded": type(e).__name__},
+                source_urls=[],
+                model_name="placeholder",
+            )
+        writer(
+            {
+                "event": "node_done",
+                "node": "company_researcher",
+                "degraded": True,
+                "code": type(e).__name__,
+                "detail": str(e),
+            }
+        )
+        return {
+            "company": placeholder.model_dump(),
+            "prep_done": True,
+            "next_step": "END",
+        }
     writer({"event": "node_done", "node": "company_researcher"})
     return {
         "company": snapshot.model_dump(),
