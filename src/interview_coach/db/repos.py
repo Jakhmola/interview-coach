@@ -729,3 +729,41 @@ async def upsert_company_snapshot(
     await session.commit()
     await session.refresh(row)
     return row
+
+
+# --- Phase 22: account reset ---------------------------------------------
+
+
+async def list_all_session_ids_for_user(
+    session: AsyncSession, user_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Every session id the user owns, regardless of status. Used by the
+    account-reset path to enumerate checkpoint threads to clean up — both
+    in-flight and historical, since the saver doesn't distinguish."""
+    result = await session.execute(select(SessionRow.id).where(SessionRow.user_id == user_id))
+    return [row for (row,) in result.all()]
+
+
+async def list_job_ids_for_user(session: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
+    """Every job id the user owns. Used to enumerate ``prep:{user}:{job}``
+    checkpoint threads for cleanup before the DB cascade removes the rows."""
+    result = await session.execute(select(Job.id).where(Job.user_id == user_id))
+    return [row for (row,) in result.all()]
+
+
+async def reset_user_data(session: AsyncSession, user_id: uuid.UUID) -> None:
+    """Phase 22 — option (b) account reset: wipe everything the user owns,
+    keep the ``users`` row + auth so the user stays logged in with an empty
+    account. Cascades on ``users.id`` handle grounding_chunks,
+    document_mappings, company_snapshots, turns, evaluations, llm_calls —
+    we only need to clear the top-level owned tables.
+
+    Caller is responsible for clearing langgraph checkpoint threads
+    *before* this runs, because thread cleanup needs the session + job ids
+    that are about to be deleted.
+    """
+    await session.execute(delete(SessionRow).where(SessionRow.user_id == user_id))
+    await session.execute(delete(Document).where(Document.user_id == user_id))
+    await session.execute(delete(Job).where(Job.user_id == user_id))
+    await session.execute(delete(ProfileRow).where(ProfileRow.user_id == user_id))
+    await session.commit()

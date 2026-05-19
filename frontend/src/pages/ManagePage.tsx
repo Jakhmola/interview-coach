@@ -28,14 +28,16 @@ import { useAuth } from "../state/auth";
  */
 
 type BlockingState = {
-  /** Which row triggered the 409 — used to scope the card to that card. */
-  scope: { kind: "cv"; id: string } | { kind: "job"; id: string };
-  code: "cv_in_use" | "job_in_use";
+  /** Which JD triggered the 409 — used to scope the card to that card.
+   * (Phase 22 dropped Delete CV in favour of Reset account, so the only
+   * delete that can return a structured 409 today is ``DELETE /jobs/{id}``.) */
+  scope: { kind: "job"; id: string };
+  code: "job_in_use";
   sessionIds: string[];
 };
 
 export function ManagePage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const navigate = useNavigate();
   // Phase 22: read jobs from the shared ActiveJobContext so re-analyze
   // / delete / make-active mutations show up consistently across the
@@ -84,34 +86,28 @@ export function ManagePage() {
   // blocked" card pinned after the second delete succeeds.
   useEffect(() => {
     if (!blocking) return;
-    if (blocking.scope.kind === "cv" && !docs.find((d) => d.id === blocking.scope.id)) {
-      setBlocking(null);
-    } else if (blocking.scope.kind === "job" && !jobs.find((j) => j.id === blocking.scope.id)) {
+    if (!jobs.find((j) => j.id === blocking.scope.id)) {
       setBlocking(null);
     }
-  }, [docs, jobs, blocking]);
+  }, [jobs, blocking]);
 
   // ─── delete helpers ────────────────────────────────────────────────
-  const captureBlocking = (
-    err: unknown,
-    scope: BlockingState["scope"],
-  ): boolean => {
+  const captureJobBlocking = (err: unknown, jobId: string): boolean => {
     if (!(err instanceof ApiError) || err.status !== 409) return false;
     const obj = err.detailObject;
     if (!obj || typeof obj !== "object") return false;
     const code = (obj as { code?: unknown }).code;
     const ids = (obj as { blocking_session_ids?: unknown }).blocking_session_ids;
-    if (code !== "cv_in_use" && code !== "job_in_use") return false;
-    if (!Array.isArray(ids)) return false;
+    if (code !== "job_in_use" || !Array.isArray(ids)) return false;
     setBlocking({
-      scope,
-      code: code as BlockingState["code"],
+      scope: { kind: "job", id: jobId },
+      code,
       sessionIds: ids.filter((x): x is string => typeof x === "string"),
     });
     return true;
   };
 
-  const deleteDocument = async (id: string, kind: "cv" | "project_doc") => {
+  const deleteProjectDoc = async (id: string) => {
     if (!token) return;
     setError(null);
     try {
@@ -119,7 +115,6 @@ export function ManagePage() {
       setMessage("Deleted.");
       await load();
     } catch (err) {
-      if (kind === "cv" && captureBlocking(err, { kind: "cv", id })) return;
       setError(codeFrom(err));
     }
   };
@@ -133,7 +128,7 @@ export function ManagePage() {
       setMessage("Deleted.");
       await load();
     } catch (err) {
-      if (captureBlocking(err, { kind: "job", id })) return;
+      if (captureJobBlocking(err, id)) return;
       setError(codeFrom(err));
     }
   };
@@ -234,13 +229,33 @@ export function ManagePage() {
       // Last blocking session cleared — auto-retry the original delete.
       const scope = blocking.scope;
       setBlocking(null);
-      if (scope.kind === "cv") {
-        await deleteDocument(scope.id, "cv");
-      } else {
-        await deleteJob(scope.id);
-      }
+      await deleteJob(scope.id);
     } catch (err) {
       setError(codeFrom(err));
+    }
+  };
+
+  // ─── Danger zone: account reset ────────────────────────────────────
+  const resetAccount = async (confirmEmail: string): Promise<void> => {
+    if (!token || !user) return;
+    setError(null);
+    setBusy("reset");
+    try {
+      await api.resetAccount(token, confirmEmail);
+      // Clear in-memory references to data that just got wiped server-side.
+      setActiveJobId(null);
+      setDocs([]);
+      // Refresh the shared jobs list + reload local state so every page
+      // sees the empty account in one tick.
+      await refreshActiveJob();
+      await load();
+      setMessage("Account reset — everything is now empty.");
+      // Drop the user back onto Setup so the onboarding wizard takes over.
+      navigate("/setup");
+    } catch (err) {
+      setError(codeFrom(err));
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -311,26 +326,8 @@ export function ManagePage() {
                     <RefreshCw size={14} /> Retry embedding
                   </button>
                 ) : null}
-                <ArmedDeleteButton
-                  label="Delete CV"
-                  icon={<Trash2 size={14} />}
-                  consequenceLabel={
-                    mappedTechDocs > 0
-                      ? `Will clear your profile and unmap ${mappedTechDocs} supporting doc${mappedTechDocs === 1 ? "" : "s"}`
-                      : "Will clear your profile"
-                  }
-                  onConfirm={() => deleteDocument(cv.id, "cv")}
-                />
               </div>
             </div>
-            {blocking && blocking.scope.kind === "cv" && blocking.scope.id === cv.id ? (
-              <BlockingSessionsCard
-                code={blocking.code}
-                sessionIds={blocking.sessionIds}
-                onAbandon={abandonSession}
-                onDismiss={() => setBlocking(null)}
-              />
-            ) : null}
           </>
         ) : (
           <p className="muted">
@@ -396,7 +393,6 @@ export function ManagePage() {
                   ) : null}
                   {isBlocked ? (
                     <BlockingSessionsCard
-                      code={blocking!.code}
                       sessionIds={blocking!.sessionIds}
                       onAbandon={abandonSession}
                       onDismiss={() => setBlocking(null)}
@@ -450,7 +446,7 @@ export function ManagePage() {
                       <ArmedDeleteButton
                         label="Delete"
                         icon={<Trash2 size={14} />}
-                        onConfirm={() => deleteDocument(d.id, "project_doc")}
+                        onConfirm={() => deleteProjectDoc(d.id)}
                       />
                     </div>
                   </div>
@@ -460,6 +456,9 @@ export function ManagePage() {
           </div>
         )}
       </section>
+
+      {/* ─── Danger zone ──────────────────────────────────────────── */}
+      <DangerZone onReset={resetAccount} busy={busy === "reset"} />
 
       {/* Phase 22: remap HITL is the same modal used by Setup. Backdrop /
           ESC close the modal *without* mutating the mapping — on Manage,
@@ -554,23 +553,17 @@ function JobEditor({
 // ─────────────────────────── Blocking sessions card ─────────────────────
 
 function BlockingSessionsCard({
-  code,
   sessionIds,
   onAbandon,
   onDismiss,
 }: {
-  code: "cv_in_use" | "job_in_use";
   sessionIds: string[];
   onAbandon: (id: string) => void;
   onDismiss: () => void;
 }) {
-  const headline =
-    code === "cv_in_use"
-      ? "Can't delete your CV — these sessions are still active:"
-      : "Can't delete this JD — these sessions are still active:";
   return (
     <div className="blocking-sessions-card">
-      <p>{headline}</p>
+      <p>Can&apos;t delete this JD — these sessions are still active:</p>
       <ul>
         {sessionIds.map((id) => (
           <li key={id}>
@@ -585,6 +578,102 @@ function BlockingSessionsCard({
         Dismiss
       </button>
     </div>
+  );
+}
+
+// ─────────────────────────── Danger zone ───────────────────────────────
+
+/**
+ * Reset account: wipes every document, JD, profile, session, mapping,
+ * embedding, and prep checkpoint owned by the user. The ``users`` row +
+ * auth token stay intact, so the user remains logged in with an empty
+ * account ready to re-onboard. Two-stage confirmation: click "Reveal"
+ * to expose the input, then type the registered email to enable submit
+ * — guards against fat-fingered clicks.
+ */
+function DangerZone({
+  onReset,
+  busy,
+}: {
+  onReset: (confirmEmail: string) => Promise<void>;
+  busy: boolean;
+}) {
+  const { user } = useAuth();
+  const [armed, setArmed] = useState(false);
+  const [typed, setTyped] = useState("");
+
+  if (!user) return null;
+  const canSubmit = !busy && typed.trim().toLowerCase() === user.email.toLowerCase();
+
+  return (
+    <section className="manage-section danger-zone">
+      <h2>Danger zone</h2>
+      <div className="manage-card danger-card">
+        <div>
+          <strong>Reset account</strong>
+          <span className="muted">
+            Permanently delete every document, job description, supporting doc, mapping,
+            interview session, and AI cache attached to your account. Your login stays — you
+            just start over with a blank slate.
+          </span>
+        </div>
+        <div className="manage-card-actions">
+          {!armed ? (
+            <button
+              className="btn-ghost danger-trigger"
+              type="button"
+              onClick={() => setArmed(true)}
+              disabled={busy}
+            >
+              <Trash2 size={14} /> Reveal reset
+            </button>
+          ) : (
+            <button
+              className="btn-quiet"
+              type="button"
+              onClick={() => {
+                setArmed(false);
+                setTyped("");
+              }}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      </div>
+      {armed ? (
+        <div className="danger-confirm">
+          <label className="wizard-form">
+            <span className="wizard-label">
+              Type <code>{user.email}</code> to confirm
+            </span>
+            <input
+              type="email"
+              autoComplete="off"
+              autoFocus
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder={user.email}
+              disabled={busy}
+            />
+          </label>
+          <button
+            className="btn-primary danger-confirm-btn"
+            type="button"
+            onClick={() => {
+              void onReset(typed.trim());
+              setArmed(false);
+              setTyped("");
+            }}
+            disabled={!canSubmit}
+            title={canSubmit ? "Wipe everything" : "Type your email to enable"}
+          >
+            <Trash2 size={14} /> {busy ? "Resetting…" : "Reset my account"}
+          </button>
+        </div>
+      ) : null}
+    </section>
   );
 }
 

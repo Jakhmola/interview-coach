@@ -316,6 +316,14 @@ export const api = {
   getSession: (token: string, id: string) => apiFetch<SessionDetail>(`/sessions/${id}`, { token }),
   abandonSession: (token: string, id: string) =>
     apiFetch<Session>(`/sessions/${id}/abandon`, { method: "POST", token }),
+  /** Phase 22: wipe everything the user owns; keep the user row + token.
+   * ``confirm_email`` must equal the current user's email (case-insensitive). */
+  resetAccount: (token: string, confirmEmail: string) =>
+    apiFetch<void>("/auth/me/reset", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ confirm_email: confirmEmail }),
+    }),
 };
 
 export function parseSseText(text: string): SseFrame[] {

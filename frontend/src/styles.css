@@ -2786,6 +2786,53 @@ select:focus {
   color: var(--text-0);
   font-size: 13px;
 }
+
+/* Phase 22: Danger zone (Reset account). Two-stage: a quiet trigger
+   that reveals a typed-email guard so the action is impossible to
+   trigger by accident. Visually separated from the rest of Manage with
+   coral accents to signal irreversibility. */
+.danger-zone {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--line);
+}
+.danger-zone h2 {
+  color: var(--coral);
+}
+.danger-card {
+  border-color: rgba(222, 116, 92, 0.45);
+}
+.danger-trigger {
+  color: var(--coral);
+  border-color: rgba(222, 116, 92, 0.45);
+}
+.danger-trigger:hover:not(:disabled) {
+  border-color: var(--coral);
+}
+.danger-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  background: rgba(222, 116, 92, 0.06);
+  border: 1px solid rgba(222, 116, 92, 0.35);
+  border-radius: 8px;
+}
+.danger-confirm code {
+  background: var(--paper-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.danger-confirm-btn {
+  align-self: flex-start;
+  background: var(--coral);
+  border-color: var(--coral);
+}
+.danger-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .blocking-sessions-card p {
   margin: 0;
   font-weight: 500;

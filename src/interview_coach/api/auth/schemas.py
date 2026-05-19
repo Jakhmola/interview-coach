@@ -26,3 +26,11 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserOut
+
+
+class ResetAccountRequest(BaseModel):
+    """Phase 22 — typed-email guard so a slip of the click can't nuke
+    everything the user owns. FE renders an input next to the button and
+    only enables submit when the value equals ``current_user.email``."""
+
+    confirm_email: EmailStr

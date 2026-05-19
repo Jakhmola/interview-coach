@@ -85,14 +85,6 @@ export const ERRORS: Record<string, ErrorEntry> = {
     message: "This JD has an active session.",
     hint: "End the session before deleting.",
   },
-  cv_in_use: {
-    message: "You have an active session.",
-    hint: "End it before replacing your CV.",
-  },
-  "rebuild only applies to CV": {
-    message: "Only CVs can have their profile rebuilt.",
-  },
-
   // Streaming / auth
   stream_interrupted: {
     message: "Connection dropped mid-response.",
