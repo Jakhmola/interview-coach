@@ -119,7 +119,7 @@ async def run_intake(document_id: uuid.UUID, user_id: uuid.UUID) -> DocIntakeRes
     return result.model_copy(update={"title": title})
 
 
-MAPPING_PREVIEW_CHARS = 500
+MAPPING_PREVIEW_CHARS = 1500
 
 
 def build_mapping_suggestion_payload(
@@ -131,7 +131,7 @@ def build_mapping_suggestion_payload(
     remaining: int,
 ) -> dict[str, Any]:
     """Build the ``mapping_suggestion`` payload consumed by the FE
-    ``MappingPanel``. Shared between the prep_graph node and the
+    ``MappingModal``. Shared between the prep_graph node and the
     out-of-graph remap route (Phase 22) so both surfaces render the
     exact same shape — no FE branching on "where did this come from"."""
     experiences: list[dict[str, Any]] = []

@@ -1037,28 +1037,147 @@ summary {
   line-height: 1.4;
 }
 
-/* Phase 21.1: inline mapping HITL panel (lives inside Stage 4 of the
-   setup wizard). Visual vocabulary mirrors the rest of the wizard. */
-.wizard-mapping-panel {
+/* Phase 22: mapping HITL is a modal, used identically on Setup (prep
+   HITL pause) and Manage (Remap). Wider than the generic .modal-panel
+   (920px vs 720px) because real CVs have many experience highlights.
+   Visual tokens match the rest of the wizard surface (--paper-strong
+   shell, --paper-soft inner sections, --line borders, --shadow lift). */
+.mapping-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 8, 7, 0.78);
   display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 16px 18px;
+  align-items: center;
+  justify-content: center;
+  z-index: 70;
+  padding: 28px 16px;
+}
+
+.mapping-modal {
+  background: var(--paper-strong);
+  color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--panel-bg, #14151233);
-}
-
-.wizard-mapping-header {
+  box-shadow: var(--shadow);
+  width: 100%;
+  max-width: 920px;
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  overflow: hidden;
 }
 
-.wizard-mapping-header h2 {
-  margin: 0;
+.mapping-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper-strong);
+}
+
+.mapping-modal-header h2 {
+  margin: 4px 0 0;
   font-size: 18px;
   font-weight: 600;
+  color: var(--ink);
+}
+
+.mapping-modal-close {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+  padding: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.mapping-modal-close:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.mapping-modal-close:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mapping-modal-body {
+  padding: 18px 22px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--paper);
+}
+
+.mapping-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--line);
+  background: var(--paper-strong);
+}
+
+/* Doc preview disclosure inside the modal — collapsed by default to
+   keep the decision surface focused; expanded gives the user the first
+   ~1500 chars of source text to remind themselves what the doc actually
+   says. */
+.mapping-modal-preview {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper-soft);
+}
+
+.mapping-modal-preview summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  user-select: none;
+}
+
+.mapping-modal-preview summary::-webkit-details-marker {
+  display: none;
+}
+
+.mapping-modal-preview summary:hover {
+  color: var(--ink);
+}
+
+.mapping-modal-preview[open] summary {
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+}
+
+.mapping-modal-preview-body {
+  padding: 12px 14px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  max-height: 280px;
+  overflow-y: auto;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.mapping-modal-preview-truncated {
+  margin-top: 10px;
+  font-style: italic;
+  font-size: 11px;
+  color: var(--quiet);
 }
 
 .wizard-label {
@@ -1074,7 +1193,8 @@ summary {
   flex-direction: column;
   gap: 8px;
   padding: 12px 14px;
-  background: #11120f;
+  background: var(--paper-soft);
+  border: 1px solid var(--line);
   border-radius: 8px;
 }
 
@@ -2575,6 +2695,21 @@ select:focus {
   letter-spacing: 0.12em;
   color: var(--text-2);
   margin: 0 0 4px;
+}
+
+.manage-warning {
+  margin: 0;
+  padding: 8px 12px;
+  background: rgba(214, 169, 89, 0.1);
+  border: 1px solid rgba(214, 169, 89, 0.4);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.manage-warning--quiet {
+  background: transparent;
+  border-color: var(--line);
 }
 
 .manage-list {

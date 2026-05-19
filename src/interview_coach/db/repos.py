@@ -198,6 +198,25 @@ async def delete_document_mappings_for_document(
     return result.rowcount or 0
 
 
+async def reset_project_doc_mappings_for_user(session: AsyncSession, user_id: uuid.UUID) -> int:
+    """Phase 22: Replace-CV cascade. Drop every ``document_mappings`` row for
+    the user and null the ``project_title`` on each ``project_doc`` so the
+    next mapping pass starts fresh against the rebuilt profile. Returns the
+    number of mapping rows removed. Idempotent. Project_doc chunks are left
+    in place — ``apply_mapping``'s embed step replaces them when the user
+    confirms the new mapping."""
+    deleted = await session.execute(
+        delete(DocumentMapping).where(DocumentMapping.user_id == user_id)
+    )
+    await session.execute(
+        Document.__table__.update()
+        .where(Document.user_id == user_id, Document.kind == "project_doc")
+        .values(project_title=None)
+    )
+    await session.commit()
+    return deleted.rowcount or 0
+
+
 async def replace_document_mappings(
     session: AsyncSession,
     *,

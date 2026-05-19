@@ -276,7 +276,7 @@ export const api = {
     apiFetch<void>(`/documents/${id}/embed`, { method: "POST", token }),
   /** Phase 22: kick off an out-of-graph remap for a project_doc. The
    * response payload is the same shape the prep_graph emits as
-   * ``mapping_suggestion``, so MappingPanel consumes one schema. */
+   * ``mapping_suggestion``, so MappingModal consumes one schema. */
   startRemap: (token: string, id: string) =>
     apiFetch<MappingSuggestion>(`/documents/${id}/remap`, { method: "POST", token }),
   /** Phase 22: finish an out-of-graph remap. ``apply`` mutates the

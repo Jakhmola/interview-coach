@@ -100,20 +100,26 @@ async def upload_document(
 
     # Phase 22: dedup at upload time. Re-uploading identical content
     # collapses onto the original row with HTTP 200 instead of a duplicate.
-    # CV uploads skip this — ``create_document`` already has replace
-    # semantics for kind='cv' (the previous CV is deleted in-transaction),
-    # so a "same content, new file" CV upload must still flow through to
-    # refresh `filename` / `content_type` / `byte_size`.
     content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    if kind == DocumentKind.project_doc:
-        existing = await repos.find_document_by_content_hash(
-            session, user_id=user.id, kind=kind.value, content_hash=content_hash
-        )
-        if existing is not None:
-            response.status_code = status.HTTP_200_OK
-            out = DocumentOut.model_validate(existing)
-            out.embedding_status = await _embedding_status_for(existing, session)
-            return out
+    existing = await repos.find_document_by_content_hash(
+        session, user_id=user.id, kind=kind.value, content_hash=content_hash
+    )
+    if existing is not None:
+        response.status_code = status.HTTP_200_OK
+        out = DocumentOut.model_validate(existing)
+        out.embedding_status = await _embedding_status_for(existing, session)
+        return out
+
+    # Phase 22 Replace-CV cascade: detect *before* create_document fires
+    # (which deletes the old CV row in-transaction) so we can tell apart a
+    # first-time CV upload from a replacement. CV-with-same-bytes is already
+    # short-circuited above by the dedup path.
+    is_cv_replace = False
+    if kind == DocumentKind.cv:
+        prior_cvs = [
+            d for d in await repos.list_documents_for_user(session, user.id) if d.kind == "cv"
+        ]
+        is_cv_replace = len(prior_cvs) > 0
 
     doc = await repos.create_document(
         session,
@@ -126,11 +132,20 @@ async def upload_document(
         content_hash=content_hash,
     )
     if kind == DocumentKind.cv:
+        if is_cv_replace:
+            # The new CV invalidates everything CV-derived: the profile
+            # (recomputed by prep_graph on next /prepare) and every
+            # project_doc mapping (which was made against the *old*
+            # profile's experiences/projects/skills). Wipe both — the
+            # wizard's work-driven auto-prep will rebuild the profile and
+            # walk the user through remapping each project_doc.
+            #
+            # JD parsed_json and company snapshots are intentionally
+            # untouched — they're job-derived, not CV-derived.
+            await repos.delete_profile(session, user.id)
+            await repos.reset_project_doc_mappings_for_user(session, user.id)
         # CV: kick off RAG embedding only. Profile-building is owned solely
         # by prep_graph (Phase 21.1) — see note in the route docstring.
-        # The wizard's Stage 2 (JD save) fires /sessions/prepare which runs
-        # profile_builder synchronously, so the user sees deterministic
-        # progress rather than a silent background race.
         asyncio.create_task(_embed_in_background(doc.id))
     # project_doc: chunking deferred until the prep-graph doc_mapping node
     # applies the mapping (so chunks carry the final user-edited title).
@@ -215,7 +230,7 @@ async def start_remap(
     Reverts any existing mapping rows (idempotent — safe if the doc was
     skipped during prep with zero rows), then runs ``run_intake`` to
     produce a fresh suggestion. Returns the same payload shape the
-    prep-graph node emits via SSE, so the FE ``MappingPanel`` consumes
+    prep-graph node emits via SSE, so the FE ``MappingModal`` consumes
     one schema.
     """
     from interview_coach.agents.nodes.doc_intake import (

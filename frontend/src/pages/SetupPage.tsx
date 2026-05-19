@@ -23,7 +23,7 @@ import {
   prepareSessionStream,
 } from "../api";
 import { LoadingStatus } from "../components/LoadingStatus";
-import { MappingPanel } from "../components/MappingPanel";
+import { MappingModal } from "../components/MappingModal";
 import { ErrorBanner, StatusPill } from "../components/ui";
 import { codeFrom } from "../errors";
 import { useStreamAbort } from "../hooks/useStreamAbort";
@@ -107,8 +107,8 @@ export function SetupPage() {
   const [isPreparing, setIsPreparing] = useState(false);
   const [nodeState, setNodeState] = useState<Record<string, string>>({});
   // The mapping suggestion the prep_graph paused on, if any. When non-null,
-  // <StepPrep /> renders the inline MappingPanel; on user submit we POST
-  // /sessions/prepare/resume which re-opens the SSE stream.
+  // the page renders <MappingModal /> at the wizard top level; on user
+  // submit we POST /sessions/prepare/resume which re-opens the SSE stream.
   const [pendingMapping, setPendingMapping] = useState<MappingSuggestion | null>(null);
   const [step, setStep] = useState<Step>("cv");
   const [didInitStep, setDidInitStep] = useState(false);
@@ -348,7 +348,7 @@ export function SetupPage() {
       // Phase 22: clear the wizard-bypass once prep is genuinely
       // complete — the natural re-render then drops the user back on
       // ReadyLanding. We don't clear on mapping-pending state because
-      // the MappingPanel lives inside the wizard.
+      // the MappingModal is still waiting for the user's decision.
       if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
         setBypassLanding(false);
         failedAutoPrepJobsRef.current.delete(activeJobId);
@@ -584,11 +584,22 @@ export function SetupPage() {
             onPrep={() => runPrep(false)}
             onRefreshCompany={() => runPrep(true)}
             nodeState={nodeState}
-            pendingMapping={pendingMapping}
-            onMappingDecision={resumeMapping}
           />
         ) : null}
       </div>
+
+      {/* Phase 22: mapping HITL renders as a top-level modal so it floats
+          above the wizard regardless of which step the user is on. ESC /
+          backdrop close = "skip this doc" (matches the modal's Skip button
+          and the prep_graph's HITL contract — skipping is the user's
+          escape hatch). */}
+      <MappingModal
+        open={pendingMapping != null}
+        suggestion={pendingMapping}
+        busy={isPreparing}
+        onDecision={resumeMapping}
+        onClose={() => resumeMapping({ action: "skip" })}
+      />
 
       <footer className="wizard-footer">
         <button
@@ -789,30 +800,18 @@ function StepPrep({
   onPrep,
   onRefreshCompany,
   nodeState,
-  pendingMapping,
-  onMappingDecision,
 }: {
   status: PrepStatus | null;
   isPreparing: boolean;
   onPrep: () => void;
   onRefreshCompany: () => void;
   nodeState: Record<string, string>;
-  pendingMapping: MappingSuggestion | null;
-  onMappingDecision: (
-    d:
-      | { action: "apply"; rows: MappingRow[]; title: string; extracted: DocIntakeExtracted }
-      | { action: "skip" },
-  ) => void;
 }) {
   const ready = status?.can_start ?? false;
   const showNodes = Object.keys(nodeState).length > 0;
 
   return (
     <div className="wizard-body">
-      {pendingMapping ? (
-        <MappingPanel suggestion={pendingMapping} onDecision={onMappingDecision} disabled={isPreparing} />
-      ) : null}
-
       {showNodes ? (
         <div className="node-list">
           {PREP_NODE_KEYS.map((key) => (
@@ -833,25 +832,23 @@ function StepPrep({
         </div>
       )}
 
-      {!pendingMapping ? (
-        <div className="wizard-actions">
-          {!ready ? (
-            <button className="btn-primary" type="button" onClick={onPrep} disabled={isPreparing}>
-              <CheckCircle2 size={14} />
-              {isPreparing ? "Preparing…" : "Run prep"}
-            </button>
-          ) : null}
-          <button
-            className="btn-ghost"
-            type="button"
-            onClick={onRefreshCompany}
-            disabled={isPreparing}
-            title="Re-runs only the company researcher; keeps your profile and JD analysis as-is."
-          >
-            <RefreshCw size={14} /> Refresh company info
+      <div className="wizard-actions">
+        {!ready ? (
+          <button className="btn-primary" type="button" onClick={onPrep} disabled={isPreparing}>
+            <CheckCircle2 size={14} />
+            {isPreparing ? "Preparing…" : "Run prep"}
           </button>
-        </div>
-      ) : null}
+        ) : null}
+        <button
+          className="btn-ghost"
+          type="button"
+          onClick={onRefreshCompany}
+          disabled={isPreparing}
+          title="Re-runs only the company researcher; keeps your profile and JD analysis as-is."
+        >
+          <RefreshCw size={14} /> Refresh company info
+        </button>
+      </div>
     </div>
   );
 }

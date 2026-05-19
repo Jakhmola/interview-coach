@@ -39,19 +39,42 @@ async def test_upload_cv_pdf_happy_path(
 async def test_upload_cv_replaces_existing(
     client: AsyncClient, auth_token: str, sample_pdf: bytes
 ) -> None:
-    for name in ["v1.pdf", "v2.pdf", "v3.pdf"]:
-        r = await client.post(
-            "/documents",
-            headers=_auth(auth_token),
-            data={"kind": "cv"},
-            files={"file": (name, sample_pdf, "application/pdf")},
-        )
-        assert r.status_code == 201, r.text
+    """Phase 22 contract: same-bytes re-uploads dedup to HTTP 200 with the
+    same row; different-bytes uploads replace (still one CV row total)."""
+    from tests.conftest import make_pdf
+
+    r1 = await client.post(
+        "/documents",
+        headers=_auth(auth_token),
+        data={"kind": "cv"},
+        files={"file": ("v1.pdf", sample_pdf, "application/pdf")},
+    )
+    assert r1.status_code == 201, r1.text
+    cv1_id = r1.json()["id"]
+
+    # Same bytes → dedup → 200, same id, filename NOT updated.
+    r2 = await client.post(
+        "/documents",
+        headers=_auth(auth_token),
+        data={"kind": "cv"},
+        files={"file": ("v2.pdf", sample_pdf, "application/pdf")},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["id"] == cv1_id
+
+    # Different bytes → replace → 201, new id, old row gone.
+    r3 = await client.post(
+        "/documents",
+        headers=_auth(auth_token),
+        data={"kind": "cv"},
+        files={"file": ("v3.pdf", make_pdf("entirely different body"), "application/pdf")},
+    )
+    assert r3.status_code == 201, r3.text
+    assert r3.json()["id"] != cv1_id
 
     r = await client.get("/documents", headers=_auth(auth_token))
     assert r.status_code == 200
-    docs = r.json()
-    cv_docs = [d for d in docs if d["kind"] == "cv"]
+    cv_docs = [d for d in r.json() if d["kind"] == "cv"]
     assert len(cv_docs) == 1
     assert cv_docs[0]["filename"] == "v3.pdf"
 

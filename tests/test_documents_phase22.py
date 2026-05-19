@@ -107,6 +107,158 @@ async def test_project_doc_distinct_content_creates_new_row(
     assert r1.json()["id"] != r2.json()["id"]
 
 
+# --- Replace-CV cascade ------------------------------------------------
+
+
+async def test_cv_replace_runs_full_cascade(
+    client: AsyncClient,
+    auth_token: str,
+    patched_embed: AsyncMock,
+    patched_async_session,  # noqa: ANN001
+) -> None:
+    """Uploading a *different* CV when one already exists is a Replace.
+    The cascade must wipe the profile, drop every project_doc mapping
+    row, and null each project_doc's project_title — but leave the
+    project_doc raw_text/embedding chunks alone (the user only needs to
+    re-confirm the mapping, not re-upload). JD parsed_json + company
+    snapshots are CV-orthogonal and must be untouched."""
+    from interview_coach.db import repos
+
+    AsyncSessionLocal = patched_async_session  # noqa: N806
+
+    me = await client.get("/auth/me", headers=_auth(auth_token))
+    user_id = uuid.UUID(me.json()["id"])
+
+    # CV v1.
+    up1 = await client.post(
+        "/documents",
+        headers=_auth(auth_token),
+        data={"kind": "cv"},
+        files={"file": ("cv1.pdf", make_pdf("Alice resume v1"), "application/pdf")},
+    )
+    assert up1.status_code == 201
+
+    # Upload a project_doc.
+    pj = await client.post(
+        "/documents",
+        headers=_auth(auth_token),
+        data={"kind": "project_doc"},
+        files={"file": ("p.docx", make_docx("Project: search rewrite"), DOCX_CT)},
+    )
+    assert pj.status_code == 201
+    doc_id = uuid.UUID(pj.json()["id"])
+
+    # Seed: profile + a mapping row + a project_title on the doc, so we
+    # can prove the cascade clears each of them.
+    async with AsyncSessionLocal() as s:
+        await repos.upsert_profile(
+            s,
+            user_id=user_id,
+            profile_json={
+                "summary": "v1 profile.",
+                "skills": [],
+                "experiences": [],
+                "projects": [],
+                "education": [],
+            },
+            source_doc_ids=[],
+            model_name="test",
+        )
+        await repos.replace_document_mappings(
+            s,
+            document_id=doc_id,
+            user_id=user_id,
+            rows=[
+                {
+                    "mapping_kind": "highlight",
+                    "experience_idx": 0,
+                    "highlight_idx": 0,
+                    "extracted_json": {"foo": "bar"},
+                }
+            ],
+        )
+        await repos.update_document_title(s, doc_id, user_id, "v1 title")
+
+    # CV v2 — different bytes → triggers replace cascade.
+    up2 = await client.post(
+        "/documents",
+        headers=_auth(auth_token),
+        data={"kind": "cv"},
+        files={"file": ("cv2.pdf", make_pdf("Alice resume v2 with new bullet"), "application/pdf")},
+    )
+    assert up2.status_code == 201, up2.text
+    assert up2.json()["id"] != up1.json()["id"]
+
+    async with AsyncSessionLocal() as s:
+        profile = await repos.get_profile(s, user_id)
+        mappings = await repos.list_document_mappings(s, doc_id)
+        doc = await repos.get_document(s, doc_id, user_id)
+        cvs = [d for d in await repos.list_documents_for_user(s, user_id) if d.kind == "cv"]
+
+    assert profile is None, "Replace-CV should wipe the profile"
+    assert mappings == [], "Replace-CV should drop project_doc mappings"
+    assert doc is not None and doc.project_title is None, (
+        "project_title cleared so remap re-extracts fresh"
+    )
+    assert doc is not None and "search rewrite" in doc.raw_text, "project_doc raw_text preserved"
+    assert len(cvs) == 1, "old CV row replaced, not duplicated"
+
+
+async def test_cv_same_bytes_reupload_is_dedup_no_cascade(
+    client: AsyncClient,
+    auth_token: str,
+    patched_embed: AsyncMock,
+    patched_async_session,  # noqa: ANN001
+) -> None:
+    """Re-uploading the *same* CV bytes hits content-hash dedup → 200
+    with the existing row. Cascade must NOT fire — the user's profile +
+    mappings stay intact."""
+    from interview_coach.db import repos
+
+    AsyncSessionLocal = patched_async_session  # noqa: N806
+
+    me = await client.get("/auth/me", headers=_auth(auth_token))
+    user_id = uuid.UUID(me.json()["id"])
+
+    body = make_pdf("Same CV bytes")
+    up1 = await client.post(
+        "/documents",
+        headers=_auth(auth_token),
+        data={"kind": "cv"},
+        files={"file": ("cv.pdf", body, "application/pdf")},
+    )
+    assert up1.status_code == 201
+    cv_id = up1.json()["id"]
+
+    async with AsyncSessionLocal() as s:
+        await repos.upsert_profile(
+            s,
+            user_id=user_id,
+            profile_json={
+                "summary": "keep me.",
+                "skills": [],
+                "experiences": [],
+                "projects": [],
+                "education": [],
+            },
+            source_doc_ids=[],
+            model_name="test",
+        )
+
+    up2 = await client.post(
+        "/documents",
+        headers=_auth(auth_token),
+        data={"kind": "cv"},
+        files={"file": ("cv_rename.pdf", body, "application/pdf")},
+    )
+    assert up2.status_code == 200, up2.text
+    assert up2.json()["id"] == cv_id
+
+    async with AsyncSessionLocal() as s:
+        profile = await repos.get_profile(s, user_id)
+    assert profile is not None, "Dedup path must NOT wipe the profile"
+
+
 # --- prep status surfaces unmapped count -------------------------------
 
 

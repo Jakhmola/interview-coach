@@ -11,7 +11,7 @@ import {
   api,
 } from "../api";
 import { ArmedDeleteButton } from "../components/ArmedDeleteButton";
-import { MappingPanel, MappingDecision } from "../components/MappingPanel";
+import { MappingModal, MappingDecision } from "../components/MappingModal";
 import { ErrorBanner, StatusPill, formatDate } from "../components/ui";
 import { codeFrom } from "../errors";
 import { jobLabel, jobSubtitle } from "../jobLabel";
@@ -267,6 +267,18 @@ export function ManagePage() {
         <h2>CV</h2>
         {cv ? (
           <>
+            {mappedTechDocs > 0 ? (
+              <p className="manage-warning">
+                Replacing your CV rebuilds your profile and asks you to remap each of your{" "}
+                {mappedTechDocs} supporting doc{mappedTechDocs === 1 ? "" : "s"} against the new
+                experiences. Uploading the same file is a no-op.
+              </p>
+            ) : (
+              <p className="manage-warning manage-warning--quiet">
+                Replacing your CV rebuilds your profile from scratch. Uploading the same file is a
+                no-op.
+              </p>
+            )}
             <div className="manage-card">
               <div>
                 <strong>{cv.filename}</strong>
@@ -405,7 +417,6 @@ export function ManagePage() {
         ) : (
           <div className="manage-list">
             {techDocs.map((d) => {
-              const isRemapping = remapping?.docId === d.id;
               return (
                 <div key={d.id}>
                   <div className="manage-card">
@@ -421,12 +432,10 @@ export function ManagePage() {
                       <button
                         className="btn-ghost"
                         type="button"
-                        onClick={() =>
-                          isRemapping ? setRemapping(null) : void openRemap(d.id)
-                        }
-                        disabled={busy === d.id}
+                        onClick={() => void openRemap(d.id)}
+                        disabled={busy === d.id || remapping != null}
                       >
-                        <Sparkles size={14} /> {isRemapping ? "Cancel" : "Remap"}
+                        <Sparkles size={14} /> Remap
                       </button>
                       {d.embedding_status === "failed" && d.project_title ? (
                         <button
@@ -445,19 +454,25 @@ export function ManagePage() {
                       />
                     </div>
                   </div>
-                  {isRemapping ? (
-                    <MappingPanel
-                      suggestion={remapping!.suggestion}
-                      onDecision={confirmRemap}
-                      disabled={busy === d.id}
-                    />
-                  ) : null}
                 </div>
               );
             })}
           </div>
         )}
       </section>
+
+      {/* Phase 22: remap HITL is the same modal used by Setup. Backdrop /
+          ESC close the modal *without* mutating the mapping — on Manage,
+          Remap is opt-in and the user can always re-open it. The dedicated
+          Skip button still goes through ``confirmRemap`` with action=skip
+          so the no-op API call clears the in-flight state. */}
+      <MappingModal
+        open={remapping != null}
+        suggestion={remapping?.suggestion ?? null}
+        busy={busy === remapping?.docId}
+        onDecision={confirmRemap}
+        onClose={() => setRemapping(null)}
+      />
     </div>
   );
 }
