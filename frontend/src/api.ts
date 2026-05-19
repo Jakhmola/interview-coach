@@ -3,11 +3,17 @@ const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 export class ApiError extends Error {
   status: number;
   detail: string;
+  /** Phase 22: when the backend returns a structured 409 body
+   * (currently only ``{code, blocking_session_ids}`` from delete
+   * routes), the parsed object lands here. ``detail`` keeps the
+   * stringified form so existing string-keyed lookups still work. */
+  detailObject: Record<string, unknown> | null;
 
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, detailObject: Record<string, unknown> | null = null) {
     super(`${status}: ${detail}`);
     this.status = status;
     this.detail = detail;
+    this.detailObject = detailObject;
   }
 }
 
@@ -123,6 +129,10 @@ export type PrepStatus = {
   company_researched: boolean;
   can_start: boolean;
   missing: string[];
+  /** Phase 22: project_docs the user uploaded but hasn't mapped yet.
+   * The wizard's work-driven auto-prep treats a non-zero count as
+   * "needs prep" without waiting for a manual Continue click. */
+  unmapped_project_doc_count: number;
   profile?: Record<string, unknown> | null;
   job?: Record<string, unknown> | null;
   company?: {
@@ -191,13 +201,27 @@ async function unwrap<T>(response: Response): Promise<T> {
 
   const text = await response.text();
   let detail = text;
+  let detailObject: Record<string, unknown> | null = null;
   try {
     const parsed = JSON.parse(text) as { detail?: unknown };
-    detail = typeof parsed.detail === "string" ? parsed.detail : JSON.stringify(parsed.detail);
+    if (typeof parsed.detail === "string") {
+      detail = parsed.detail;
+    } else if (parsed.detail !== null && typeof parsed.detail === "object") {
+      // Phase 22: structured 409 body. Surface the `code` field as the
+      // string detail so existing ``codeFrom`` consumers still match
+      // the right ``ERRORS`` entry, but keep the full object so
+      // callers that need the metadata (e.g. blocking_session_ids)
+      // can reach into ``detailObject``.
+      detailObject = parsed.detail as Record<string, unknown>;
+      const code = (detailObject as { code?: unknown }).code;
+      detail = typeof code === "string" ? code : JSON.stringify(parsed.detail);
+    } else {
+      detail = JSON.stringify(parsed.detail);
+    }
   } catch {
     detail = text || response.statusText;
   }
-  throw new ApiError(response.status, detail);
+  throw new ApiError(response.status, detail, detailObject);
 }
 
 async function apiFetch<T>(path: string, init: FetchInit = {}): Promise<T> {
@@ -239,12 +263,40 @@ export const api = {
   getDocument: (token: string, id: string) => apiFetch<DocumentDetail>(`/documents/${id}`, { token }),
   deleteDocument: (token: string, id: string) =>
     apiFetch<void>(`/documents/${id}`, { method: "DELETE", token }),
+  /** Phase 22: re-schedule embedding for a CV (or already-mapped
+   * project_doc). 202 Accepted; the FE polls listDocuments to discover
+   * when the chunks land via ``embedding_status``. */
+  retryEmbed: (token: string, id: string) =>
+    apiFetch<void>(`/documents/${id}/embed`, { method: "POST", token }),
+  /** Phase 22: kick off an out-of-graph remap for a project_doc. The
+   * response payload is the same shape the prep_graph emits as
+   * ``mapping_suggestion``, so MappingPanel consumes one schema. */
+  startRemap: (token: string, id: string) =>
+    apiFetch<MappingSuggestion>(`/documents/${id}/remap`, { method: "POST", token }),
+  /** Phase 22: finish an out-of-graph remap. ``apply`` mutates the
+   * profile; ``skip`` leaves the doc unmapped (no DB writes). */
+  confirmRemap: (
+    token: string,
+    id: string,
+    body:
+      | { action: "apply"; rows: MappingRow[]; title: string; extracted: DocIntakeExtracted }
+      | { action: "skip" },
+  ) =>
+    apiFetch<DocumentDetail>(`/documents/${id}/remap/confirm`, {
+      method: "POST",
+      token,
+      body: JSON.stringify(body),
+    }),
   submitJobText: (token: string, text: string) =>
     apiFetch<JobDetail>("/jobs", { method: "POST", token, body: JSON.stringify({ text }) }),
   submitJobUrl: (token: string, url: string) =>
     apiFetch<JobDetail>("/jobs", { method: "POST", token, body: JSON.stringify({ url }) }),
   listJobs: (token: string) => apiFetch<JobItem[]>("/jobs", { token }),
   getJob: (token: string, id: string) => apiFetch<JobDetail>(`/jobs/${id}`, { token }),
+  /** Phase 22: re-analyze JD. Replaces ``raw_text``, clears parsed
+   * analysis + company snapshot. Next ``/prepare`` re-runs both. */
+  patchJob: (token: string, id: string, body: { text?: string; url?: string }) =>
+    apiFetch<JobDetail>(`/jobs/${id}`, { method: "PATCH", token, body: JSON.stringify(body) }),
   deleteJob: (token: string, id: string) => apiFetch<void>(`/jobs/${id}`, { method: "DELETE", token }),
   prepStatus: (token: string, jobId: string) =>
     apiFetch<PrepStatus>(`/sessions/prepare/status?job_id=${encodeURIComponent(jobId)}`, { token }),

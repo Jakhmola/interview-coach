@@ -2600,6 +2600,76 @@ select:focus {
   flex-shrink: 0;
 }
 
+/* ---- Phase 22: Manage editors + blocking-sessions card ---- */
+
+.manage-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 4px 0 12px 0;
+  padding: 14px 16px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.manage-editor textarea,
+.manage-editor .input-with-icon input {
+  font-size: 13px;
+}
+.manage-editor .muted {
+  font-size: 12px;
+  color: var(--text-2);
+  margin: 0;
+}
+
+.blocking-sessions-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 12px 0;
+  padding: 12px 14px;
+  background: rgba(197, 107, 98, 0.08);
+  border: 1px solid rgba(197, 107, 98, 0.35);
+  border-radius: 8px;
+  color: var(--text-0);
+  font-size: 13px;
+}
+.blocking-sessions-card p {
+  margin: 0;
+  font-weight: 500;
+}
+.blocking-sessions-card ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.blocking-sessions-card li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.blocking-sessions-card code {
+  font-size: 12px;
+  background: var(--bg-1);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.blocking-sessions-card > .btn-quiet {
+  align-self: flex-end;
+  font-size: 12px;
+}
+
+.armed-consequence {
+  display: block;
+  margin-left: 8px;
+  font-size: 11px;
+  opacity: 0.85;
+}
+
 .success-banner {
   padding: 10px 14px;
   background: var(--cool-soft);

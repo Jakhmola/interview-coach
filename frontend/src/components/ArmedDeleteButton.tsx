@@ -17,6 +17,10 @@ type Props = {
   icon?: ReactNode;
   /** Pass-through HTML title for accessibility tooltips. */
   title?: string;
+  /** Phase 22: optional one-liner shown next to the armed label so the
+   * user can see the cascade before the destructive click goes through
+   * (e.g. "Will clear your profile and unmap 3 supporting docs"). */
+  consequenceLabel?: ReactNode;
 };
 
 /**
@@ -35,6 +39,7 @@ export function ArmedDeleteButton({
   disabled = false,
   icon,
   title,
+  consequenceLabel,
 }: Props) {
   const [armed, setArmed] = useState(false);
   const timerRef = useRef<number | null>(null);
@@ -83,6 +88,9 @@ export function ArmedDeleteButton({
     >
       {icon}
       <span>{armed ? armedLabel : label}</span>
+      {armed && consequenceLabel ? (
+        <span className="armed-consequence">{consequenceLabel}</span>
+      ) : null}
     </button>
   );
 }
