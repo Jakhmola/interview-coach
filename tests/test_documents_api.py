@@ -56,15 +56,21 @@ async def test_upload_cv_replaces_existing(
     assert cv_docs[0]["filename"] == "v3.pdf"
 
 
-async def test_upload_multiple_project_docs_allowed(
-    client: AsyncClient, auth_token: str, sample_docx: bytes
-) -> None:
-    for name in ["proj_a.docx", "proj_b.docx"]:
+async def test_upload_multiple_project_docs_allowed(client: AsyncClient, auth_token: str) -> None:
+    """Two project_docs with distinct content land as two rows. Phase 22
+    dedups by ``sha256(text)`` so the bodies must differ — that's the
+    intended ergonomics: ten identical re-uploads stay one row."""
+    from tests.conftest import make_docx
+
+    for name, body in [
+        ("proj_a.docx", make_docx("Project A: built an indexer.")),
+        ("proj_b.docx", make_docx("Project B: shipped a CRDT sync engine.")),
+    ]:
         r = await client.post(
             "/documents",
             headers=_auth(auth_token),
             data={"kind": "project_doc"},
-            files={"file": (name, sample_docx, DOCX_CT)},
+            files={"file": (name, body, DOCX_CT)},
         )
         assert r.status_code == 201, r.text
 

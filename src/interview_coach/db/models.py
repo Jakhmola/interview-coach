@@ -54,6 +54,7 @@ class Document(Base):
         JSONB().with_variant(JSON(), "sqlite"), nullable=True
     )
     project_title: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -68,6 +69,15 @@ class Document(Base):
             unique=True,
             postgresql_where=text("kind = 'cv'"),
             sqlite_where=text("kind = 'cv'"),
+        ),
+        Index(
+            "uq_documents_user_kind_content_hash",
+            "user_id",
+            "kind",
+            "content_hash",
+            unique=True,
+            postgresql_where=text("content_hash IS NOT NULL"),
+            sqlite_where=text("content_hash IS NOT NULL"),
         ),
     )
 
@@ -85,13 +95,24 @@ class Job(Base):
     parsed_json: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB().with_variant(JSON(), "sqlite"), nullable=True
     )
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,
     )
 
-    __table_args__ = (CheckConstraint("source in ('pasted', 'url')", name="ck_jobs_source"),)
+    __table_args__ = (
+        CheckConstraint("source in ('pasted', 'url')", name="ck_jobs_source"),
+        Index(
+            "uq_jobs_user_content_hash",
+            "user_id",
+            "content_hash",
+            unique=True,
+            postgresql_where=text("content_hash IS NOT NULL"),
+            sqlite_where=text("content_hash IS NOT NULL"),
+        ),
+    )
 
 
 class ProfileRow(Base):

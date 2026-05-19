@@ -78,6 +78,10 @@ async def client(db_session: AsyncSession) -> AsyncIterator[AsyncClient]:
     # Phase 21: prep_graph is now checkpointed. Share the same MemorySaver
     # across both graphs (matches production's shared AsyncSqliteSaver).
     checkpointer = MemorySaver()
+    # Phase 22: also expose the bare saver — DELETE /jobs/{id} cleans
+    # the per-job prep checkpoint via ``adelete_thread`` and reads it
+    # off ``app.state.checkpointer``.
+    app.state.checkpointer = checkpointer
     app.state.prep_graph = build_prep_graph(checkpointer)
     app.state.interview_graph = build_interview_graph(checkpointer)
 

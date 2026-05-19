@@ -119,6 +119,49 @@ async def run_intake(document_id: uuid.UUID, user_id: uuid.UUID) -> DocIntakeRes
     return result.model_copy(update={"title": title})
 
 
+MAPPING_PREVIEW_CHARS = 500
+
+
+def build_mapping_suggestion_payload(
+    *,
+    document_id: uuid.UUID,
+    intake: DocIntakeResult,
+    doc_raw_text: str,
+    profile_json: dict[str, Any] | None,
+    remaining: int,
+) -> dict[str, Any]:
+    """Build the ``mapping_suggestion`` payload consumed by the FE
+    ``MappingPanel``. Shared between the prep_graph node and the
+    out-of-graph remap route (Phase 22) so both surfaces render the
+    exact same shape — no FE branching on "where did this come from"."""
+    experiences: list[dict[str, Any]] = []
+    if profile_json is not None:
+        for i, exp in enumerate(profile_json.get("experiences") or []):
+            if not isinstance(exp, dict):
+                continue
+            highlights_out: list[dict[str, Any]] = []
+            for j, hl in enumerate(exp.get("highlights") or []):
+                if isinstance(hl, dict):
+                    highlights_out.append({"highlight_idx": j, "text": str(hl.get("text") or "")})
+            experiences.append(
+                {
+                    "experience_idx": i,
+                    "company": str(exp.get("company") or ""),
+                    "role": str(exp.get("role") or ""),
+                    "highlights": highlights_out,
+                }
+            )
+    return {
+        "document_id": str(document_id),
+        "title": intake.title,
+        "preview": doc_raw_text[:MAPPING_PREVIEW_CHARS],
+        "extracted": intake.extracted.model_dump(),
+        "suggestions": [s.model_dump() for s in intake.suggestions],
+        "experiences": experiences,
+        "remaining": remaining,
+    }
+
+
 def _resolve_extracted_payload(
     *,
     user_supplied: dict[str, Any] | None,
@@ -132,9 +175,7 @@ def _resolve_extracted_payload(
     return fallback or {}
 
 
-def reapply_existing_mappings(
-    profile: Profile, mapping_rows: list[dict[str, Any]]
-) -> Profile:
+def reapply_existing_mappings(profile: Profile, mapping_rows: list[dict[str, Any]]) -> Profile:
     """Phase 21.1: re-apply every persisted ``document_mappings`` row to a
     freshly-built profile so a CV re-extract doesn't silently wipe prior
     project_doc enrichments.
@@ -159,10 +200,13 @@ def reapply_existing_mappings(
 
     current = profile
     for doc_id, rows in by_doc.items():
-        doc_extracted = next(
-            (r["extracted_json"] for r in rows if r.get("extracted_json")),
-            {},
-        ) or {}
+        doc_extracted = (
+            next(
+                (r["extracted_json"] for r in rows if r.get("extracted_json")),
+                {},
+            )
+            or {}
+        )
         try:
             current = _mutate_profile_apply(
                 profile=current,

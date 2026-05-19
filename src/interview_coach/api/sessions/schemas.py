@@ -72,6 +72,11 @@ class PrepStatusOut(BaseModel):
     company_researched: bool
     can_start: bool
     missing: list[str]
+    # Phase 22: count of project_docs the user has uploaded but hasn't
+    # mapped yet. The wizard's work-driven auto-prep treats a non-zero
+    # value as "there's pending work" and fires prep without waiting for
+    # the user to click Continue.
+    unmapped_project_doc_count: int = 0
     profile: dict[str, Any] | None = None
     job: dict[str, Any] | None = None
     company: dict[str, Any] | None = None

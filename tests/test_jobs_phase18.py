@@ -1,5 +1,7 @@
-"""Phase 18: DELETE /jobs/{id} now refuses with 409 job_in_use when an
-active session references the job."""
+"""Phase 18 + 22: DELETE /jobs/{id} refuses with 409 when an active
+session references the job. Phase 22 swapped the bare-string detail for
+a structured ``{code, blocking_session_ids}`` body — tests assert the
+new shape."""
 
 from __future__ import annotations
 
@@ -40,11 +42,13 @@ async def test_delete_job_blocked_by_active_session(
 
     d = await client.delete(f"/jobs/{job_id}", headers=_auth(auth_token))
     assert d.status_code == 409
-    assert d.json()["detail"] == "job_in_use"
-
-    # After abandoning the session, delete succeeds.
+    detail = d.json()["detail"]
+    assert detail["code"] == "job_in_use"
     sessions = await repos.list_sessions_for_user(db_session, user_id)
     sess_id = sessions[0].id
+    assert detail["blocking_session_ids"] == [str(sess_id)]
+
+    # After abandoning the session, delete succeeds.
     await repos.update_session_status(db_session, sess_id, user_id, "abandoned")
 
     d2 = await client.delete(f"/jobs/{job_id}", headers=_auth(auth_token))

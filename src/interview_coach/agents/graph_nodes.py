@@ -48,6 +48,7 @@ from interview_coach.agents.nodes.doc_intake import (
     DocIntakeError,
     ProfileMissing,
     apply_mapping,
+    build_mapping_suggestion_payload,
     run_intake,
 )
 from interview_coach.agents.nodes.evaluator import stream_evaluation
@@ -179,7 +180,7 @@ async def node_prepare_mapping_suggestion(state: InterviewState) -> dict[str, An
             "next_step": "apply_or_skip_mapping",
         }
 
-    payload = _build_mapping_suggestion_payload(
+    payload = build_mapping_suggestion_payload(
         document_id=next_doc.id,
         intake=intake,
         doc_raw_text=next_doc.raw_text,
@@ -199,48 +200,6 @@ async def node_prepare_mapping_suggestion(state: InterviewState) -> dict[str, An
             "remaining": remaining,
         },
         "next_step": "await_mapping_confirm",
-    }
-
-
-def _build_mapping_suggestion_payload(
-    *,
-    document_id: uuid.UUID,
-    intake: Any,
-    doc_raw_text: str,
-    profile_json: dict[str, Any] | None,
-    remaining: int,
-) -> dict[str, Any]:
-    """Build the SSE ``mapping_suggestion`` payload. Mirrors the shape the
-    FE renders inline at Stage 4 of setup. ``remaining`` lets the FE show
-    "doc N of M" without a follow-up request."""
-    PREVIEW_CHARS = 500
-    experiences: list[dict[str, Any]] = []
-    if profile_json is not None:
-        for i, exp in enumerate(profile_json.get("experiences") or []):
-            if not isinstance(exp, dict):
-                continue
-            highlights_out: list[dict[str, Any]] = []
-            for j, hl in enumerate(exp.get("highlights") or []):
-                if isinstance(hl, dict):
-                    highlights_out.append(
-                        {"highlight_idx": j, "text": str(hl.get("text") or "")}
-                    )
-            experiences.append(
-                {
-                    "experience_idx": i,
-                    "company": str(exp.get("company") or ""),
-                    "role": str(exp.get("role") or ""),
-                    "highlights": highlights_out,
-                }
-            )
-    return {
-        "document_id": str(document_id),
-        "title": intake.title,
-        "preview": doc_raw_text[:PREVIEW_CHARS],
-        "extracted": intake.extracted.model_dump(),
-        "suggestions": [s.model_dump() for s in intake.suggestions],
-        "experiences": experiences,
-        "remaining": remaining,
     }
 
 

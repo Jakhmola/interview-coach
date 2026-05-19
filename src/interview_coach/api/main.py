@@ -37,6 +37,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # prep_graph uses thread_id "prep:{user_id}:{job_id}";
         # interview_graph uses "{session_id}:turn_{n}". Distinct prefixes
         # mean the two namespaces never collide.
+        # Phase 22: also expose the bare saver so ``DELETE /jobs/{id}``
+        # can drop its prep thread via ``adelete_thread``.
+        app.state.checkpointer = checkpointer
         app.state.prep_graph = build_prep_graph(checkpointer)
         app.state.interview_graph = build_interview_graph(checkpointer)
 

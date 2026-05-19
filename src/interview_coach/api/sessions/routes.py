@@ -162,6 +162,7 @@ async def prepare_status(
     has_cv = any(d.kind == "cv" for d in docs)
     profile = await repos.get_profile(session, user.id)
     snapshot = await repos.get_company_snapshot_by_job(session, job_id)
+    unmapped = await repos.list_unmapped_project_docs_for_user(session, user.id)
 
     profile_ready = profile is not None
     job_analyzed = bool(job.parsed_json)
@@ -185,6 +186,7 @@ async def prepare_status(
         company_researched=company_researched,
         can_start=not missing,
         missing=missing,
+        unmapped_project_doc_count=len(unmapped),
         profile=(profile.profile_json if (detail and profile is not None) else None),
         job=(job.parsed_json if detail else None),
         company=(

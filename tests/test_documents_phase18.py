@@ -175,7 +175,12 @@ async def test_delete_cv_blocked_by_active_session(
 
     d = await client.delete(f"/documents/{cv_id}", headers=_auth(auth_token))
     assert d.status_code == 409
-    assert d.json()["detail"] == "cv_in_use"
+    detail = d.json()["detail"]
+    # Phase 22: structured body carrying the offending session ids so
+    # Manage can render per-session Abandon buttons.
+    assert detail["code"] == "cv_in_use"
+    sessions = await repos.list_sessions_for_user(db_session, user_id)
+    assert detail["blocking_session_ids"] == [str(sessions[0].id)]
 
 
 async def test_delete_cv_drops_profile(

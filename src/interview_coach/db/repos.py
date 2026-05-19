@@ -127,6 +127,7 @@ async def create_document(
     content_type: str,
     byte_size: int,
     raw_text: str,
+    content_hash: str | None = None,
 ) -> Document:
     """Insert a new document. For kind='cv', any existing CV for this user is
     deleted first in the same transaction (replace semantics)."""
@@ -142,11 +143,35 @@ async def create_document(
         content_type=content_type,
         byte_size=byte_size,
         raw_text=raw_text,
+        content_hash=content_hash,
     )
     session.add(doc)
     await session.commit()
     await session.refresh(doc)
     return doc
+
+
+async def find_document_by_content_hash(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    kind: str,
+    content_hash: str,
+) -> Document | None:
+    """Phase 22: dedup helper for ``POST /documents``.
+
+    Returns an existing doc when ``(user_id, kind, content_hash)`` already
+    matches a row, so re-uploading identical content collapses onto the
+    original instead of inserting a duplicate.
+    """
+    result = await session.execute(
+        select(Document).where(
+            Document.user_id == user_id,
+            Document.kind == kind,
+            Document.content_hash == content_hash,
+        )
+    )
+    return result.scalar_one_or_none()
 
 
 # --- document mappings ---
@@ -231,12 +256,51 @@ async def create_job(
     source: str,
     raw_text: str,
     source_url: str | None = None,
+    content_hash: str | None = None,
 ) -> Job:
-    job = Job(user_id=user_id, source=source, source_url=source_url, raw_text=raw_text)
+    job = Job(
+        user_id=user_id,
+        source=source,
+        source_url=source_url,
+        raw_text=raw_text,
+        content_hash=content_hash,
+    )
     session.add(job)
     await session.commit()
     await session.refresh(job)
     return job
+
+
+async def find_job_by_content_hash(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    content_hash: str,
+) -> Job | None:
+    """Phase 22: dedup helper for ``POST /jobs``.
+
+    Returns the existing job for ``(user_id, content_hash)`` so repeated
+    pastes of the same JD collapse onto one row (and one prep checkpoint
+    thread).
+    """
+    result = await session.execute(
+        select(Job).where(Job.user_id == user_id, Job.content_hash == content_hash)
+    )
+    return result.scalar_one_or_none()
+
+
+async def find_job_by_source_url(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    source_url: str,
+) -> Job | None:
+    """Phase 22: URL-path dedup. The URL is normalized by the caller
+    (lower-cased, trailing-slash-stripped) before lookup."""
+    result = await session.execute(
+        select(Job).where(Job.user_id == user_id, Job.source_url == source_url)
+    )
+    return result.scalar_one_or_none()
 
 
 async def update_job_parsed_json(
@@ -250,6 +314,47 @@ async def update_job_parsed_json(
     if job is None:
         return False
     job.parsed_json = parsed
+    await session.commit()
+    return True
+
+
+async def update_job_raw_text(
+    session: AsyncSession,
+    *,
+    job_id: uuid.UUID,
+    user_id: uuid.UUID,
+    raw_text: str,
+    content_hash: str,
+    source_url: str | None = None,
+) -> Job | None:
+    """Phase 22: ``PATCH /jobs/{id}`` re-analyze path.
+
+    Replaces ``raw_text``, refreshes ``content_hash``, and optionally swaps
+    in a new ``source_url``. Nukes ``parsed_json`` so the next ``/prepare``
+    re-runs the job analyzer instead of using the stale cache. The caller
+    is responsible for clearing the company snapshot via
+    ``delete_company_snapshot_for_job``.
+    """
+    job = await get_job(session, job_id, user_id)
+    if job is None:
+        return None
+    job.raw_text = raw_text
+    job.content_hash = content_hash
+    if source_url is not None:
+        job.source_url = source_url
+    job.parsed_json = None
+    await session.commit()
+    await session.refresh(job)
+    return job
+
+
+async def delete_company_snapshot_for_job(session: AsyncSession, job_id: uuid.UUID) -> bool:
+    """Phase 22: drop the company snapshot for a job so the next
+    ``/prepare`` re-runs the company researcher. Idempotent."""
+    existing = await get_company_snapshot_by_job(session, job_id)
+    if existing is None:
+        return False
+    await session.delete(existing)
     await session.commit()
     return True
 
@@ -519,24 +624,30 @@ async def count_grounding_chunks_for_document(session: AsyncSession, document_id
     return int(result.scalar_one() or 0)
 
 
-async def count_active_sessions_for_job(session: AsyncSession, job_id: uuid.UUID) -> int:
-    """Active sessions referencing this job — gates DELETE /jobs/{id}."""
+async def list_active_session_ids_for_user(
+    session: AsyncSession, user_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Phase 22: surface the offending session ids in the 409 body so the
+    FE can render per-session Abandon buttons. Newest first so the most
+    recent session appears at the top of the blocking card."""
     result = await session.execute(
-        select(func.count(SessionRow.id)).where(
-            SessionRow.job_id == job_id, SessionRow.status == "active"
-        )
+        select(SessionRow.id)
+        .where(SessionRow.user_id == user_id, SessionRow.status == "active")
+        .order_by(SessionRow.created_at.desc())
     )
-    return int(result.scalar_one() or 0)
+    return [row for (row,) in result.all()]
 
 
-async def count_active_sessions_for_user(session: AsyncSession, user_id: uuid.UUID) -> int:
-    """Active sessions owned by this user — gates DELETE /documents/{cv_id}."""
+async def list_active_session_ids_for_job(
+    session: AsyncSession, job_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Phase 22: same shape as the per-user variant, scoped to a job."""
     result = await session.execute(
-        select(func.count(SessionRow.id)).where(
-            SessionRow.user_id == user_id, SessionRow.status == "active"
-        )
+        select(SessionRow.id)
+        .where(SessionRow.job_id == job_id, SessionRow.status == "active")
+        .order_by(SessionRow.created_at.desc())
     )
-    return int(result.scalar_one() or 0)
+    return [row for (row,) in result.all()]
 
 
 async def insert_grounding_chunks(
