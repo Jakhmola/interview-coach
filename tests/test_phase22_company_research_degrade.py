@@ -35,7 +35,9 @@ async def db() -> AsyncIterator[async_sessionmaker]:
         await engine.dispose()
 
 
-async def _seed_job(db: async_sessionmaker, *, company_name: str | None) -> tuple[uuid.UUID, uuid.UUID]:
+async def _seed_job(
+    db: async_sessionmaker, *, company_name: str | None
+) -> tuple[uuid.UUID, uuid.UUID]:
     """Create a user + JD with the given (possibly empty) analyzed company_name."""
     async with db() as s:
         user = await repos.create_user(s, "alice@example.com", "x")

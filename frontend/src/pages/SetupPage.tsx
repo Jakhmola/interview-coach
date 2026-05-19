@@ -27,6 +27,7 @@ import { MappingPanel } from "../components/MappingPanel";
 import { ErrorBanner, StatusPill } from "../components/ui";
 import { codeFrom } from "../errors";
 import { useStreamAbort } from "../hooks/useStreamAbort";
+import { jobLabel } from "../jobLabel";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
 
@@ -88,12 +89,11 @@ export function SetupPage() {
   const { token } = useAuth();
   const navigate = useNavigate();
   const { refreshReadiness } = useOutletContext<SetupOutletContext>();
-  const { activeJobId, activeJob, setActiveJobId, refresh: refreshActiveJob } = useActiveJob();
+  const { activeJobId, jobs, setActiveJobId, refresh: refreshActiveJob } = useActiveJob();
   const prepAbort = useStreamAbort();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [docs, setDocs] = useState<DocumentItem[]>([]);
-  const [jobs, setJobs] = useState<JobItem[]>([]);
   const [status, setStatus] = useState<PrepStatus | null>(null);
   // Phase 22: which job the held status payload describes. Auto-prep
   // refuses to fire until this matches `activeJobId` — kills the race
@@ -155,15 +155,11 @@ export function SetupPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const [nextDocs, nextJobs] = await Promise.all([
-        api.listDocuments(token),
-        api.listJobs(token),
-      ]);
+      // Phase 22: jobs live on ActiveJobContext now — refreshing it
+      // updates the sidebar dropdown + Setup wizard + Manage + the
+      // landing in one go. We only own ``docs`` locally.
+      const [nextDocs] = await Promise.all([api.listDocuments(token), refreshActiveJob()]);
       setDocs(nextDocs);
-      setJobs(nextJobs);
-      if (!activeJobId && nextJobs[0]) {
-        setActiveJobId(nextJobs[0].id);
-      }
     } catch (err) {
       setError(codeFrom(err));
     } finally {
@@ -533,9 +529,6 @@ export function SetupPage() {
         cv={cv}
         job={selectedJob}
         techDocCount={technicalDocs.length}
-        activeJobParsed={
-          activeJob?.parsed_json as { title?: string; company_name?: string } | null | undefined
-        }
         onStart={() => navigate("/interview")}
         onAddJob={() => navigate("/setup?new_job=1")}
         onAddDocs={() => navigate("/setup?add_doc=1")}
@@ -735,12 +728,7 @@ function StepJd({
           <span className="wizard-job-list-label">Saved JDs</span>
           {jobs.map((j) => {
             const isCurrent = j.id === currentJob?.id;
-            const snippet = j.preview ? j.preview.replace(/\s+/g, " ").slice(0, 90) : "";
-            const headline = j.source_url
-              ? j.source_url.replace(/^https?:\/\//, "").slice(0, 70)
-              : snippet
-                ? `"${snippet}…"`
-                : "Pasted JD";
+            const headline = jobLabel(j);
             return (
               <button
                 key={j.id}
@@ -873,7 +861,6 @@ function ReadyLanding({
   cv,
   job,
   techDocCount,
-  activeJobParsed,
   onStart,
   onAddJob,
   onAddDocs,
@@ -882,14 +869,21 @@ function ReadyLanding({
   cv: DocumentItem | undefined;
   job: JobItem | null;
   techDocCount: number;
-  activeJobParsed: { title?: string; company_name?: string } | null | undefined;
   onStart: () => void;
   onAddJob: () => void;
   onAddDocs: () => void;
   onManage: () => void;
 }) {
-  const role = activeJobParsed?.title;
-  const company = activeJobParsed?.company_name;
+  // Phase 22: parsed_json now arrives on the list endpoint too, so
+  // ReadyLanding can derive role/company straight from the active
+  // JobItem instead of taking a separate ``activeJobParsed`` prop
+  // that could drift from what Manage/dropdown render.
+  const parsed = (job?.parsed_json as
+    | { title?: string; company_name?: string }
+    | null
+    | undefined) ?? null;
+  const role = parsed?.title;
+  const company = parsed?.company_name;
   return (
     <div className="ready-landing">
       <span className="ready-eyebrow">Ready to practice</span>

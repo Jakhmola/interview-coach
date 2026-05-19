@@ -114,6 +114,12 @@ export type JobItem = {
   char_count: number;
   preview: string;
   created_at: string;
+  /** Phase 22: surfaced on the list endpoint so Manage + the active-job
+   * dropdown can render "role @ company" instead of a generic
+   * "Pasted JD" label. Null until ``job_analyzer`` has run for this
+   * row (i.e. ``/prepare`` has been kicked off and reached at least
+   * the analyzer node). */
+  parsed_json?: Record<string, unknown> | null;
 };
 
 export type JobDetail = JobItem & {

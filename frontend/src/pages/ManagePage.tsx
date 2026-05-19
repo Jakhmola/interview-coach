@@ -14,6 +14,7 @@ import { ArmedDeleteButton } from "../components/ArmedDeleteButton";
 import { MappingPanel, MappingDecision } from "../components/MappingPanel";
 import { ErrorBanner, StatusPill, formatDate } from "../components/ui";
 import { codeFrom } from "../errors";
+import { jobLabel, jobSubtitle } from "../jobLabel";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
 
@@ -36,10 +37,12 @@ type BlockingState = {
 export function ManagePage() {
   const { token } = useAuth();
   const navigate = useNavigate();
-  const { activeJobId, setActiveJobId } = useActiveJob();
+  // Phase 22: read jobs from the shared ActiveJobContext so re-analyze
+  // / delete / make-active mutations show up consistently across the
+  // sidebar dropdown, Setup wizard, and this page.
+  const { activeJobId, jobs, setActiveJobId, refresh: refreshActiveJob } = useActiveJob();
 
   const [docs, setDocs] = useState<DocumentItem[]>([]);
-  const [jobs, setJobs] = useState<JobItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -62,12 +65,8 @@ export function ManagePage() {
     setIsLoading(true);
     setError(null);
     try {
-      const [nextDocs, nextJobs] = await Promise.all([
-        api.listDocuments(token),
-        api.listJobs(token),
-      ]);
+      const [nextDocs] = await Promise.all([api.listDocuments(token), refreshActiveJob()]);
       setDocs(nextDocs);
-      setJobs(nextJobs);
     } catch (err) {
       setError(codeFrom(err));
     } finally {
@@ -343,9 +342,11 @@ export function ManagePage() {
                 <div key={j.id}>
                   <div className="manage-card">
                     <div>
-                      <strong>{j.source_url || "Pasted JD"}</strong>
+                      <strong>{jobLabel(j)}</strong>
                       <span className="muted">
-                        {j.char_count.toLocaleString()} chars · {formatDate(j.created_at)}
+                        {[jobSubtitle(j), `${j.char_count.toLocaleString()} chars`, formatDate(j.created_at)]
+                          .filter(Boolean)
+                          .join(" · ")}
                       </span>
                       {j.id === activeJobId ? <StatusPill tone="good">Active</StatusPill> : null}
                     </div>

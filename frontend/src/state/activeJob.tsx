@@ -18,11 +18,17 @@ type ActiveJobContextValue = {
   activeJobId: string | null;
   /** Fully-fetched job detail when available. May lag behind activeJobId by one round-trip. */
   activeJob: JobDetail | null;
+  /** All jobs for the current user, oldest-first per the backend.
+   * Phase 22: lives on the context so a single ``refresh()`` call
+   * keeps the sidebar dropdown, Setup wizard, Manage page, and
+   * ReadyLanding all reading from one snapshot — no more "I switched
+   * the active job but the dropdown still shows the old label". */
+  jobs: JobItem[];
   /** Loading flag for the initial resolve + any refresh in flight. */
   isLoading: boolean;
   /** Set or clear the active job. Pass null to clear. */
   setActiveJobId: (id: string | null) => void;
-  /** Re-fetch the active job detail from the server (e.g. after a JD-analyze run). */
+  /** Re-fetch the active job detail AND the user's full job list. */
   refresh: () => Promise<void>;
 };
 
@@ -52,6 +58,7 @@ export function ActiveJobProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
   const [activeJobId, setActiveJobIdState] = useState<string | null>(() => readStoredId());
   const [activeJob, setActiveJob] = useState<JobDetail | null>(null);
+  const [jobs, setJobs] = useState<JobItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const setActiveJobId = useCallback((id: string | null) => {
@@ -67,14 +74,27 @@ export function ActiveJobProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!token) {
       setActiveJob(null);
+      setJobs([]);
     }
   }, [token]);
 
-  /** Resolve the stored id against the server. Auto-fallback to most-recent JD. */
+  /** Resolve the stored id against the server. Auto-fallback to most-recent JD.
+   * Always also refreshes ``jobs`` so the sidebar dropdown stays in
+   * sync with whatever the user just did (created/deleted/re-analyzed). */
   const resolve = useCallback(async () => {
     if (!token) return;
     setIsLoading(true);
     try {
+      // Always pull the list — it's cheap and it's the source of truth
+      // every Phase 22 surface reads from.
+      let nextJobs: JobItem[] = [];
+      try {
+        nextJobs = await api.listJobs(token);
+        setJobs(nextJobs);
+      } catch {
+        // Best-effort; keep the previous list rather than blanking the UI.
+      }
+
       const storedId = readStoredId();
       if (storedId) {
         try {
@@ -98,21 +118,20 @@ export function ActiveJobProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Fallback: most recent JD (listJobs orders desc by created_at).
+      // Fallback: most recent JD from the list we just fetched.
+      if (nextJobs.length === 0) {
+        setActiveJobIdState(null);
+        setActiveJob(null);
+        return;
+      }
+      const newest = nextJobs[0];
+      writeStoredId(newest.id);
+      setActiveJobIdState(newest.id);
       try {
-        const jobs = await api.listJobs(token);
-        if (jobs.length === 0) {
-          setActiveJobIdState(null);
-          setActiveJob(null);
-          return;
-        }
-        const newest = jobs[0];
-        writeStoredId(newest.id);
-        setActiveJobIdState(newest.id);
         const detail = await api.getJob(token, newest.id);
         setActiveJob(detail);
       } catch {
-        // Best-effort.
+        // Best-effort; the list snapshot already drives the chip label.
       }
     } finally {
       setIsLoading(false);
@@ -129,11 +148,12 @@ export function ActiveJobProvider({ children }: { children: ReactNode }) {
     () => ({
       activeJobId,
       activeJob,
+      jobs,
       isLoading,
       setActiveJobId,
       refresh: resolve,
     }),
-    [activeJobId, activeJob, isLoading, setActiveJobId, resolve],
+    [activeJobId, activeJob, jobs, isLoading, setActiveJobId, resolve],
   );
 
   return <ActiveJobContext.Provider value={value}>{children}</ActiveJobContext.Provider>;

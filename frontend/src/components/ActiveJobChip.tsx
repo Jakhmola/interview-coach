@@ -2,9 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import { api, JobItem } from "../api";
+import { jobLabel } from "../jobLabel";
 import { useActiveJob } from "../state/activeJob";
-import { useAuth } from "../state/auth";
 
 /**
  * Active-job indicator, rendered in the sidebar footer.
@@ -16,12 +15,13 @@ import { useAuth } from "../state/auth";
  * empty menu.
  */
 export function ActiveJobChip() {
-  const { token } = useAuth();
   const navigate = useNavigate();
-  const { activeJob, activeJobId, setActiveJobId, refresh } = useActiveJob();
+  // Phase 22: jobs list now lives on ActiveJobContext, so a single
+  // ``refresh()`` from any caller (Setup/Manage) keeps the dropdown
+  // synced. The chip no longer needs its own listJobs fetch.
+  const { activeJob, activeJobId, jobs, setActiveJobId, refresh } = useActiveJob();
 
   const [open, setOpen] = useState(false);
-  const [jobs, setJobs] = useState<JobItem[]>([]);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -36,28 +36,13 @@ export function ActiveJobChip() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [open]);
 
-  // Eager load — we need the job count to decide chip behavior.
-  // Refetch when activeJobId changes so newly saved JDs appear in the menu.
-  useEffect(() => {
-    if (!token) return;
-    let cancelled = false;
-    api
-      .listJobs(token)
-      .then((j) => {
-        if (!cancelled) setJobs(j);
-      })
-      .catch(() => {
-        /* swallow — chip stays usable */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [token, activeJobId]);
-
-  const parsed = activeJob?.parsed_json as
-    | { title?: string; company_name?: string }
-    | null
-    | undefined;
+  // Prefer the detail copy (freshest after a re-analyze), fall back to
+  // the list payload (already includes parsed_json post-Phase 22) so
+  // the pill never has to show "(role TBD)" once the analyzer has run.
+  const listMatch = jobs.find((j) => j.id === activeJobId) ?? null;
+  const parsed =
+    (activeJob?.parsed_json as { title?: string; company_name?: string } | null | undefined) ??
+    (listMatch?.parsed_json as { title?: string; company_name?: string } | null | undefined);
   const role = parsed?.title;
   const company = parsed?.company_name;
 
@@ -107,7 +92,7 @@ export function ActiveJobChip() {
       {open && dropdownUseful ? (
         <div className="active-job-menu" role="listbox">
           {jobs.map((j) => {
-            const fallback = j.source_url ? j.source_url.slice(0, 56) : "Pasted JD";
+            const label = jobLabel(j);
             const date = new Date(j.created_at).toLocaleDateString(undefined, {
               month: "short",
               day: "numeric",
@@ -126,7 +111,7 @@ export function ActiveJobChip() {
                   void refresh();
                 }}
               >
-                <span className="active-job-menu-item-label">{fallback}</span>
+                <span className="active-job-menu-item-label">{label}</span>
                 <span className="active-job-menu-item-date">{date}</span>
               </button>
             );

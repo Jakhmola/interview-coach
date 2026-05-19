@@ -129,6 +129,7 @@ async def list_jobs(
             created_at=j.created_at,
             char_count=len(j.raw_text),
             preview=j.raw_text[:PREVIEW_CHARS],
+            parsed_json=j.parsed_json,
         )
         for j in jobs
     ]

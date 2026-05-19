@@ -37,6 +37,10 @@ class _JobBase(BaseModel):
 class JobListItem(_JobBase):
     char_count: int
     preview: str
+    # Phase 22: include the analyzed payload so list-consumers (Manage,
+    # ActiveJobChip dropdown) can render "role @ company" instead of a
+    # generic "Pasted JD" label. Null until the job_analyzer has run.
+    parsed_json: dict[str, Any] | None = None
 
 
 class JobOut(_JobBase):
