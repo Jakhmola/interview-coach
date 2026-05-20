@@ -1,7 +1,12 @@
-"""Top-k cosine retrieval over `grounding_chunks`.
+"""Top-k retrieval over `grounding_chunks` — vector or hybrid (BM25+vector).
 
-Postgres-only path — uses pgvector's `<=>` cosine-distance operator. The
-default `source_kinds` is the set of "candidate-deep" corpora the model
+Phase 24: this module is the dispatcher. The pure pgvector cosine path is
+kept here (`_vector_search`); the hybrid (BM25 + vector with RRF) path
+lives in `rag.hybrid`. Which path runs is controlled by
+`settings.retrieval_mode` (env: `RETRIEVAL_MODE`), defaulting to `hybrid`
+with `vector` as a one-release safety net.
+
+The default `source_kinds` is the set of "candidate-deep" corpora the model
 answer is allowed to draw from. Phase 14.1: optional ``document_ids`` filter
 lets the evaluator scope retrieval to the project_doc(s) the question was
 about, when the question generator pre-picked a focus with doc provenance.
@@ -14,6 +19,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import bindparam, text
 
+from interview_coach.config import settings
 from interview_coach.db.session import AsyncSessionLocal
 from interview_coach.observability.langfuse import span
 from interview_coach.rag import get_embedding_client
@@ -28,6 +34,12 @@ class GroundingHit:
     chunk_index: int
     score: float
     filename: str
+    # Phase 24: hybrid retrieval telemetry. In `vector` mode `cosine_score`
+    # equals `score` and `bm25_score` is None; in `hybrid` mode `score` is
+    # the fused RRF score and the two component scores carry the underlying
+    # signals (either may be None when the hit only fired in one branch).
+    cosine_score: float | None = None
+    bm25_score: float | None = None
 
 
 MIN_GROUNDING_SCORE = 0.5
@@ -64,6 +76,10 @@ async def retrieve_grounding(
     if not query.strip() or not source_kinds:
         return []
 
+    mode = (settings.retrieval_mode or "hybrid").lower()
+    if mode not in ("hybrid", "vector"):
+        mode = "hybrid"
+
     with span(
         "rag.retrieve_grounding",
         input={
@@ -72,44 +88,92 @@ async def retrieve_grounding(
             "source_kinds": list(source_kinds),
             "document_ids": [str(d) for d in document_ids],
             "min_score": min_score,
+            "mode": mode,
         },
         metadata={"user_id": str(user_id)},
     ) as obs:
         client = await get_embedding_client()
+        qvec: list[float] | None
         try:
             qvec = await client.embed_query(query, retries=retries)
         except EmbedderUnavailable:
-            # Degrade gracefully: the evaluator can still produce a
-            # non-grounded model answer rather than 500-ing the turn.
-            return []
-        raw_hits = await _vector_search(
+            qvec = None
+
+        if mode == "vector":
+            if qvec is None:
+                # Legacy behavior: vector-only can't recover from a dead embedder.
+                _update_obs(obs, output={"n_hits": 0, "mode": mode, "embedder_down": True})
+                return []
+            raw_hits = await _vector_search(
+                qvec=qvec,
+                user_id=user_id,
+                source_kinds=source_kinds,
+                document_ids=document_ids,
+                k=k,
+            )
+            hits = [h for h in raw_hits if h.score >= min_score]
+            _update_obs(
+                obs,
+                output={
+                    "n_hits": len(hits),
+                    "n_dropped_below_min_score": len(raw_hits) - len(hits),
+                    "mode": mode,
+                    "hits": _telemetry_hits(hits),
+                },
+            )
+            return hits
+
+        # mode == "hybrid"
+        from interview_coach.rag.hybrid import hybrid_search
+
+        hits, stats = await hybrid_search(
             qvec=qvec,
+            query_text=query,
             user_id=user_id,
             source_kinds=source_kinds,
             document_ids=document_ids,
             k=k,
+            candidate_k=settings.hybrid_candidate_k,
+            rrf_k=settings.rrf_k,
+            min_cosine_score=min_score,
         )
-        hits = [h for h in raw_hits if h.score >= min_score]
-        if obs is not None:
-            try:
-                obs.update(
-                    output={
-                        "n_hits": len(hits),
-                        "n_dropped_below_min_score": len(raw_hits) - len(hits),
-                        "hits": [
-                            {
-                                "filename": h.filename,
-                                "source_doc_kind": h.source_doc_kind,
-                                "chunk_index": h.chunk_index,
-                                "score": round(h.score, 4),
-                            }
-                            for h in hits
-                        ],
-                    }
-                )
-            except Exception:  # noqa: BLE001
-                pass
+        _update_obs(
+            obs,
+            output={
+                "n_hits": len(hits),
+                "mode": mode,
+                "embedder_down": qvec is None,
+                "hits": _telemetry_hits(hits),
+                **stats,
+            },
+        )
         return hits
+
+
+def _telemetry_hits(hits: list[GroundingHit]) -> list[dict[str, object]]:
+    out: list[dict[str, object]] = []
+    for h in hits:
+        row: dict[str, object] = {
+            "filename": h.filename,
+            "source_doc_kind": h.source_doc_kind,
+            "chunk_index": h.chunk_index,
+            "score": round(h.score, 4),
+        }
+        if h.cosine_score is not None:
+            row["cosine_score"] = round(h.cosine_score, 4)
+        if h.bm25_score is not None:
+            row["bm25_score"] = round(h.bm25_score, 4)
+        out.append(row)
+    return out
+
+
+def _update_obs(obs: object, *, output: dict[str, object]) -> None:
+    if obs is None:
+        return
+    try:
+        obs.update(output=output)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001
+        pass
 
 
 async def _vector_search(

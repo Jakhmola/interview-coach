@@ -1,0 +1,20 @@
+{
+  "queries": [
+    {
+      "query": "Radix Stitches design system tokens",
+      "expected_substrings": ["Radix", "Stitches"]
+    },
+    {
+      "query": "Vite CRA migration build time",
+      "expected_substrings": ["Vite", "CRA"]
+    },
+    {
+      "query": "Playwright e2e tests checkout",
+      "expected_substrings": ["Playwright"]
+    },
+    {
+      "query": "accessibility audit Lighthouse score",
+      "expected_substrings": ["Lighthouse", "a11y"]
+    }
+  ]
+}

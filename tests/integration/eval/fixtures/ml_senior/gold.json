@@ -1,0 +1,20 @@
+{
+  "queries": [
+    {
+      "query": "SupportRAG ColBERT reranker FAISS",
+      "expected_substrings": ["SupportRAG"]
+    },
+    {
+      "query": "vLLM OpenAI-compatible serving KV cache",
+      "expected_substrings": ["vLLM"]
+    },
+    {
+      "query": "LightGBM ranker click-through rate",
+      "expected_substrings": ["LightGBM"]
+    },
+    {
+      "query": "Label Studio human ratings LLM judge calibration",
+      "expected_substrings": ["Label Studio"]
+    }
+  ]
+}

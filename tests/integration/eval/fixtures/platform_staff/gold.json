@@ -1,0 +1,20 @@
+{
+  "queries": [
+    {
+      "query": "GatewayFailover Envoy multi-region active-active",
+      "expected_substrings": ["GatewayFailover", "Envoy"]
+    },
+    {
+      "query": "SLO error-budget policy rollout",
+      "expected_substrings": ["SLO", "error-budget"]
+    },
+    {
+      "query": "Postgres autovacuum bloat monitoring",
+      "expected_substrings": ["autovacuum"]
+    },
+    {
+      "query": "Kubernetes monolith migration traffic shadowing",
+      "expected_substrings": ["Kubernetes"]
+    }
+  ]
+}

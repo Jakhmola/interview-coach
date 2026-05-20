@@ -48,5 +48,14 @@ class Settings(BaseSettings):
     embedder_timeout_s: float = 60.0
     embedder_retries: int = 3
 
+    # Phase 24: hybrid retrieval (BM25 + vector with RRF). `retrieval_mode`
+    # is the kill-switch — set to `"vector"` to fall back to pure pgvector
+    # search; `"hybrid"` (default) fuses BM25 and vector via Reciprocal
+    # Rank Fusion. `rrf_k=60` is the literature default; `hybrid_candidate_k`
+    # is how deep each branch reads before fusion.
+    retrieval_mode: str = "hybrid"
+    rrf_k: int = 60
+    hybrid_candidate_k: int = 20
+
 
 settings = Settings()

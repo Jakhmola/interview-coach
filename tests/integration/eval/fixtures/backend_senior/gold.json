@@ -1,0 +1,20 @@
+{
+  "queries": [
+    {
+      "query": "Billing-Events idempotency",
+      "expected_substrings": ["Billing-Events", "idempotency"]
+    },
+    {
+      "query": "Redis Streams fan-out notifications",
+      "expected_substrings": ["Redis Streams", "fan-out"]
+    },
+    {
+      "query": "advisory locks deadlock migration",
+      "expected_substrings": ["advisory locks"]
+    },
+    {
+      "query": "how did the candidate improve latency on the request handling stack",
+      "expected_substrings": ["p99 latency", "FastAPI"]
+    }
+  ]
+}

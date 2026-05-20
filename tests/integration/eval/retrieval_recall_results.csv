@@ -1,0 +1,16 @@
+timestamp,phase,fixture,mode,recall_at_4,recall_at_10,n_queries
+2026-05-20T17:11:03+00:00,24-hybrid,backend_senior,vector,0.0000,0.0000,4
+2026-05-20T17:11:03+00:00,24-hybrid,backend_senior,bm25,0.7500,0.7500,4
+2026-05-20T17:11:03+00:00,24-hybrid,backend_senior,hybrid,0.7500,0.7500,4
+2026-05-20T17:11:59+00:00,24-hybrid,backend_senior,vector,0.0000,0.0000,4
+2026-05-20T17:11:59+00:00,24-hybrid,backend_senior,bm25,0.7500,0.7500,4
+2026-05-20T17:11:59+00:00,24-hybrid,backend_senior,hybrid,0.7500,0.7500,4
+2026-05-20T17:12:19+00:00,24-hybrid,frontend_mid,vector,0.0000,0.0000,4
+2026-05-20T17:12:19+00:00,24-hybrid,frontend_mid,bm25,0.5000,0.5000,4
+2026-05-20T17:12:19+00:00,24-hybrid,frontend_mid,hybrid,0.5000,0.5000,4
+2026-05-20T17:12:41+00:00,24-hybrid,ml_senior,vector,0.0000,0.0000,4
+2026-05-20T17:12:41+00:00,24-hybrid,ml_senior,bm25,0.7500,0.7500,4
+2026-05-20T17:12:41+00:00,24-hybrid,ml_senior,hybrid,0.7500,0.7500,4
+2026-05-20T17:13:04+00:00,24-hybrid,platform_staff,vector,0.0000,0.0000,4
+2026-05-20T17:13:04+00:00,24-hybrid,platform_staff,bm25,1.0000,1.0000,4
+2026-05-20T17:13:04+00:00,24-hybrid,platform_staff,hybrid,1.0000,1.0000,4

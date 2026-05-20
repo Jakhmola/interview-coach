@@ -53,6 +53,7 @@ async def install_broken_client(monkeypatch: pytest.MonkeyPatch):
 
 async def test_retrieve_grounding_returns_empty_when_embedder_down(
     install_broken_client: EmbeddingClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import interview_coach.rag.retrieval as retrieval_mod
 
@@ -62,6 +63,10 @@ async def test_retrieve_grounding_returns_empty_when_embedder_down(
     # The module imports `get_embedding_client` at module load — patch
     # the binding inside the retrieval module too.
     object.__setattr__(retrieval_mod, "get_embedding_client", _fake_client)
+
+    # Phase 24: hybrid mode would fall back to BM25-only against the DB;
+    # this test asserts the *legacy* vector-only contract — pin the mode.
+    monkeypatch.setattr(retrieval_mod.settings, "retrieval_mode", "vector")
 
     hits = await retrieval_mod.retrieve_grounding(
         user_id=uuid.uuid4(),

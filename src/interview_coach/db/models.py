@@ -251,6 +251,13 @@ class GroundingChunk(Base):
         Vector(1024).with_variant(JSON(), "sqlite"), nullable=False
     )
     model_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Phase 24: `text_tsv tsvector` is added by Alembic migration 0011 but
+    # intentionally NOT declared on the ORM class. It is a Postgres-only
+    # generated column (`GENERATED ALWAYS AS to_tsvector('english', text)
+    # STORED`); SQLite has no equivalent, and SQLAlchemy can't represent a
+    # generated column whose expression is dialect-specific via
+    # `with_variant`. The BM25 branch in `rag/hybrid.py` references the
+    # column via raw SQL, which is the only place it's used.
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
