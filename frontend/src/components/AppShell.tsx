@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, api } from "../api";
+import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
 import { ActiveJobChip } from "./ActiveJobChip";
 import { ErrorBanner } from "./ui";
@@ -15,6 +16,7 @@ const navItems = [
 
 export function AppShell() {
   const { token, user, logout } = useAuth();
+  const { activeJobId } = useActiveJob();
   const location = useLocation();
   const navigate = useNavigate();
   const [isSetupComplete, setIsSetupComplete] = useState(false);
@@ -29,18 +31,30 @@ export function AppShell() {
     }
     setReadinessError(null);
     try {
+      // Phase 25 (B15): completeness is per-active-job. Pre-Phase-25
+      // this asked "does the user have *any* ready job?" — once a
+      // user had one ready job, switching to a brand-new un-prepped
+      // job let them navigate to /interview, which then errored on
+      // missing context. Now we gate on the active job's own status,
+      // falling back to "any can_start" only when no job is active
+      // (first-time-user case before they pick one).
       const jobs = await api.listJobs(token);
-      const statuses = await Promise.all(
-        jobs.map((job) => api.prepStatus(token, job.id).catch(() => null)),
-      );
-      setIsSetupComplete(statuses.some((status) => status?.can_start));
+      if (activeJobId) {
+        const status = await api.prepStatus(token, activeJobId).catch(() => null);
+        setIsSetupComplete(Boolean(status?.can_start));
+      } else {
+        const statuses = await Promise.all(
+          jobs.map((job) => api.prepStatus(token, job.id).catch(() => null)),
+        );
+        setIsSetupComplete(statuses.some((status) => status?.can_start));
+      }
     } catch (err) {
       setReadinessError(err instanceof ApiError ? err.detail : "Could not check setup readiness.");
       setIsSetupComplete(false);
     } finally {
       setHasCheckedReadiness(true);
     }
-  }, [token]);
+  }, [token, activeJobId]);
 
   useEffect(() => {
     void refreshReadiness();
