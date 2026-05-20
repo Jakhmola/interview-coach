@@ -1,7 +1,7 @@
 [project]
 name = "interview-coach"
 version = "0.1.0"
-description = "Personalized AI interview practice — LangGraph + FastAPI + Streamlit + Ollama"
+description = "Personalized AI interview practice — LangGraph + FastAPI + React + Ollama"
 requires-python = ">=3.13"
 readme = "README.md"
 dependencies = [
@@ -10,15 +10,11 @@ dependencies = [
     "langchain>=1.2,<2",
     "langchain-core>=1.0,<2",
     "langchain-openai>=0.3",
-    "a2a-sdk==0.3.25",
     "langfuse==4.0.1",
-    "deepeval==3.9.1",
-    "litellm==1.82.4",
     "openai==2.8.0",
     "httpx==0.28.1",
     "fastapi==0.115.0",
     "uvicorn==0.34.0",
-    "streamlit==1.43.2",
     "pydantic==2.11.9",
     "pydantic-settings>=2.6.0",
     "python-dotenv==1.1.1",
@@ -49,6 +45,7 @@ dev = [
     "pre-commit>=4.0.0",
     "reportlab>=4.2",
     "scikit-learn>=1.3",
+    "deepeval==3.9.1",
 ]
 
 [build-system]
@@ -56,12 +53,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/interview_coach", "ui"]
+packages = ["src/interview_coach"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py313"
-src = ["src", "ui", "tests"]
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
