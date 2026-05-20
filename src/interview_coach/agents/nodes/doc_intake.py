@@ -15,7 +15,6 @@ Workflow:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
 from typing import Any
@@ -466,18 +465,22 @@ async def apply_mapping(
             model_name=settings.model_name,
         )
 
-    # Chunking is deferred until mapping is confirmed (so chunks carry the
-    # final user-edited project_title). Fire-and-forget under the shared
-    # ingest sema so the apply-mapping POST returns immediately; the UI
-    # polls `embedding_status` to discover when the chunks land.
-    async def _embed_swallow(doc_id: uuid.UUID) -> None:
-        async with ingest_sema:
-            try:
-                await embed_and_store_document(doc_id)
-            except Exception:  # noqa: BLE001
-                logger.exception("embed_and_store_document failed for doc=%s", doc_id)
-
-    asyncio.create_task(_embed_swallow(document_id))
+    # Phase 25 (B3): chunking is awaited inline so the prep_graph's
+    # ``mapping_applied`` event only fires once chunks are in
+    # ``grounding_chunks``. Previously this was fire-and-forget — the
+    # UI would mark mapping "done" and let the user start practicing
+    # before retrieval had anything to retrieve for the doc they just
+    # confirmed. Still under the shared ``ingest_sema`` so we don't
+    # parallelise with another ingest job on the single CPU pool.
+    #
+    # Embed failures are swallowed: mapping rows already persisted, so
+    # the user keeps their HITL decision; they can re-trigger embed via
+    # ``POST /documents/{id}/embed`` if it flaked.
+    async with ingest_sema:
+        try:
+            await embed_and_store_document(document_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("embed_and_store_document failed for doc=%s", document_id)
 
     return len(stamped)
 
