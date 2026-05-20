@@ -239,7 +239,7 @@ export function SetupPage() {
   }, [message]);
   useEffect(() => setMessage(null), [step]);
 
-  const handlePrepFrame = (frame: SseFrame) => {
+  const handlePrepFrameFor = (frame: SseFrame, runJobId: string) => {
     const data = frame.data as {
       node?: string;
       reason?: string;
@@ -316,12 +316,19 @@ export function SetupPage() {
         }
         return next;
       });
-      if (activeJobId) failedAutoPrepJobsRef.current.add(activeJobId);
+      failedAutoPrepJobsRef.current.add(runJobId);
     }
   };
 
   const runPrep = async (forceRefresh: boolean) => {
     if (!token || !activeJobId) return;
+    // Phase 25 (B7): pin the job id we're prepping at function entry.
+    // If the user switches the active job mid-stream, every write —
+    // status, failure flag, SSE error handler — still references the
+    // job the run was *for*, not whatever's active when the closure
+    // fires. Otherwise a failure on job A could be recorded against
+    // job B and a successful run on A could refresh job B's status.
+    const runJobId = activeJobId;
     setIsPreparing(true);
     setNodeState({
       profile_builder: "pending",
@@ -332,26 +339,20 @@ export function SetupPage() {
     setError(null);
     setMessage(null);
     setPendingMapping(null);
-    // Clear any prior auto-prep failure flag for this job so an SSE
-    // error event during this run gets recorded freshly. (The flag is
-    // re-set inside `handlePrepFrame` on the next failure.)
-    failedAutoPrepJobsRef.current.delete(activeJobId);
+    failedAutoPrepJobsRef.current.delete(runJobId);
     const signal = prepAbort.fresh();
+    const frameHandler = (frame: SseFrame) => handlePrepFrameFor(frame, runJobId);
     try {
-      await prepareSessionStream(token, activeJobId, forceRefresh, handlePrepFrame, signal);
+      await prepareSessionStream(token, runJobId, forceRefresh, frameHandler, signal);
       await load();
-      const nextStatus = await api.prepStatus(token, activeJobId);
+      const nextStatus = await api.prepStatus(token, runJobId);
       setStatus(nextStatus);
-      setStatusJobId(activeJobId);
+      setStatusJobId(runJobId);
       await refreshReadiness();
       await refreshActiveJob();
-      // Phase 22: clear the wizard-bypass once prep is genuinely
-      // complete — the natural re-render then drops the user back on
-      // ReadyLanding. We don't clear on mapping-pending state because
-      // the MappingModal is still waiting for the user's decision.
       if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
         setBypassLanding(false);
-        failedAutoPrepJobsRef.current.delete(activeJobId);
+        failedAutoPrepJobsRef.current.delete(runJobId);
       }
     } catch (err) {
       setError(codeFrom(err));
@@ -364,20 +365,25 @@ export function SetupPage() {
     | { action: "apply"; rows: MappingRow[]; title: string; extracted: DocIntakeExtracted }
     | { action: "skip" }) => {
     if (!token || !activeJobId) return;
+    // Phase 25 (B7): same job-id pinning as runPrep — a job switch
+    // mid-resume must not corrupt the bookkeeping for the job whose
+    // mapping the user just confirmed.
+    const runJobId = activeJobId;
     setIsPreparing(true);
     setPendingMapping(null);
     const signal = prepAbort.fresh();
+    const frameHandler = (frame: SseFrame) => handlePrepFrameFor(frame, runJobId);
     try {
       await prepareSessionResumeStream(
         token,
-        { job_id: activeJobId, ...decision },
-        handlePrepFrame,
+        { job_id: runJobId, ...decision },
+        frameHandler,
         signal,
       );
       await load();
-      const nextStatus = await api.prepStatus(token, activeJobId);
+      const nextStatus = await api.prepStatus(token, runJobId);
       setStatus(nextStatus);
-      setStatusJobId(activeJobId);
+      setStatusJobId(runJobId);
       await refreshReadiness();
       if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
         setBypassLanding(false);
