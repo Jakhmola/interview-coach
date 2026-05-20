@@ -75,9 +75,18 @@ async def node_profile_builder(state: InterviewState) -> dict[str, Any]:
     async with AsyncSessionLocal() as s:
         existing = await repos.get_profile(s, user_id)
         current_doc_ids: list[str] = []
+        cached_ids: list[str] = []
         if existing is not None:
+            # Phase 25 (B2): compare against the *profile-contributing* doc
+            # set — the CV plus every project_doc whose mapping has been
+            # confirmed — not the full ``documents`` list. ``build_profile``
+            # writes exactly this shape into ``source_doc_ids``, so a fresh
+            # project_doc upload (mapping not yet applied) no longer flips
+            # the key to a miss and forces a full LLM re-extract.
             docs = await repos.list_documents_for_user(s, user_id)
-            current_doc_ids = sorted(str(d.id) for d in docs)
+            cv_ids = [str(d.id) for d in docs if d.kind == "cv"]
+            mapped_ids = await repos.list_document_mapping_doc_ids_for_user(s, user_id)
+            current_doc_ids = sorted({*cv_ids, *(str(x) for x in mapped_ids)})
             cached_ids = sorted(str(x) for x in (existing.source_doc_ids or []))
 
     if existing is not None and current_doc_ids == cached_ids:

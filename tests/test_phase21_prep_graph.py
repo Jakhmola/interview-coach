@@ -255,13 +255,26 @@ async def _seed_caches(
 ) -> None:
     """Pre-seed profile / job parsed_json / company snapshot so every
     pre-mapping node in prep_graph short-circuits via its own cache —
-    keeps the mapping-loop tests focused on what they're testing."""
+    keeps the mapping-loop tests focused on what they're testing.
+
+    Phase 25 (B2): ``source_doc_ids`` now mirrors the profile-contributing
+    document set (CV + project_docs with mapping rows), not the user's
+    full doc list. Callers pass *all* doc ids they own; we filter to
+    what the new cache key actually compares against so the seed
+    matches reality.
+    """
+    seed_source_ids: list[str] = []
+    async with db() as s:
+        docs = await repos.list_documents_for_user(s, user.id)
+        cv_ids = {d.id for d in docs if d.kind == "cv"}
+        mapped_ids = set(await repos.list_document_mapping_doc_ids_for_user(s, user.id))
+        seed_source_ids = sorted(str(x) for x in (cv_ids | mapped_ids) if x in set(doc_ids))
     async with db() as s:
         await repos.upsert_profile(
             s,
             user_id=user.id,
             profile_json=_simple_profile(),
-            source_doc_ids=sorted(str(d) for d in doc_ids),
+            source_doc_ids=seed_source_ids,
             model_name="qwen3-8b",
         )
         await repos.update_job_parsed_json(

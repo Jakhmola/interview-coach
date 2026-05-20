@@ -83,6 +83,25 @@ async def list_document_mappings_for_user(
     return result.scalars().all()
 
 
+async def list_document_mapping_doc_ids_for_user(
+    session: AsyncSession, user_id: uuid.UUID
+) -> list[uuid.UUID]:
+    """Phase 25 (B2): distinct ``document_id`` over a user's mappings.
+
+    Used by ``node_profile_builder`` to compute its cache key against
+    only the documents that actually contribute to the profile (the CV
+    plus every project_doc whose mapping has been confirmed). Comparing
+    the full ``documents`` list — as the prior implementation did —
+    flips the key to a miss the moment a project_doc lands on disk,
+    *before* its mapping is applied, forcing a needless profile
+    rebuild on every project_doc upload.
+    """
+    result = await session.execute(
+        select(DocumentMapping.document_id).where(DocumentMapping.user_id == user_id).distinct()
+    )
+    return list(result.scalars().all())
+
+
 async def get_document(
     session: AsyncSession, document_id: uuid.UUID, user_id: uuid.UUID
 ) -> Document | None:
