@@ -178,6 +178,18 @@ export function SetupPage() {
       setStatusJobId(null);
       return;
     }
+    // Phase 25 (B9): if a prep stream is in flight against the prior
+    // job when the user switches, abort it cleanly. Without this the
+    // tail of the prior stream keeps writing into setStatus /
+    // setNodeState / failedAutoPrepJobsRef under the *new* activeJobId
+    // — node pills appear to belong to the new job, failure flags get
+    // mis-attributed (already addressed for runPrep by B7's pinning,
+    // but the abort is what stops the bytes flowing).
+    if (isPreparing) {
+      prepAbort.abort();
+      setIsPreparing(false);
+      setPendingMapping(null);
+    }
     api
       .prepStatus(token, activeJobId)
       .then((s) => {
@@ -188,6 +200,7 @@ export function SetupPage() {
         setStatus(null);
         setStatusJobId(null);
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeJobId]);
 
   // Phase 22: query-param navigation from ReadyLanding. Consume the
