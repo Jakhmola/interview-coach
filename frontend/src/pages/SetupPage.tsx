@@ -455,9 +455,19 @@ export function SetupPage() {
     if (!token || !event.target.files?.[0]) return;
     setMessage(null);
     setError(null);
+    // Phase 25 (B10): capture replace-state pre-upload. A new CV
+    // invalidates the profile and every project_doc mapping
+    // (handled server-side in upload_document's cv-replace cascade);
+    // the user deserves to know their mappings were wiped before
+    // they hit prep and the modal re-asks for every doc.
+    const wasReplace = docs.some((d) => d.kind === "cv");
     try {
       await api.uploadDocument(token, "cv", event.target.files[0]);
-      setMessage("Got it.");
+      setMessage(
+        wasReplace
+          ? "New CV uploaded. Your project doc mappings were cleared — we'll re-ask during prep."
+          : "Got it.",
+      );
       await load();
       setStep(jobs.length === 0 ? "jd" : "prep");
     } catch (err) {
