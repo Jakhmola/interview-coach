@@ -392,6 +392,10 @@ export function SetupPage() {
       setError(codeFrom(err));
     } finally {
       setIsPreparing(false);
+      // Phase 25 (B8): mapping decided → drop the auto-prep key so a
+      // status delta from the just-applied mapping (or a fresh
+      // unmapped doc surfaced by it) re-arms the effect cleanly.
+      lastAutoPrepKeyRef.current = null;
     }
   };
 
@@ -409,6 +413,12 @@ export function SetupPage() {
   useEffect(() => {
     if (!token || !activeJobId || !hasCv) return;
     if (isPreparing) return;
+    // Phase 25 (B8): a pending mapping means the prior prep is paused
+    // on the HITL interrupt and the modal is open. Re-firing prep
+    // would reset the prep_graph thread and destroy the interrupt
+    // state mid-modal. Wait for the user's decision (apply/skip)
+    // before allowing another run.
+    if (pendingMapping) return;
     // Phase 25 (B1): the docs step is where the user is actively
     // adding supporting docs. Auto-prep would yank them out mid-add.
     // The wizard's Continue button is the explicit advance.
@@ -426,7 +436,7 @@ export function SetupPage() {
     lastAutoPrepKeyRef.current = key;
     void runPrep(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, activeJobId, hasCv, status, statusJobId, step]);
+  }, [token, activeJobId, hasCv, status, statusJobId, step, pendingMapping]);
 
   const uploadCv = async (event: ChangeEvent<HTMLInputElement>) => {
     if (!token || !event.target.files?.[0]) return;
