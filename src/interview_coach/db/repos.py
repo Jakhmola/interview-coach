@@ -170,6 +170,22 @@ async def create_document(
     return doc
 
 
+async def mark_embed_attempt(session: AsyncSession, document_id: uuid.UUID) -> None:
+    """Phase 25 (B11): stamp ``documents.last_embed_attempt_at = now()``
+    so the embedding_status derivation treats a recently-scheduled
+    embed as ``pending`` instead of inheriting the prior ``failed``
+    status until chunks land. Called at the *start* of every embed
+    attempt — upload, apply_mapping, retry-embed."""
+    from datetime import UTC, datetime
+
+    await session.execute(
+        Document.__table__.update()
+        .where(Document.id == document_id)
+        .values(last_embed_attempt_at=datetime.now(UTC))
+    )
+    await session.commit()
+
+
 async def find_document_by_content_hash(
     session: AsyncSession,
     *,

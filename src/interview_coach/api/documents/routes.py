@@ -35,7 +35,16 @@ async def _embed_in_background(document_id: uuid.UUID) -> None:
 
     Acquires the shared ``ingest_sema`` so embed and profile-build don't
     parallelise inside the api container (see Phase 19 plan).
+
+    Phase 25 (B11): stamps ``last_embed_attempt_at`` *before* the embed
+    call so the status helper reports ``pending`` immediately, even if
+    the doc is already past the 60s grace window from a prior failed
+    attempt.
     """
+    from interview_coach.db.session import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as s:
+        await repos.mark_embed_attempt(s, document_id)
     async with ingest_sema:
         try:
             from interview_coach.rag.ingest import embed_and_store_document
@@ -56,6 +65,12 @@ async def _embedding_status_for(doc: Any, session: AsyncSession) -> EmbeddingSta
     project_doc reports ``n_a`` until mapping is confirmed — its chunking is
     deferred until ``apply_mapping`` runs, so the absence of chunks then is
     expected, not a failure.
+
+    Phase 25 (B11): an in-flight retry (``last_embed_attempt_at``
+    within the grace window) reports ``pending`` even if the doc itself
+    is older than the grace. Without this, clicking retry-embed on a
+    failed doc left the status pill stuck on ``failed`` until chunks
+    actually landed, making the retry button look broken.
     """
     if doc.kind == "project_doc":
         n_mappings = len(await repos.list_document_mappings(session, doc.id))
@@ -64,10 +79,17 @@ async def _embedding_status_for(doc: Any, session: AsyncSession) -> EmbeddingSta
     chunks = await repos.count_grounding_chunks_for_document(session, doc.id)
     if chunks > 0:
         return "ready"
+    now = datetime.now(UTC)
+    last_attempt = getattr(doc, "last_embed_attempt_at", None)
+    if last_attempt is not None:
+        if last_attempt.tzinfo is None:
+            last_attempt = last_attempt.replace(tzinfo=UTC)
+        if (now - last_attempt).total_seconds() < EMBED_PENDING_GRACE_S:
+            return "pending"
     created = doc.created_at
     if created.tzinfo is None:
         created = created.replace(tzinfo=UTC)
-    age_s = (datetime.now(UTC) - created).total_seconds()
+    age_s = (now - created).total_seconds()
     return "pending" if age_s < EMBED_PENDING_GRACE_S else "failed"
 
 

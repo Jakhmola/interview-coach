@@ -115,6 +115,7 @@ async def test_prepare_post_resets_prep_thread(
     client: AsyncClient,
     auth_token: str,
     sample_pdf: bytes,
+    db_session,  # noqa: ANN001
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Phase 22 fix: a fresh ``POST /prepare`` deletes the prior prep
@@ -124,10 +125,33 @@ async def test_prepare_post_resets_prep_thread(
     project_doc upload silently no-ops."""
     from unittest.mock import AsyncMock
 
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from interview_coach.agents import graph_nodes
+    from interview_coach.agents.nodes import doc_intake, profile_builder
     from interview_coach.api.documents import routes as doc_routes
     from interview_coach.api.main import app
 
     monkeypatch.setattr(doc_routes, "_embed_in_background", AsyncMock(return_value=None))
+    # Phase 25: keep prep_graph wholly in the test's event loop. Without
+    # this, node_profile_builder reaches real Postgres for cache check,
+    # then calls build_profile (real LLM + telemetry → asyncpg). Each
+    # of those holds a connection that pytest's per-test event loop
+    # discards on teardown, polluting the next test with "Future
+    # attached to a different loop" errors. The point of this test is
+    # adelete_thread bookkeeping, not the graph itself, so we cap the
+    # graph at a NoDocumentsError emitted by build_profile.
+    factory = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    monkeypatch.setattr(graph_nodes, "AsyncSessionLocal", factory)
+    monkeypatch.setattr(doc_intake, "AsyncSessionLocal", factory)
+    monkeypatch.setattr(profile_builder, "AsyncSessionLocal", factory)
+
+    from interview_coach.agents.nodes.profile_builder import NoDocumentsError
+
+    async def boom(*_a, **_k):  # noqa: ANN002, ANN003
+        raise NoDocumentsError("test")
+
+    monkeypatch.setattr(graph_nodes, "build_profile", boom)
 
     class _RecordingSaver:
         def __init__(self, real):  # noqa: ANN001

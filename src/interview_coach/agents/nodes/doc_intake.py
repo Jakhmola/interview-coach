@@ -476,6 +476,12 @@ async def apply_mapping(
     # Embed failures are swallowed: mapping rows already persisted, so
     # the user keeps their HITL decision; they can re-trigger embed via
     # ``POST /documents/{id}/embed`` if it flaked.
+    #
+    # Phase 25 (B11): stamp last_embed_attempt_at before the call so the
+    # status helper reports ``pending`` for any concurrent /documents
+    # reads while embed runs.
+    async with AsyncSessionLocal() as s:
+        await repos.mark_embed_attempt(s, document_id)
     async with ingest_sema:
         try:
             await embed_and_store_document(document_id)

@@ -55,6 +55,14 @@ class Document(Base):
     )
     project_title: Mapped[str | None] = mapped_column(String(160), nullable=True)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Phase 25 (B11): set every time embedding is scheduled for this doc
+    # (initial upload, apply_mapping, retry-embed). The status helper
+    # treats "recently attempted" as ``pending``, so a retry after the
+    # 60s grace window surfaces as a fresh attempt instead of staying
+    # stuck on ``failed`` until chunks land.
+    last_embed_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
