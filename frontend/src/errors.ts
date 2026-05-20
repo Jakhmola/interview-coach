@@ -85,6 +85,10 @@ export const ERRORS: Record<string, ErrorEntry> = {
     message: "This JD has an active session.",
     hint: "End the session before deleting.",
   },
+  prep_in_progress: {
+    message: "Prep is already running, possibly in another tab.",
+    hint: "Wait for it to finish or close the other tab.",
+  },
   // Streaming / auth
   stream_interrupted: {
     message: "Connection dropped mid-response.",

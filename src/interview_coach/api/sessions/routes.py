@@ -309,6 +309,19 @@ async def prepare_session(
     checkpointer = getattr(request.app.state, "checkpointer", None)
     if checkpointer is not None:
         thread_id = f"prep:{user.id}:{body.job_id}"
+        prep_config_for_peek = _thread_config_for_prep(user.id, body.job_id)
+        # Phase 25 (B17): peek at graph state before nuking the thread.
+        # If the prior run is paused on an interrupt (mapping HITL), a
+        # fresh /prepare POST would destroy that interrupt state —
+        # exactly what happens when the user opens setup in a second
+        # tab while tab 1 has the mapping modal open. Refuse with 409
+        # unless the caller explicitly forces a restart.
+        try:
+            state = await prep_graph.aget_state(prep_config_for_peek)
+        except Exception:  # noqa: BLE001
+            state = None
+        if state is not None and state.next and not body.force_refresh:
+            raise HTTPException(status.HTTP_409_CONFLICT, "prep_in_progress")
         try:
             await checkpointer.adelete_thread(thread_id)
         except Exception:  # noqa: BLE001
