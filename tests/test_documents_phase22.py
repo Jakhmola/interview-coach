@@ -459,3 +459,138 @@ async def test_remap_round_trip_apply_then_idempotent_skip(
         json={"action": "skip"},
     )
     assert s2.status_code == 200
+
+
+# --- B12: remap-then-skip preserves grounding chunks ------------------
+
+
+async def test_remap_then_skip_preserves_grounding_chunks(
+    client: AsyncClient,
+    auth_token: str,
+    patched_embed: AsyncMock,
+    patched_async_session,  # noqa: ANN001
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 25 (B12): opening Remap and then Skipping must not delete
+    the existing mapping rows or grounding chunks. Pre-Phase-25, the
+    revert ran inside ``start_remap`` and silently dropped both.
+    """
+    from interview_coach.agents.nodes import doc_intake
+    from interview_coach.agents.schemas import (
+        DocIntakeExtracted,
+        DocIntakeResult,
+    )
+    from interview_coach.db import models, repos
+
+    AsyncSessionLocal = patched_async_session  # noqa: N806
+
+    # Set up CV + profile + one mapped project_doc with simulated chunks.
+    up = await client.post(
+        "/documents",
+        headers=_auth(auth_token),
+        data={"kind": "cv"},
+        files={"file": ("cv.pdf", make_pdf("Alice resume"), "application/pdf")},
+    )
+    assert up.status_code == 201
+    me = await client.get("/auth/me", headers=_auth(auth_token))
+    user_id = uuid.UUID(me.json()["id"])
+
+    async with AsyncSessionLocal() as s:
+        await repos.upsert_profile(
+            s,
+            user_id=user_id,
+            profile_json={
+                "summary": "x",
+                "skills": [],
+                "experiences": [
+                    {
+                        "company": "Acme",
+                        "role": "SWE",
+                        "highlights": [{"text": "Built search", "source_document_ids": []}],
+                    }
+                ],
+                "projects": [],
+                "education": [],
+            },
+            source_doc_ids=[],
+            model_name="test",
+        )
+
+    pj = await client.post(
+        "/documents",
+        headers=_auth(auth_token),
+        data={"kind": "project_doc"},
+        files={"file": ("p.docx", make_docx("Project body"), DOCX_CT)},
+    )
+    doc_id = uuid.UUID(pj.json()["id"])
+
+    fake_intake = DocIntakeResult(
+        title="Project",
+        extracted=DocIntakeExtracted(tech_stack=["python"], description="x", urls=[]),
+        suggestions=[],
+    )
+
+    async def fake_run_intake(*_a, **_k):  # noqa: ANN002, ANN003
+        return fake_intake
+
+    monkeypatch.setattr(doc_intake, "run_intake", fake_run_intake)
+
+    # Stub embed to actually insert a grounding chunk so we can observe
+    # the "preserved" claim concretely. Inserted via the test factory so
+    # the assertions below see the same rows.
+    async def stub_embed(d_id: uuid.UUID) -> int:
+        async with AsyncSessionLocal() as s:
+            s.add(
+                models.GroundingChunk(
+                    user_id=user_id,
+                    document_id=d_id,
+                    source_doc_kind="project_doc",
+                    chunk_index=0,
+                    text="chunk",
+                    n_tokens=1,
+                    embedding=[0.0] * 1024,
+                    model_name="test",
+                )
+            )
+            await s.commit()
+        return 1
+
+    monkeypatch.setattr(doc_intake, "embed_and_store_document", stub_embed)
+
+    # First apply lands a mapping row + one chunk.
+    r1 = await client.post(f"/documents/{doc_id}/remap", headers=_auth(auth_token))
+    assert r1.status_code == 200
+    payload = r1.json()
+    c1 = await client.post(
+        f"/documents/{doc_id}/remap/confirm",
+        headers=_auth(auth_token),
+        json={
+            "action": "apply",
+            "rows": [{"mapping_kind": "highlight", "experience_idx": 0, "highlight_idx": 0}],
+            "title": "Project",
+            "extracted": payload["extracted"],
+        },
+    )
+    assert c1.status_code == 200
+
+    async with AsyncSessionLocal() as s:
+        mappings_before = await repos.list_document_mappings(s, doc_id)
+        chunks_before = await repos.count_grounding_chunks_for_document(s, doc_id)
+    assert len(mappings_before) == 1
+    assert chunks_before == 1
+
+    # Now: start remap and skip. Chunks + mapping must survive.
+    r2 = await client.post(f"/documents/{doc_id}/remap", headers=_auth(auth_token))
+    assert r2.status_code == 200
+    c2 = await client.post(
+        f"/documents/{doc_id}/remap/confirm",
+        headers=_auth(auth_token),
+        json={"action": "skip"},
+    )
+    assert c2.status_code == 200
+
+    async with AsyncSessionLocal() as s:
+        mappings_after = await repos.list_document_mappings(s, doc_id)
+        chunks_after = await repos.count_grounding_chunks_for_document(s, doc_id)
+    assert len(mappings_after) == 1, "skip dropped the prior mapping"
+    assert chunks_after == 1, "skip dropped grounding chunks"

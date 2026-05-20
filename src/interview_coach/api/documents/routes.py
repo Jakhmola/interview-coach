@@ -227,17 +227,19 @@ async def start_remap(
 ) -> dict[str, Any]:
     """Phase 22: kick off an out-of-graph remap for a single ``project_doc``.
 
-    Reverts any existing mapping rows (idempotent — safe if the doc was
-    skipped during prep with zero rows), then runs ``run_intake`` to
-    produce a fresh suggestion. Returns the same payload shape the
-    prep-graph node emits via SSE, so the FE ``MappingModal`` consumes
-    one schema.
+    Runs ``run_intake`` against the doc to produce a fresh suggestion.
+    Returns the same payload shape the prep-graph node emits via SSE,
+    so the FE ``MappingModal`` consumes one schema.
+
+    Phase 25 (B12): the prior revert-up-front behavior silently dropped
+    grounding chunks if the user opened remap and then closed the
+    modal. Revert now happens inside ``confirm_remap`` on the apply
+    branch only — a skip leaves the existing mapping + chunks intact.
     """
     from interview_coach.agents.nodes.doc_intake import (
         DocIntakeError,
         ProfileMissing,
         build_mapping_suggestion_payload,
-        revert_mapping,
         run_intake,
     )
 
@@ -246,14 +248,6 @@ async def start_remap(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
     if doc.kind != "project_doc":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "remap only supports project_doc")
-
-    try:
-        await revert_mapping(document_id=doc.id, user_id=user.id)
-    except Exception:  # noqa: BLE001
-        # Revert is best-effort: a failure here doesn't prevent re-running
-        # intake. The doc just keeps its prior enrichment until the user
-        # confirms (or skips) the new suggestion.
-        logger.exception("revert_mapping failed during remap for doc=%s", doc.id)
 
     try:
         intake = await run_intake(doc.id, user.id)
@@ -282,12 +276,18 @@ async def confirm_remap(
 ) -> DocumentOut:
     """Phase 22: finish an out-of-graph remap.
 
-    On ``apply``: calls ``apply_mapping`` with the user's choices and
-    returns the updated doc. On ``skip``: no DB writes; the doc just
-    stays unmapped (chunking remains deferred). Both paths return the
-    current ``DocumentOut`` so the FE can refresh its row.
+    On ``apply``: reverts the prior mapping (Phase 25 B12 — moved from
+    ``start_remap`` so we don't drop grounding chunks on a skip), then
+    calls ``apply_mapping`` with the user's choices and returns the
+    updated doc. On ``skip``: no DB writes; the existing mapping and
+    grounding chunks stay intact. Both paths return the current
+    ``DocumentOut`` so the FE can refresh its row.
     """
-    from interview_coach.agents.nodes.doc_intake import ProfileMissing, apply_mapping
+    from interview_coach.agents.nodes.doc_intake import (
+        ProfileMissing,
+        apply_mapping,
+        revert_mapping,
+    )
 
     doc = await repos.get_document(session, document_id, user.id)
     if doc is None:
@@ -297,6 +297,13 @@ async def confirm_remap(
 
     if body.action == "apply":
         assert body.title is not None and body.extracted is not None  # validator
+        try:
+            await revert_mapping(document_id=doc.id, user_id=user.id)
+        except Exception:  # noqa: BLE001
+            # Revert is best-effort — a failure here is logged but
+            # doesn't block the apply. ``apply_mapping`` will either
+            # overlay cleanly or surface its own validation error.
+            logger.exception("revert_mapping failed during remap apply for doc=%s", doc.id)
         try:
             await apply_mapping(
                 document_id=doc.id,
