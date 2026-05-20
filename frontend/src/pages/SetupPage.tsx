@@ -403,7 +403,10 @@ export function SetupPage() {
   useEffect(() => {
     if (!token || !activeJobId || !hasCv) return;
     if (isPreparing) return;
-    if (step === "cv") return;
+    // Phase 25 (B1): the docs step is where the user is actively
+    // adding supporting docs. Auto-prep would yank them out mid-add.
+    // The wizard's Continue button is the explicit advance.
+    if (step === "cv" || step === "docs") return;
     if (statusJobId !== activeJobId) return;
     if (!status) return;
     // Don't auto-refire on a job that just failed — let the user
@@ -441,17 +444,16 @@ export function SetupPage() {
     setError(null);
     try {
       const doc = await api.uploadDocument(token, "project_doc", event.target.files[0]);
-      setMessage(`Uploaded ${doc.filename}. We'll ask where it fits during prep.`);
+      setMessage(`Uploaded ${doc.filename}. Add more or click Continue when you're done.`);
       await load();
-      // Phase 22: the upload bumps `unmapped_project_doc_count`, so the
-      // work-driven auto-prep effect fires once the next status refresh
-      // surfaces it. Routing to "prep" here removes the manual Continue
-      // click that the old wizard required.
+      // Phase 25 (B1): stay on the docs step after upload so the user
+      // can add additional supporting docs. The wizard's "Continue"
+      // button is the explicit advance to prep. (Pre-Phase-25 this
+      // routed straight to prep, blocking multi-doc uploads.)
       if (activeJobId) {
         const nextStatus = await api.prepStatus(token, activeJobId);
         setStatus(nextStatus);
         setStatusJobId(activeJobId);
-        setStep("prep");
       }
     } catch (err) {
       setError(codeFrom(err));
