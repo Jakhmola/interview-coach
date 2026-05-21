@@ -61,7 +61,6 @@ async def test_prepare_returns_409_when_paused_on_interrupt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from interview_coach.agents import graph_nodes
-    from interview_coach.agents.nodes import doc_intake
     from interview_coach.agents.schemas import DocIntakeExtracted, DocIntakeResult
 
     AsyncSessionLocal = patched_agent_session  # noqa: N806
@@ -84,9 +83,7 @@ async def test_prepare_returns_409_when_paused_on_interrupt(
     from interview_coach.db import repos
 
     async with AsyncSessionLocal() as s:
-        cv_doc = next(
-            d for d in await repos.list_documents_for_user(s, user_id) if d.kind == "cv"
-        )
+        cv_doc = next(d for d in await repos.list_documents_for_user(s, user_id) if d.kind == "cv")
         await repos.upsert_profile(
             s,
             user_id=user_id,
@@ -216,9 +213,7 @@ async def test_prepare_no_409_after_clean_finish(
     user_id = uuid.UUID(me.json()["id"])
 
     async with AsyncSessionLocal() as s:
-        cv_doc = next(
-            d for d in await repos.list_documents_for_user(s, user_id) if d.kind == "cv"
-        )
+        cv_doc = next(d for d in await repos.list_documents_for_user(s, user_id) if d.kind == "cv")
         await repos.upsert_profile(
             s,
             user_id=user_id,

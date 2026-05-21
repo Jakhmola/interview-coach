@@ -41,6 +41,22 @@ def _patch_unmapped_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+async def _no_mapped_doc_ids(*_a: Any, **_kw: Any) -> list[Any]:
+    """Phase 25 (B2): node_profile_builder now consults
+    ``list_document_mapping_doc_ids_for_user`` when building the cache
+    key. Graph tests that stub the docs list also need to stub this so
+    the cache key is just the CV id."""
+    return []
+
+
+def _patch_mapped_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    from interview_coach.agents import graph_nodes
+
+    monkeypatch.setattr(
+        graph_nodes.repos, "list_document_mapping_doc_ids_for_user", _no_mapped_doc_ids
+    )
+
+
 # --- prep graph ----------------------------------------------------
 
 
@@ -153,6 +169,7 @@ async def test_prep_graph_short_circuits_on_cache_hits(
 
     class _Doc:
         id = cached_doc_id
+        kind = "cv"
 
     class _Job:
         parsed_json: dict[str, Any] = {"company_name": "Acme"}
@@ -175,6 +192,7 @@ async def test_prep_graph_short_circuits_on_cache_hits(
     monkeypatch.setattr(graph_nodes.repos, "get_profile", fake_get_profile)
     monkeypatch.setattr(graph_nodes.repos, "list_documents_for_user", fake_list_docs)
     _patch_unmapped_empty(monkeypatch)
+    _patch_mapped_empty(monkeypatch)
     monkeypatch.setattr(graph_nodes.repos, "get_job", fake_get_job)
     monkeypatch.setattr(graph_nodes.repos, "get_company_snapshot_by_job", fake_get_snapshot)
 
@@ -224,6 +242,7 @@ async def test_prep_graph_force_refresh_runs_company_only(
 
     class _Doc:
         id = cached_doc_id
+        kind = "cv"
 
     class _Job:
         parsed_json: dict[str, Any] = {"company_name": "Acme"}
@@ -250,6 +269,7 @@ async def test_prep_graph_force_refresh_runs_company_only(
     monkeypatch.setattr(graph_nodes.repos, "get_profile", fake_get_profile)
     monkeypatch.setattr(graph_nodes.repos, "list_documents_for_user", fake_list_docs)
     _patch_unmapped_empty(monkeypatch)
+    _patch_mapped_empty(monkeypatch)
     monkeypatch.setattr(graph_nodes.repos, "get_job", fake_get_job)
     monkeypatch.setattr(graph_nodes.repos, "get_company_snapshot_by_job", fake_get_snapshot)
 
@@ -302,6 +322,7 @@ async def test_profile_node_reruns_when_doc_ids_differ(
 
     class _Doc:
         id = new_doc_id
+        kind = "cv"
 
     class _Job:
         parsed_json: dict[str, Any] = {"company_name": "Acme"}
@@ -324,6 +345,7 @@ async def test_profile_node_reruns_when_doc_ids_differ(
     monkeypatch.setattr(graph_nodes.repos, "get_profile", fake_get_profile)
     monkeypatch.setattr(graph_nodes.repos, "list_documents_for_user", fake_list_docs)
     _patch_unmapped_empty(monkeypatch)
+    _patch_mapped_empty(monkeypatch)
     monkeypatch.setattr(graph_nodes.repos, "get_job", fake_get_job)
     monkeypatch.setattr(graph_nodes.repos, "get_company_snapshot_by_job", fake_get_snapshot)
 

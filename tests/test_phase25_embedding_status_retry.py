@@ -9,7 +9,6 @@ last attempt timestamp on the doc row and treats a recent attempt as
 
 from __future__ import annotations
 
-import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -63,9 +62,7 @@ async def _make_old_cv(db: async_sessionmaker, user: User) -> Document:
         return doc
 
 
-async def test_old_doc_with_no_chunks_reports_failed(
-    db: async_sessionmaker, alice: User
-) -> None:
+async def test_old_doc_with_no_chunks_reports_failed(db: async_sessionmaker, alice: User) -> None:
     doc = await _make_old_cv(db, alice)
     async with db() as s:
         status = await _embedding_status_for(doc, s)
@@ -87,9 +84,7 @@ async def test_recent_retry_attempt_flips_status_to_pending(
     assert status == "pending"
 
 
-async def test_old_retry_attempt_still_failed(
-    db: async_sessionmaker, alice: User
-) -> None:
+async def test_old_retry_attempt_still_failed(db: async_sessionmaker, alice: User) -> None:
     """An attempt timestamp from outside the grace window doesn't
     paper over a real failure — we go back to ``failed``."""
     doc = await _make_old_cv(db, alice)
@@ -107,9 +102,7 @@ async def test_old_retry_attempt_still_failed(
     assert status == "failed"
 
 
-async def test_chunks_present_always_ready(
-    db: async_sessionmaker, alice: User
-) -> None:
+async def test_chunks_present_always_ready(db: async_sessionmaker, alice: User) -> None:
     """Existence of chunks short-circuits — last_embed_attempt_at doesn't
     matter once we've succeeded once."""
     doc = await _make_old_cv(db, alice)
@@ -155,9 +148,7 @@ async def test_project_doc_unmapped_still_n_a_even_with_attempt(
     assert status == "n_a"
 
 
-async def test_repos_mark_embed_attempt_sets_timestamp(
-    db: async_sessionmaker, alice: User
-) -> None:
+async def test_repos_mark_embed_attempt_sets_timestamp(db: async_sessionmaker, alice: User) -> None:
     async with db() as s:
         doc = await repos.create_document(
             s,
