@@ -1,12 +1,5 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import {
-  ArrowLeft,
-  ArrowRight,
-  CheckCircle2,
-  FileUp,
-  LinkIcon,
-  RefreshCw,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, FileUp, LinkIcon } from "lucide-react";
 import { Link, useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 
 import {
@@ -283,7 +276,12 @@ export function SetupPage() {
         );
       }
     } else if (frame.event === "node_skipped" && data.node) {
-      setNodeState((c) => ({ ...c, [data.node!]: "cached" }));
+      // Phase 25: a doc_mapping skip is the loop finishing (no unmapped
+      // docs left, or a company-only refresh) — never a cache hit. The
+      // mapping it just walked ran fresh, so don't render "Using cached
+      // result". Only profile/JD/company skips are genuine cache hits.
+      const pill = data.node === "doc_mapping" ? "done" : "cached";
+      setNodeState((c) => ({ ...c, [data.node!]: pill }));
     } else if (frame.event === "mapping_suggestion" && data.payload) {
       // Mark doc_mapping as running and show the inline mapping panel.
       setNodeState((c) => ({ ...c, doc_mapping: "running" }));
@@ -513,9 +511,16 @@ export function SetupPage() {
     try {
       const job = await api.submitJobText(token, text);
       setMessage("Job description saved.");
+      // Phase 25 (#4): commit activeJobId and the docs step in the same
+      // render so the auto-prep effect never sees the transient
+      // (newJob, step="jd") window. The B1 guard only blocks cv/docs —
+      // a job that's active while step is still "jd" auto-fires a full
+      // prep with zero docs, skipping doc_mapping, *before* the user can
+      // add a supporting doc. Setting step before the await keeps both
+      // state updates in one batch.
       setActiveJobId(job.id);
-      await load();
       setStep("docs");
+      await load();
     } catch (err) {
       setError(codeFrom(err));
     }
@@ -533,9 +538,11 @@ export function SetupPage() {
     try {
       const job = await api.submitJobUrl(token, url);
       setMessage("Fetched and saved.");
+      // Phase 25 (#4): see submitJobText — commit activeJobId + docs step
+      // together so auto-prep can't fire a doc-less prep in the gap.
       setActiveJobId(job.id);
-      await load();
       setStep("docs");
+      await load();
     } catch (err) {
       setError(codeFrom(err));
     }
@@ -623,7 +630,6 @@ export function SetupPage() {
             status={status}
             isPreparing={isPreparing}
             onPrep={() => runPrep(false)}
-            onRefreshCompany={() => runPrep(true)}
             nodeState={nodeState}
           />
         ) : null}
@@ -839,13 +845,11 @@ function StepPrep({
   status,
   isPreparing,
   onPrep,
-  onRefreshCompany,
   nodeState,
 }: {
   status: PrepStatus | null;
   isPreparing: boolean;
   onPrep: () => void;
-  onRefreshCompany: () => void;
   nodeState: Record<string, string>;
 }) {
   const ready = status?.can_start ?? false;
@@ -880,15 +884,6 @@ function StepPrep({
             {isPreparing ? "Preparing…" : "Run prep"}
           </button>
         ) : null}
-        <button
-          className="btn-ghost"
-          type="button"
-          onClick={onRefreshCompany}
-          disabled={isPreparing}
-          title="Re-runs only the company researcher; keeps your profile and JD analysis as-is."
-        >
-          <RefreshCw size={14} /> Refresh company info
-        </button>
       </div>
     </div>
   );

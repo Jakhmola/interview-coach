@@ -364,7 +364,15 @@ export function ManagePage() {
                         <button
                           className="btn-ghost"
                           type="button"
-                          onClick={() => setActiveJobId(j.id)}
+                          onClick={() => {
+                            // Phase 25: setActiveJobId only swaps the id;
+                            // the cached activeJob detail (which the
+                            // sidebar chip reads first) stays stale until
+                            // a refresh. Mirror the dropdown switcher so
+                            // the chip flips to this job immediately.
+                            setActiveJobId(j.id);
+                            void refreshActiveJob();
+                          }}
                         >
                           Make active
                         </button>
