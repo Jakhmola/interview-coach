@@ -48,3 +48,6 @@ tests/integration/eval/questions/
 
 # Claude Code per-machine settings (permission grants etc.)
 .claude/
+
+# Graphify knowledge-graph output (regenerated locally; not source)
+graphify-out/

@@ -30,3 +30,17 @@ make logs        # tail logs
 FastAPI + Streamlit + Postgres + LangGraph (later phases) + MCP (later) + Ollama on host (`qwen3:8b`). JWT + bcrypt auth. Alembic migrations run on `api` container start.
 
 The full architecture and per-phase deliverables live in `plan/master.md` — go read it.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs live as markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles using their default names (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context — one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
