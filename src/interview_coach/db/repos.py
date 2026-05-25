@@ -102,6 +102,22 @@ async def list_document_mapping_doc_ids_for_user(
     return list(result.scalars().all())
 
 
+async def current_profile_doc_ids(session: AsyncSession, user_id: uuid.UUID) -> list[str]:
+    """Phase 26: the canonical **Profile document set** — the single source
+    of truth for the ``profile_builder`` cache key.
+
+    CV doc ids ∪ distinct confirmed-mapping document ids, normalized to
+    ``str`` and sorted. Computed at both write (``build_profile``,
+    ``apply_mapping``, ``revert_mapping``) and read (``node_profile_builder``)
+    so ``profiles.source_doc_ids`` is a pure function of current DB state
+    rather than an incrementally-folded value that can drift.
+    """
+    docs = await list_documents_for_user(session, user_id)
+    cv_ids = {str(d.id) for d in docs if d.kind == "cv"}
+    mapped_ids = await list_document_mapping_doc_ids_for_user(session, user_id)
+    return sorted(cv_ids | {str(x) for x in mapped_ids})
+
+
 async def get_document(
     session: AsyncSession, document_id: uuid.UUID, user_id: uuid.UUID
 ) -> Document | None:

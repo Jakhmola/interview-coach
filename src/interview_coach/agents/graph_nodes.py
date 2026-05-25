@@ -10,14 +10,17 @@ unchanged — these wrappers are thin glue:
   route layer can forward them as SSE,
 * return a state delta.
 
-Cache rules (used by the prep graph):
+Cache rules (used by the prep graph): each node asks ``prep_cache`` for a
+typed ``SkipVerdict`` and emits ``node_skipped`` with the verdict's reason.
 
-* ``profile_builder`` is skipped iff a ProfileRow exists for the user
-  AND its ``source_doc_ids`` match the user's current document list.
-  If the user replaced their CV, the doc-id set differs and we re-run.
+* ``profile_builder`` is skipped iff a ProfileRow exists AND its
+  ``source_doc_ids`` equal the current Profile document set
+  (``repos.current_profile_doc_ids``). Replace the CV and the set
+  differs, so we re-run.
 * ``job_analyzer`` is skipped iff ``jobs.parsed_json`` is non-empty.
-* ``company_researcher`` is skipped iff a snapshot row exists for the
-  job AND ``state["force_refresh"]`` is False.
+* ``company_researcher`` is skipped iff a snapshot row exists,
+  ``state["force_refresh"]`` is False, and the snapshot isn't a
+  *transiently* degraded placeholder — those re-attempt research.
 
 Streaming rules (used by the interview graph):
 
@@ -58,6 +61,11 @@ from interview_coach.agents.nodes.question_generator import (
     GenerationPrereqsMissing,
     stream_question,
 )
+from interview_coach.agents.prep_cache import (
+    decide_company_cache,
+    decide_job_cache,
+    decide_profile_cache,
+)
 from interview_coach.agents.state import InterviewState
 from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
@@ -74,23 +82,21 @@ async def node_profile_builder(state: InterviewState) -> dict[str, Any]:
 
     async with AsyncSessionLocal() as s:
         existing = await repos.get_profile(s, user_id)
-        current_doc_ids: list[str] = []
-        cached_ids: list[str] = []
-        if existing is not None:
-            # Phase 25 (B2): compare against the *profile-contributing* doc
-            # set — the CV plus every project_doc whose mapping has been
-            # confirmed — not the full ``documents`` list. ``build_profile``
-            # writes exactly this shape into ``source_doc_ids``, so a fresh
-            # project_doc upload (mapping not yet applied) no longer flips
-            # the key to a miss and forces a full LLM re-extract.
-            docs = await repos.list_documents_for_user(s, user_id)
-            cv_ids = [str(d.id) for d in docs if d.kind == "cv"]
-            mapped_ids = await repos.list_document_mapping_doc_ids_for_user(s, user_id)
-            current_doc_ids = sorted({*cv_ids, *(str(x) for x in mapped_ids)})
-            cached_ids = sorted(str(x) for x in (existing.source_doc_ids or []))
+        # Phase 26: the cache key is the canonical Profile document set
+        # (CV ∪ confirmed-mapping doc ids), computed by one repo helper at
+        # write *and* read. Skipped when no profile exists (the verdict is
+        # ``missing`` regardless of the doc set).
+        current_doc_ids = (
+            await repos.current_profile_doc_ids(s, user_id) if existing is not None else []
+        )
 
-    if existing is not None and current_doc_ids == cached_ids:
-        writer({"event": "node_skipped", "node": "profile_builder", "reason": "cached"})
+    verdict = decide_profile_cache(
+        profile_exists=existing is not None,
+        stored_doc_ids=existing.source_doc_ids if existing is not None else None,
+        current_doc_ids=current_doc_ids,
+    )
+    if verdict.skip:
+        writer({"event": "node_skipped", "node": "profile_builder", "reason": verdict.reason})
         return {
             "profile": existing.profile_json,
             "next_step": "doc_intake_fanout",
@@ -323,8 +329,9 @@ async def node_job_analyzer(state: InterviewState) -> dict[str, Any]:
         writer({"event": "error", "node": "job_analyzer", "code": "job_not_found"})
         raise JobNotFoundError(f"job {job_id} not found")
 
-    if job.parsed_json:
-        writer({"event": "node_skipped", "node": "job_analyzer", "reason": "already_analyzed"})
+    verdict = decide_job_cache(parsed_json=job.parsed_json)
+    if verdict.skip:
+        writer({"event": "node_skipped", "node": "job_analyzer", "reason": verdict.reason})
         return {"job": job.parsed_json, "next_step": "company_researcher"}
 
     writer({"event": "node_started", "node": "job_analyzer"})
@@ -359,16 +366,21 @@ async def node_company_researcher(state: InterviewState) -> dict[str, Any]:
     force_refresh = bool(state.get("force_refresh", False))
     writer = get_stream_writer()
 
-    if not force_refresh:
-        async with AsyncSessionLocal() as s:
-            existing = await repos.get_company_snapshot_by_job(s, job_id)
-        if existing is not None:
-            writer({"event": "node_skipped", "node": "company_researcher", "reason": "cached"})
-            return {
-                "company": existing.snapshot_json,
-                "prep_done": True,
-                "next_step": "END",
-            }
+    async with AsyncSessionLocal() as s:
+        existing = await repos.get_company_snapshot_by_job(s, job_id)
+    verdict = decide_company_cache(
+        snapshot_json=existing.snapshot_json if existing is not None else None,
+        force_refresh=force_refresh,
+    )
+    # On ``miss("degraded")`` we fall through to research — the self-heal
+    # for a transient soft-fail (Phase 26 / OD-1).
+    if verdict.skip:
+        writer({"event": "node_skipped", "node": "company_researcher", "reason": verdict.reason})
+        return {
+            "company": existing.snapshot_json,
+            "prep_done": True,
+            "next_step": "END",
+        }
 
     writer({"event": "node_started", "node": "company_researcher"})
     try:

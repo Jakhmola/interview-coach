@@ -441,15 +441,6 @@ async def apply_mapping(
                 proj["name"] = project_title
     new_profile = Profile.model_validate(new_dict)
 
-    # Phase 21 (G4 fix): the profile_builder cache key in
-    # `graph_nodes.node_profile_builder` compares the user's current
-    # document set against `source_doc_ids`. Without folding the new
-    # project_doc id in here, every subsequent prep run sees a mismatch
-    # and re-runs profile_builder unnecessarily.
-    new_source_ids = sorted(
-        {*(str(x) for x in (profile_row.source_doc_ids or [])), str(document_id)}
-    )
-
     async with AsyncSessionLocal() as s:
         await repos.replace_document_mappings(
             s,
@@ -457,6 +448,11 @@ async def apply_mapping(
             user_id=user_id,
             rows=stamped,
         )
+        # Phase 26: recompute the canonical Profile document set now that
+        # this doc's mapping rows exist, instead of folding the id in by
+        # hand. The profile_builder cache key in ``node_profile_builder``
+        # reads the same helper, so write and read can't drift.
+        new_source_ids = await repos.current_profile_doc_ids(s, user_id)
         await repos.upsert_profile(
             s,
             user_id=user_id,
@@ -520,14 +516,15 @@ async def revert_mapping(*, document_id: uuid.UUID, user_id: uuid.UUID) -> None:
         profile=profile, doc_id=document_id, mapping_rows=rows_as_dict
     )
 
-    # Phase 21 (G4 fix): drop the project_doc id from source_doc_ids so the
-    # profile_builder cache key stays in sync with the user's documents
-    # after this doc is deleted.
-    new_source_ids = sorted(
-        str(x) for x in (profile_row.source_doc_ids or []) if str(x) != str(document_id)
-    )
-
     async with AsyncSessionLocal() as s:
+        # Phase 26: recompute the canonical Profile document set, minus the
+        # doc being reverted. ``revert_mapping`` runs *before* the document
+        # row (and its cascade-deleted mapping rows) is removed, so the
+        # helper still sees this doc — filter it out to reflect the
+        # post-delete state.
+        new_source_ids = [
+            x for x in await repos.current_profile_doc_ids(s, user_id) if x != str(document_id)
+        ]
         await repos.upsert_profile(
             s,
             user_id=user_id,

@@ -49,9 +49,10 @@ async def build_profile(user_id: uuid.UUID, *, temperature: float = 0.0) -> Prof
     On a rebuild (e.g. the user replaced their CV), any persisted
     ``document_mappings`` rows are re-applied to the freshly-extracted
     profile so prior project_doc enrichments survive. ``source_doc_ids``
-    is rewritten to ``[cv_id, *project_doc_ids_with_surviving_mappings]``
-    so the profile_builder cache check in ``node_profile_builder`` stays
-    consistent across project_doc additions and deletions.
+    is rewritten to the canonical Profile document set
+    (``repos.current_profile_doc_ids``) so the profile_builder cache check
+    in ``node_profile_builder`` stays consistent across project_doc
+    additions and deletions.
 
     Raises:
         NoDocumentsError: user has no CV.
@@ -94,10 +95,11 @@ async def build_profile(user_id: uuid.UUID, *, temperature: float = 0.0) -> Prof
     ]
     profile = reapply_existing_mappings(profile, rows_as_dicts)
 
-    surviving_project_doc_ids = sorted({str(r.document_id) for r in mapping_rows})
-    source_doc_ids = [str(cv_id), *surviving_project_doc_ids]
-
     async with AsyncSessionLocal() as session:
+        # Phase 26: one formula for the Profile document set — recompute
+        # from current DB state (CV ∪ confirmed-mapping doc ids) instead
+        # of assembling ``[cv_id, *surviving]`` by hand here.
+        source_doc_ids = await repos.current_profile_doc_ids(session, user_id)
         await repos.upsert_profile(
             session,
             user_id=user_id,
