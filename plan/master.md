@@ -155,6 +155,7 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 23    | Cleanup P5 — dead deps (streamlit/litellm/a2a/deepeval), pyproject `ui` | ✅ |
 | 24    | Hybrid retrieval — BM25 + vector with RRF      | ✅          |
 | 25    | Correctness P6 — setup flow: cache keys, embed-await, prep-in-progress 409, FE node-skip/job-active | ✅ |
+| 26    | Arch deepening — prep cache verdict (one Profile-document-set owner + degraded self-heal) | ✅ |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
 | 15    | GitHub ingestion                               | ⏳          |
