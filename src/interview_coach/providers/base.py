@@ -1,13 +1,12 @@
-"""Provider protocols for external-world I/O.
+"""Shared result type for web-search providers.
 
-These define a single seam that future providers (crawl4ai, GitHub, etc.)
-will conform to. Internal app code can call providers directly; MCP
-servers wrap them as tools for future LLM/external consumers.
+`SearchResult` is the single shape every search helper returns; it's imported
+by `tavily.py`, `company_researcher`, and the `ingestion.web` re-export shim.
 """
 
 from __future__ import annotations
 
-from typing import Protocol, TypedDict
+from typing import TypedDict
 
 
 class SearchResult(TypedDict):
@@ -15,15 +14,3 @@ class SearchResult(TypedDict):
     title: str
     content: str
     score: float
-
-
-class WebSearchProvider(Protocol):
-    name: str
-
-    async def search(self, query: str, *, max_results: int = 5) -> list[SearchResult]: ...
-
-
-class WebFetchProvider(Protocol):
-    name: str
-
-    async def fetch_text(self, url: str) -> str: ...

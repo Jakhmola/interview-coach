@@ -1,7 +1,6 @@
 """Tavily provider — wraps Tavily's `extract` and `search` HTTP endpoints.
 
-Conforms to `WebSearchProvider` + `WebFetchProvider` protocols. Top-level
-async helpers (`fetch_url_text`, `tavily_search`) preserve the historical
+Top-level async helpers (`fetch_url_text`, `tavily_search`) are the
 function-style API used by `company_researcher`, `jobs/routes.py`, and the
 documents MCP server.
 """
@@ -112,27 +111,3 @@ async def tavily_search(
             )
         )
     return out
-
-
-class TavilySearch:
-    """`WebSearchProvider` adapter around `tavily_search`."""
-
-    name = "tavily"
-
-    def __init__(self, api_key: str | None) -> None:
-        self._api_key = api_key
-
-    async def search(self, query: str, *, max_results: int = 5) -> list[SearchResult]:
-        return await tavily_search(query, self._api_key, max_results=max_results)
-
-
-class TavilyFetch:
-    """`WebFetchProvider` adapter around `fetch_url_text`."""
-
-    name = "tavily"
-
-    def __init__(self, api_key: str | None) -> None:
-        self._api_key = api_key
-
-    async def fetch_text(self, url: str) -> str:
-        return await fetch_url_text(url, self._api_key)

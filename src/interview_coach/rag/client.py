@@ -27,11 +27,12 @@ from tenacity import (
 
 from interview_coach.config import settings
 from interview_coach.observability.langfuse import span
+from interview_coach.rag.model_identity import EMBEDDING_DIM, EMBEDDING_MODEL_NAME
 
 logger = logging.getLogger(__name__)
 
-EXPECTED_MODEL_NAME = "jinaai/jina-embeddings-v3"
-EXPECTED_DIM = 1024
+EXPECTED_MODEL_NAME = EMBEDDING_MODEL_NAME
+EXPECTED_DIM = EMBEDDING_DIM
 
 Task = Literal["retrieval.passage", "retrieval.query"]
 

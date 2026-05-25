@@ -16,10 +16,10 @@ import { useActiveJob } from "../state/activeJob";
  */
 export function ActiveJobChip() {
   const navigate = useNavigate();
-  // Phase 22: jobs list now lives on ActiveJobContext, so a single
-  // ``refresh()`` from any caller (Setup/Manage) keeps the dropdown
-  // synced. The chip no longer needs its own listJobs fetch.
-  const { activeJob, activeJobId, jobs, setActiveJobId, refresh } = useActiveJob();
+  // Jobs list + active detail both live on ActiveJobContext. Switching the
+  // active job only moves the id — the provider's effect pulls the matching
+  // detail and a switch can't change the list — so the chip needs no refetch.
+  const { activeJob, activeJobId, jobs, setActiveJobId } = useActiveJob();
 
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -108,7 +108,6 @@ export function ActiveJobChip() {
                 onClick={() => {
                   setActiveJobId(j.id);
                   setOpen(false);
-                  void refresh();
                 }}
               >
                 <span className="active-job-menu-item-label">{label}</span>

@@ -14,9 +14,11 @@ import asyncio
 import logging
 from typing import Any
 
+from interview_coach.rag.model_identity import EMBEDDING_MODEL_NAME
+
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "jinaai/jina-embeddings-v3"
+MODEL_NAME = EMBEDDING_MODEL_NAME
 
 _TOKENIZER: Any | None = None
 _LOAD_LOCK: asyncio.Lock | None = None

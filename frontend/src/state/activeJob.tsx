@@ -54,6 +54,18 @@ function writeStoredId(id: string | null) {
   }
 }
 
+/** True when the held detail lags the active id and a fetch should follow.
+ * `activeJob` is derived async state keyed on `activeJobId`; this is the
+ * guard that lets the detail-follows-id effect run exactly once per move and
+ * no-op once the fetched detail matches (so it never loops or double-fetches
+ * after resolve()/a fetch has already set a matching detail). */
+export function shouldFetchActiveJobDetail(
+  activeJobId: string | null,
+  activeJob: JobDetail | null,
+): boolean {
+  return activeJobId !== null && activeJob?.id !== activeJobId;
+}
+
 export function ActiveJobProvider({ children }: { children: ReactNode }) {
   const { token } = useAuth();
   const [activeJobId, setActiveJobIdState] = useState<string | null>(() => readStoredId());
@@ -143,6 +155,29 @@ export function ActiveJobProvider({ children }: { children: ReactNode }) {
     void resolve();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  // Detail follows the id: when the active id moves ahead of the held detail
+  // (e.g. a dropdown/Setup switch that only flips the id, no list refresh),
+  // pull the matching JobDetail. Best-effort and silent — resolve() owns
+  // isLoading, so this never flashes a second spinner; the list snapshot keeps
+  // the chip label if the fetch fails. The `cancelled` flag drops a stale
+  // result on unmount or a rapid re-switch (A→B→A settles on A).
+  useEffect(() => {
+    if (!token || activeJobId === null) return;
+    if (!shouldFetchActiveJobDetail(activeJobId, activeJob)) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const job = await api.getJob(token, activeJobId);
+        if (!cancelled) setActiveJob(job);
+      } catch {
+        // Best-effort; keep the list-snapshot chip label.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, activeJobId, activeJob]);
 
   const value = useMemo<ActiveJobContextValue>(
     () => ({

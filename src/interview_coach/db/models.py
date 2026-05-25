@@ -20,6 +20,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import JSON
 
+from interview_coach.rag.model_identity import EMBEDDING_DIM
+
 
 class Base(DeclarativeBase):
     pass
@@ -256,7 +258,7 @@ class GroundingChunk(Base):
     text: Mapped[str] = mapped_column(Text, nullable=False)
     n_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
     embedding: Mapped[list[float]] = mapped_column(
-        Vector(1024).with_variant(JSON(), "sqlite"), nullable=False
+        Vector(EMBEDDING_DIM).with_variant(JSON(), "sqlite"), nullable=False
     )
     model_name: Mapped[str] = mapped_column(String(64), nullable=False)
     # Phase 24: `text_tsv tsvector` is added by Alembic migration 0011 but
