@@ -158,6 +158,8 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 26    | Arch deepening — prep cache verdict (one Profile-document-set owner + degraded self-heal) | ✅ |
 | 27    | Arch deepening — prep-event protocol (one typed owner; verdict reason on run+skip, outcome enum) | ✅ |
 | 28    | Arch deepening — render prep run reason (setup UI consumes Phase 27 protocol; force_refresh UI cleanup) | ✅ |
+| 29    | Arch deepening — activeJob deep setter (D) + collapse providers seam (F) + embedding-identity owner (G) | ✅          |
+| 30    | Arch deepening — graph_nodes glue (E); parked on a StateGraph/checkpointer decision | ⏳ |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
 | 15    | GitHub ingestion                               | ⏳          |
@@ -536,6 +538,30 @@ The rest of the original Phase 12. Lands after RAG so the eval set is stable.
 - GitHub REST API (no auth needed for public repos) → README + top-level `.md` + `package.json` / `pyproject.toml`.
 - Reuse Phase 14 chunker / embedder / table — adding GitHub is a one-line widening of the `source_doc_kind` check constraint to include `'github'` plus changing the `retrieve_grounding` default `source_kinds` to `('project_doc', 'github')`. No new migration.
 - **Smoke test:** ingest a known repo; chunks searchable; model_answer references attested code patterns.
+
+### Architecture-deepening track (`/improve-codebase-architecture` candidates)
+
+A 2026-05-24 architecture review produced 7 deepening candidates (vocabulary in repo-root
+`CONTEXT.md`). The prep-cache critical chain **B → A → C** shipped as Phases 26 → 27 → 28. Remaining:
+
+**Phase 29 — D + F + G (✅ shipped, branch `arch-deepening-dfg`).**
+Three independent candidates bundled into one phase:
+- **D — activeJob deep setter:** `activeJob` detail follows `activeJobId` via an effect in
+  `frontend/src/state/activeJob.tsx` (extracted `shouldFetchActiveJobDetail` helper). Fixes the
+  `SetupPage onSelectJob` latent bug and drops the manual `refresh()` in `ActiveJobChip`.
+- **F — collapse the providers seam:** the `providers/` Protocols, `TavilySearch`/`TavilyFetch`
+  adapters, `registry` getters, and `web_*_provider` settings have zero production callers (the live
+  path uses the `tavily_search`/`fetch_url_text` functions directly). Delete the dead loop + its test;
+  keep `SearchResult` + the functions.
+- **G — embedding-identity owner:** consolidate the re-typed model name/dim into a dep-free
+  `rag/model_identity.py` (`EMBEDDING_MODEL_NAME`/`EMBEDDING_DIM`) consumed by `rag/client.py`,
+  `rag/tokenizer.py`, and `db/models.py`, with a drift-guard test.
+
+**Phase 30 (prospective) — E, graph_nodes glue.** The last candidate; ⏳ parked, gated on a separate
+StateGraph/checkpointer decision that must be resolved before it can be planned.
+
+> All 7 review candidates are now accounted for: B/A/C shipped (26/27/28), D/F/G in Phase 29, E parked
+> (Phase 30). No deepening candidates remain unassigned.
 
 ---
 
