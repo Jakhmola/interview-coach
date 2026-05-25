@@ -40,7 +40,7 @@ export const ERRORS: Record<string, ErrorEntry> = {
   },
   company_snapshot_missing: {
     message: "Company info hasn't been researched yet.",
-    hint: "Click 'Refresh company info' on the JD.",
+    hint: "Re-analyze the JD from Manage to run prep again.",
   },
   no_documents: { message: "Upload a CV first." },
   NoDocumentsError: { message: "Upload a CV first." },
@@ -50,11 +50,11 @@ export const ERRORS: Record<string, ErrorEntry> = {
   },
   NoSearchHits: {
     message: "No public info found about this company.",
-    hint: "Try 'Refresh company info'; if it still fails, the JD's company name may be off — Re-analyze from Manage.",
+    hint: "Re-analyze the JD from Manage — if the company name looks off, paste a clearer version.",
   },
   NoUsablePages: {
     message: "Found search results but couldn't read them.",
-    hint: "Click 'Refresh company info' to retry.",
+    hint: "Re-analyze the JD from Manage to retry.",
   },
 
   // Sessions

@@ -59,6 +59,39 @@ const nodeLoadingMessages: Record<string, string[]> = {
 
 const PREP_NODE_KEYS = ["profile_builder", "doc_mapping", "job_analyzer", "company_researcher"];
 
+// Per-node prep state: the settled pill plus the verdict reason that rode in on
+// node_started/node_skipped (Phase 27 protocol). node_done merges — it updates
+// the pill but preserves the reason captured at start (Phase 28).
+type NodePill = { pill: string; reason?: PrepRunReason | PrepSkipReason };
+
+// Phase 28: terminal-state sub-label for the run reasons that tell a story.
+// Total over (node, reason, pill) — any combo not listed returns null so
+// TaskStatus keeps its plain fallback. Targets the real firing set traced
+// through prep_cache.py: `stale` only fires on profile_builder; `degraded`
+// only on company_researcher. `missing` and every skip reason mean "reused /
+// nothing changed" → no added copy on the fresh-setup happy path. (`forced`
+// has no UI trigger — the "Refresh company info" button was removed — so it is
+// deliberately unhandled; if the backend ever emits it, it degrades to plain
+// copy rather than rendering a button-driven message no path can produce.)
+//
+// Company's degraded run is the one conflict case: outcome wins. A degraded-run
+// that settled `done` announces the self-heal ("Recovered…"); a degraded-run
+// that settled `degraded` returns null and defers to the existing Phase-27
+// "Completed with warnings" pill + toast, so the user never sees two messages.
+export function nodeReasonLabel(
+  node: string,
+  reason: PrepRunReason | PrepSkipReason | undefined,
+  pill: string,
+): string | null {
+  if (node === "profile_builder" && reason === "stale" && pill === "done") {
+    return "Rebuilt — your documents changed";
+  }
+  if (node === "company_researcher" && reason === "degraded" && pill === "done") {
+    return "Recovered — earlier company info was incomplete";
+  }
+  return null;
+}
+
 type SetupOutletContext = {
   refreshReadiness: () => Promise<void>;
   isSetupComplete: boolean;
@@ -101,7 +134,7 @@ export function SetupPage() {
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isPreparing, setIsPreparing] = useState(false);
-  const [nodeState, setNodeState] = useState<Record<string, string>>({});
+  const [nodeState, setNodeState] = useState<Record<string, NodePill>>({});
   // The mapping suggestion the prep_graph paused on, if any. When non-null,
   // the page renders <MappingModal /> at the wizard top level; on user
   // submit we POST /sessions/prepare/resume which re-opens the SSE stream.
@@ -264,7 +297,11 @@ export function SetupPage() {
       n_rows?: number;
     };
     if (frame.event === "node_started" && data.node) {
-      setNodeState((c) => ({ ...c, [data.node!]: "running" }));
+      // Keep the run reason — node_done merges it through to the settled pill.
+      setNodeState((c) => ({
+        ...c,
+        [data.node!]: { pill: "running", reason: data.reason },
+      }));
     } else if (frame.event === "node_done" && data.node) {
       // Phase 27: a node_done with ``outcome === "degraded"`` is a
       // soft-fail (currently only company_researcher when the JD has
@@ -273,7 +310,9 @@ export function SetupPage() {
       // it via Manage → Re-analyze if they want, but can still
       // proceed.
       const pill = data.outcome === "degraded" ? "degraded" : "done";
-      setNodeState((c) => ({ ...c, [data.node!]: pill }));
+      // Merge: settle the pill but preserve the reason from node_started so
+      // nodeReasonLabel can render the terminal sub-label (Phase 28).
+      setNodeState((c) => ({ ...c, [data.node!]: { ...c[data.node!], pill } }));
       if (data.outcome === "degraded" && data.code) {
         setMessage(
           data.code === "CompanyNameMissing"
@@ -287,10 +326,10 @@ export function SetupPage() {
       // mapping it just walked ran fresh, so don't render "Using cached
       // result". Only profile/JD/company skips are genuine cache hits.
       const pill = data.node === "doc_mapping" ? "done" : "cached";
-      setNodeState((c) => ({ ...c, [data.node!]: pill }));
+      setNodeState((c) => ({ ...c, [data.node!]: { pill, reason: data.reason } }));
     } else if (frame.event === "mapping_suggestion" && data.payload) {
       // Mark doc_mapping as running and show the inline mapping panel.
-      setNodeState((c) => ({ ...c, doc_mapping: "running" }));
+      setNodeState((c) => ({ ...c, doc_mapping: { ...c.doc_mapping, pill: "running" } }));
       setPendingMapping(data.payload);
     } else if (frame.event === "mapping_suggestion_failed") {
       // The intake LLM call failed for this doc; the graph already
@@ -309,7 +348,7 @@ export function SetupPage() {
       setNodeState((c) => {
         const next = { ...c };
         for (const k of PREP_NODE_KEYS) {
-          if (!next[k]) next[k] = "done";
+          if (!next[k]) next[k] = { pill: "done" };
         }
         return next;
       });
@@ -325,10 +364,10 @@ export function SetupPage() {
       // re-fire the same failing run on every mount.
       setNodeState((c) => {
         const next = { ...c };
-        if (data.node) next[data.node] = "failed";
+        if (data.node) next[data.node] = { ...next[data.node], pill: "failed" };
         for (const k of PREP_NODE_KEYS) {
-          if (next[k] === "pending" || next[k] === "running") {
-            if (k !== data.node) next[k] = "skipped";
+          if (next[k]?.pill === "pending" || next[k]?.pill === "running") {
+            if (k !== data.node) next[k] = { ...next[k], pill: "skipped" };
           }
         }
         return next;
@@ -337,7 +376,7 @@ export function SetupPage() {
     }
   };
 
-  const runPrep = async (forceRefresh: boolean) => {
+  const runPrep = async () => {
     if (!token || !activeJobId) return;
     // Phase 25 (B7): pin the job id we're prepping at function entry.
     // If the user switches the active job mid-stream, every write —
@@ -348,10 +387,10 @@ export function SetupPage() {
     const runJobId = activeJobId;
     setIsPreparing(true);
     setNodeState({
-      profile_builder: "pending",
-      doc_mapping: "pending",
-      job_analyzer: "pending",
-      company_researcher: "pending",
+      profile_builder: { pill: "pending" },
+      doc_mapping: { pill: "pending" },
+      job_analyzer: { pill: "pending" },
+      company_researcher: { pill: "pending" },
     });
     setError(null);
     setMessage(null);
@@ -360,7 +399,7 @@ export function SetupPage() {
     const signal = prepAbort.fresh();
     const frameHandler = (frame: SseFrame) => handlePrepFrameFor(frame, runJobId);
     try {
-      await prepareSessionStream(token, runJobId, forceRefresh, frameHandler, signal);
+      await prepareSessionStream(token, runJobId, frameHandler, signal);
       await load();
       const nextStatus = await api.prepStatus(token, runJobId);
       setStatus(nextStatus);
@@ -451,7 +490,7 @@ export function SetupPage() {
     const key = `${activeJobId}:${status.can_start ? 1 : 0}:${unmapped}`;
     if (lastAutoPrepKeyRef.current === key) return;
     lastAutoPrepKeyRef.current = key;
-    void runPrep(false);
+    void runPrep();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeJobId, hasCv, status, statusJobId, step, pendingMapping]);
 
@@ -635,7 +674,7 @@ export function SetupPage() {
           <StepPrep
             status={status}
             isPreparing={isPreparing}
-            onPrep={() => runPrep(false)}
+            onPrep={() => runPrep()}
             nodeState={nodeState}
           />
         ) : null}
@@ -856,7 +895,7 @@ function StepPrep({
   status: PrepStatus | null;
   isPreparing: boolean;
   onPrep: () => void;
-  nodeState: Record<string, string>;
+  nodeState: Record<string, NodePill>;
 }) {
   const ready = status?.can_start ?? false;
   const showNodes = Object.keys(nodeState).length > 0;
@@ -868,8 +907,10 @@ function StepPrep({
           {PREP_NODE_KEYS.map((key) => (
             <TaskStatus
               key={key}
+              node={key}
               label={nodeLabels[key]}
-              state={nodeState[key] ?? "pending"}
+              state={nodeState[key]?.pill ?? "pending"}
+              reason={nodeState[key]?.reason}
               messages={nodeLoadingMessages[key] ?? [`Preparing ${nodeLabels[key].toLowerCase()}`]}
             />
           ))}
@@ -990,18 +1031,25 @@ function embeddingPillProps(status: EmbeddingStatus | undefined): {
 }
 
 function TaskStatus({
+  node,
   label,
   state,
+  reason,
   messages,
 }: {
+  node: string;
   label: string;
   state: string;
+  reason?: PrepRunReason | PrepSkipReason;
   messages: string[];
 }) {
   const normalizedState = state.startsWith("cached") ? "cached" : state;
   const isActive = normalizedState === "pending" || normalizedState === "running";
+  // Phase 28: a story reason (stale rebuild, forced/recovered company) replaces
+  // the plain settled copy; everything else returns null and keeps it.
   const fallback =
-    normalizedState === "done"
+    nodeReasonLabel(node, reason, normalizedState) ??
+    (normalizedState === "done"
       ? "Complete"
       : normalizedState === "cached"
         ? "Using cached result"
@@ -1013,7 +1061,7 @@ function TaskStatus({
               ? "Skipped"
               : normalizedState === "degraded"
                 ? "Completed with warnings"
-                : "Queued";
+                : "Queued");
 
   return (
     <article className={`task-status task-${normalizedState}`}>

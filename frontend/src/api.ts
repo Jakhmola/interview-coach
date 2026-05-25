@@ -187,7 +187,8 @@ export type SseFrame = {
 
 // Prep-graph node-lifecycle protocol — mirrors agents/prep_events.py (Phase 27).
 // Run reason rides node_started; skip reason rides node_skipped; outcome rides
-// node_done. The reason fields are carried but not yet rendered (Phase C).
+// node_done. SetupPage renders the story reasons as a terminal sub-label via
+// nodeReasonLabel (Phase 28).
 export type PrepRunReason = "missing" | "stale" | "forced" | "degraded";
 export type PrepSkipReason = "cached" | "already_analyzed" | "no_unmapped_project_docs";
 export type PrepNodeOutcome = "ok" | "degraded";
@@ -456,17 +457,12 @@ async function streamPost(
 export function prepareSessionStream(
   token: string,
   jobId: string,
-  forceRefresh: boolean,
   onFrame: (frame: SseFrame) => void,
   signal?: AbortSignal,
 ) {
-  return streamPost(
-    "/sessions/prepare",
-    token,
-    { job_id: jobId, force_refresh: forceRefresh },
-    onFrame,
-    signal,
-  );
+  // force_refresh has no UI trigger (the "Refresh company info" button was
+  // removed); the backend defaults it to false, so we omit it from the body.
+  return streamPost("/sessions/prepare", token, { job_id: jobId }, onFrame, signal);
 }
 
 /** Resume prep_graph after the user confirms or skips a project_doc
