@@ -157,6 +157,7 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 25    | Correctness P6 — setup flow: cache keys, embed-await, prep-in-progress 409, FE node-skip/job-active | ✅ |
 | 26    | Arch deepening — prep cache verdict (one Profile-document-set owner + degraded self-heal) | ✅ |
 | 27    | Arch deepening — prep-event protocol (one typed owner; verdict reason on run+skip, outcome enum) | ✅ |
+| 28    | Arch deepening — render prep run reason (setup UI consumes Phase 27 protocol; force_refresh UI cleanup) | ✅ |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
 | 15    | GitHub ingestion                               | ⏳          |
