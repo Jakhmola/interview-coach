@@ -156,6 +156,7 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 24    | Hybrid retrieval — BM25 + vector with RRF      | ✅          |
 | 25    | Correctness P6 — setup flow: cache keys, embed-await, prep-in-progress 409, FE node-skip/job-active | ✅ |
 | 26    | Arch deepening — prep cache verdict (one Profile-document-set owner + degraded self-heal) | ✅ |
+| 27    | Arch deepening — prep-event protocol (one typed owner; verdict reason on run+skip, outcome enum) | ✅ |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
 | 15    | GitHub ingestion                               | ⏳          |
