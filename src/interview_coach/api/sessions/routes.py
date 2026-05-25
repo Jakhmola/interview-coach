@@ -26,6 +26,7 @@ from interview_coach.agents.nodes.evaluator import (
 )
 from interview_coach.agents.nodes.profile_builder import NoDocumentsError
 from interview_coach.agents.nodes.question_generator import GenerationPrereqsMissing
+from interview_coach.agents.prep_events import LIFECYCLE_EVENT_NAMES
 from interview_coach.agents.streaming_json import StreamingJsonError
 from interview_coach.api.auth.deps import get_current_user
 from interview_coach.api.sessions.schemas import (
@@ -197,11 +198,11 @@ async def prepare_status(
     )
 
 
-PREP_FORWARDED_EVENTS = frozenset(
+# The doc-mapping HITL sub-protocol — untyped, owned here (no verdict reason
+# rides these; see docs/adr/0001). The per-doc ``node_started`` the mapping
+# loop emits reuses a lifecycle name and is covered by LIFECYCLE_EVENT_NAMES.
+MAPPING_EVENT_NAMES = frozenset(
     {
-        "node_started",
-        "node_done",
-        "node_skipped",
         "mapping_suggestion",
         "mapping_suggestion_failed",
         "mapping_applied",
@@ -209,6 +210,11 @@ PREP_FORWARDED_EVENTS = frozenset(
         "mapping_apply_failed",
     }
 )
+
+# The node-lifecycle half is sourced from agents/prep_events so the allowlist
+# can't drift from the typed models. ``error`` is in this set but is
+# special-cased below (forward, then terminate the stream).
+PREP_FORWARDED_EVENTS = LIFECYCLE_EVENT_NAMES | MAPPING_EVENT_NAMES
 
 
 def _prep_event_stream(
@@ -242,14 +248,16 @@ def _prep_event_stream(
                 async for chunk in prep_graph.astream(
                     graph_input, config=prep_config, stream_mode="custom"
                 ):
-                    if chunk.get("event") == "mapping_suggestion":
-                        saw_mapping_interrupt = True
                     event = chunk.get("event")
-                    if event in PREP_FORWARDED_EVENTS:
-                        yield sse_event(event, {k: v for k, v in chunk.items() if k != "event"})
-                    elif event == "error":
+                    if event == "mapping_suggestion":
+                        saw_mapping_interrupt = True
+                    # ``error`` is in PREP_FORWARDED_EVENTS but keeps its own
+                    # forward-then-terminate control flow (checked first).
+                    if event == "error":
                         yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
                         return
+                    if event in PREP_FORWARDED_EVENTS:
+                        yield sse_event(event, {k: v for k, v in chunk.items() if k != "event"})
                 # astream exit: either the graph reached END or it paused
                 # at a mapping interrupt. The interrupt path ends the
                 # generator without emitting a langgraph-internal frame
@@ -264,7 +272,7 @@ def _prep_event_stream(
         except NoDocumentsError as e:
             # Phase 22: company-research soft errors (CompanyNameMissing,
             # NoSearchHits, NoUsablePages) are swallowed *inside* the
-            # graph node and surfaced as ``node_done {degraded: true}``,
+            # graph node and surfaced as ``node_done {outcome: "degraded"}``,
             # not as fatal stream errors — the user can still proceed
             # with a placeholder snapshot. Only genuinely fatal prep
             # exceptions terminate the stream here.

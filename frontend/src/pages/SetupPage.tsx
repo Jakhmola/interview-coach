@@ -9,6 +9,9 @@ import {
   JobItem,
   MappingRow,
   MappingSuggestion,
+  PrepNodeOutcome,
+  PrepRunReason,
+  PrepSkipReason,
   PrepStatus,
   SseFrame,
   api,
@@ -246,29 +249,32 @@ export function SetupPage() {
   useEffect(() => setMessage(null), [step]);
 
   const handlePrepFrameFor = (frame: SseFrame, runJobId: string) => {
+    // Lifecycle fields (node/reason/outcome/code/detail) are typed against the
+    // prep_events contract; the mapping sub-protocol fields (document_id,
+    // payload, remaining, n_rows) ride the same handler and stay loose.
     const data = frame.data as {
       node?: string;
-      reason?: string;
+      reason?: PrepRunReason | PrepSkipReason;
+      outcome?: PrepNodeOutcome;
       code?: string;
       detail?: string;
       document_id?: string;
       payload?: MappingSuggestion;
       remaining?: number;
       n_rows?: number;
-      degraded?: boolean;
     };
     if (frame.event === "node_started" && data.node) {
       setNodeState((c) => ({ ...c, [data.node!]: "running" }));
     } else if (frame.event === "node_done" && data.node) {
-      // Phase 22: a node_done with ``degraded: true`` is a soft-fail
-      // (currently only company_researcher when the JD has no
-      // company_name or no search hits). Mark the pill differently
+      // Phase 27: a node_done with ``outcome === "degraded"`` is a
+      // soft-fail (currently only company_researcher when the JD has
+      // no company_name or no search hits). Mark the pill differently
       // and surface a non-blocking message so the user knows to fix
       // it via Manage → Re-analyze if they want, but can still
       // proceed.
-      const pill = data.degraded ? "degraded" : "done";
+      const pill = data.outcome === "degraded" ? "degraded" : "done";
       setNodeState((c) => ({ ...c, [data.node!]: pill }));
-      if (data.degraded && data.code) {
+      if (data.outcome === "degraded" && data.code) {
         setMessage(
           data.code === "CompanyNameMissing"
             ? "Couldn't extract a company name from this JD — questions will be less company-specific. Fix it any time via Manage → Re-analyze."

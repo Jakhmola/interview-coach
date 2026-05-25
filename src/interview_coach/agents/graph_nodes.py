@@ -66,6 +66,13 @@ from interview_coach.agents.prep_cache import (
     decide_job_cache,
     decide_profile_cache,
 )
+from interview_coach.agents.prep_events import (
+    NodeDone,
+    NodeError,
+    NodeSkipped,
+    NodeStarted,
+    emit,
+)
 from interview_coach.agents.state import InterviewState
 from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
@@ -96,26 +103,19 @@ async def node_profile_builder(state: InterviewState) -> dict[str, Any]:
         current_doc_ids=current_doc_ids,
     )
     if verdict.skip:
-        writer({"event": "node_skipped", "node": "profile_builder", "reason": verdict.reason})
+        emit(writer, NodeSkipped(node="profile_builder", reason=verdict.reason))
         return {
             "profile": existing.profile_json,
             "next_step": "doc_intake_fanout",
         }
 
-    writer({"event": "node_started", "node": "profile_builder"})
+    emit(writer, NodeStarted(node="profile_builder", reason=verdict.reason))
     try:
         profile = await build_profile(user_id)
     except NoDocumentsError as e:
-        writer(
-            {
-                "event": "error",
-                "node": "profile_builder",
-                "code": "no_documents",
-                "detail": str(e),
-            }
-        )
+        emit(writer, NodeError(node="profile_builder", code="no_documents", detail=str(e)))
         raise
-    writer({"event": "node_done", "node": "profile_builder"})
+    emit(writer, NodeDone(node="profile_builder"))
     return {
         "profile": profile.model_dump(),
         "next_step": "doc_intake_fanout",
@@ -149,13 +149,7 @@ async def node_prepare_mapping_suggestion(state: InterviewState) -> dict[str, An
 
     unmapped = [d for d in unmapped_all if str(d.id) not in skiplist]
     if not unmapped:
-        writer(
-            {
-                "event": "node_skipped",
-                "node": "doc_mapping",
-                "reason": "no_unmapped_project_docs",
-            }
-        )
+        emit(writer, NodeSkipped(node="doc_mapping", reason="no_unmapped_project_docs"))
         return {"pending_mapping": None, "next_step": "job_analyzer"}
 
     next_doc = unmapped[0]
@@ -326,17 +320,17 @@ async def node_job_analyzer(state: InterviewState) -> dict[str, Any]:
         job = await repos.get_job(s, job_id, user_id)
 
     if job is None:
-        writer({"event": "error", "node": "job_analyzer", "code": "job_not_found"})
+        emit(writer, NodeError(node="job_analyzer", code="job_not_found"))
         raise JobNotFoundError(f"job {job_id} not found")
 
     verdict = decide_job_cache(parsed_json=job.parsed_json)
     if verdict.skip:
-        writer({"event": "node_skipped", "node": "job_analyzer", "reason": verdict.reason})
+        emit(writer, NodeSkipped(node="job_analyzer", reason=verdict.reason))
         return {"job": job.parsed_json, "next_step": "company_researcher"}
 
-    writer({"event": "node_started", "node": "job_analyzer"})
+    emit(writer, NodeStarted(node="job_analyzer", reason=verdict.reason))
     analysis = await analyze_job(job_id, user_id)
-    writer({"event": "node_done", "node": "job_analyzer"})
+    emit(writer, NodeDone(node="job_analyzer"))
     return {"job": analysis.model_dump(), "next_step": "company_researcher"}
 
 
@@ -354,8 +348,8 @@ async def node_company_researcher(state: InterviewState) -> dict[str, Any]:
 
     So we now catch the three soft modes, persist a placeholder
     snapshot (so ``company_researched`` flips true and the user can
-    actually proceed), and emit a ``node_done`` with ``degraded: true``
-    + a reason code. The FE renders that as a warning instead of an
+    actually proceed), and emit a ``node_done`` with
+    ``outcome="degraded"`` + a reason code. The FE renders that as a warning instead of an
     error and points the user at Manage → Re-analyze JD if they want
     to fix it. Only genuinely fatal exceptions (e.g.
     ``JobNotAnalyzed``, which means a logic bug upstream) still
@@ -375,26 +369,19 @@ async def node_company_researcher(state: InterviewState) -> dict[str, Any]:
     # On ``miss("degraded")`` we fall through to research — the self-heal
     # for a transient soft-fail (Phase 26 / OD-1).
     if verdict.skip:
-        writer({"event": "node_skipped", "node": "company_researcher", "reason": verdict.reason})
+        emit(writer, NodeSkipped(node="company_researcher", reason=verdict.reason))
         return {
             "company": existing.snapshot_json,
             "prep_done": True,
             "next_step": "END",
         }
 
-    writer({"event": "node_started", "node": "company_researcher"})
+    emit(writer, NodeStarted(node="company_researcher", reason=verdict.reason))
     try:
         snapshot = await research_company(job_id, user_id, force_refresh=force_refresh)
     except JobNotAnalyzed as e:
         # Indicates upstream pipeline bug — analyzer should have run first.
-        writer(
-            {
-                "event": "error",
-                "node": "company_researcher",
-                "code": type(e).__name__,
-                "detail": str(e),
-            }
-        )
+        emit(writer, NodeError(node="company_researcher", code=type(e).__name__, detail=str(e)))
         raise
     except (CompanyNameMissing, NoSearchHits, NoUsablePages) as e:
         logger.warning(
@@ -432,21 +419,21 @@ async def node_company_researcher(state: InterviewState) -> dict[str, Any]:
                 source_urls=[],
                 model_name="placeholder",
             )
-        writer(
-            {
-                "event": "node_done",
-                "node": "company_researcher",
-                "degraded": True,
-                "code": type(e).__name__,
-                "detail": str(e),
-            }
+        emit(
+            writer,
+            NodeDone(
+                node="company_researcher",
+                outcome="degraded",
+                code=type(e).__name__,
+                detail=str(e),
+            ),
         )
         return {
             "company": placeholder.model_dump(),
             "prep_done": True,
             "next_step": "END",
         }
-    writer({"event": "node_done", "node": "company_researcher"})
+    emit(writer, NodeDone(node="company_researcher"))
     return {
         "company": snapshot.model_dump(),
         "prep_done": True,

@@ -185,6 +185,19 @@ export type SseFrame = {
   data: unknown;
 };
 
+// Prep-graph node-lifecycle protocol — mirrors agents/prep_events.py (Phase 27).
+// Run reason rides node_started; skip reason rides node_skipped; outcome rides
+// node_done. The reason fields are carried but not yet rendered (Phase C).
+export type PrepRunReason = "missing" | "stale" | "forced" | "degraded";
+export type PrepSkipReason = "cached" | "already_analyzed" | "no_unmapped_project_docs";
+export type PrepNodeOutcome = "ok" | "degraded";
+
+export type PrepLifecycleEvent =
+  | { event: "node_started"; node: string; reason: PrepRunReason }
+  | { event: "node_skipped"; node: string; reason: PrepSkipReason }
+  | { event: "node_done"; node: string; outcome: PrepNodeOutcome; code?: string; detail?: string }
+  | { event: "error"; node?: string; code: string; detail?: string };
+
 type FetchInit = RequestInit & { token?: string | null };
 
 async function unwrap<T>(response: Response): Promise<T> {

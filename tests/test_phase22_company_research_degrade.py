@@ -3,7 +3,8 @@
 If the JD has no extractable company name (or Tavily comes up empty),
 ``node_company_researcher`` no longer terminates the prep_graph stream
 with an error. Instead it persists a placeholder snapshot, emits a
-``node_done`` with ``degraded: true``, and lets the user proceed to
+``node_done`` with ``outcome="degraded"`` (Phase 27 typed it; was
+``degraded: true``), and lets the user proceed to
 interview. The placeholder embeds the degrade reason in the
 ``snapshot_json`` so Manage can surface a "company info incomplete"
 state later.
@@ -120,11 +121,11 @@ async def test_company_name_missing_degrades_softly(
         raises=researcher_mod.CompanyNameMissing("no name"),
     )
 
-    # No fatal error event; instead a node_done with degraded=True.
+    # No fatal error event; instead a node_done with outcome="degraded".
     assert not any(e["event"] == "error" for e in writer.events)
     done = [e for e in writer.events if e["event"] == "node_done"]
     assert len(done) == 1
-    assert done[0]["degraded"] is True
+    assert done[0]["outcome"] == "degraded"
     assert done[0]["code"] == "CompanyNameMissing"
 
     # A placeholder snapshot was persisted so prepare_status flips
@@ -152,7 +153,7 @@ async def test_no_search_hits_degrades_softly(
 
     assert not any(e["event"] == "error" for e in writer.events)
     done = next(e for e in writer.events if e["event"] == "node_done")
-    assert done["degraded"] is True
+    assert done["outcome"] == "degraded"
     assert done["code"] == "NoSearchHits"
 
     # Analyzed company_name carries through onto the placeholder row.
@@ -177,7 +178,7 @@ async def test_no_usable_pages_degrades_softly(
     )
 
     done = next(e for e in writer.events if e["event"] == "node_done")
-    assert done["degraded"] is True
+    assert done["outcome"] == "degraded"
     assert done["code"] == "NoUsablePages"
 
     async with db() as s:

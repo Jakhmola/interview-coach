@@ -32,8 +32,19 @@ The typed reason on a skip verdict.
 - skip: `cached` · `already_analyzed` · `no_unmapped_project_docs`
 - run:  `missing` · `stale` · `forced` · `degraded`
 
+**Node outcome**
+How a prep node's *run* turned out — one of `ok` or `degraded`. Distinct from
+the **skip verdict**, which is the decision of *whether* to run: a node that
+skipped has no outcome (it never ran). The **cache reason** says *why* a node ran
+or skipped; the outcome says *how* the run finished.
+_Avoid_: conflating "outcome" with "reason"; using a bare `degraded` boolean when
+you mean the typed outcome.
+
 **Degraded snapshot**
 A placeholder company snapshot persisted when company research soft-fails
 (`CompanyNameMissing`, `NoSearchHits`, `NoUsablePages`); tagged with
 `_degraded` in its JSON. A degraded snapshot is **stale**, not a cache hit — the
-next prep run re-attempts research rather than serving the placeholder.
+next prep run re-attempts research rather than serving the placeholder. The term
+surfaces in two faithful-but-distinct places: as a **run** cache reason (the
+*prior* snapshot was degraded, so this prep re-attempts) and as a node
+**outcome** (*this* run produced the placeholder).
