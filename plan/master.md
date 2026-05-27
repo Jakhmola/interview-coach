@@ -159,7 +159,7 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 27    | Arch deepening — prep-event protocol (one typed owner; verdict reason on run+skip, outcome enum) | ✅ |
 | 28    | Arch deepening — render prep run reason (setup UI consumes Phase 27 protocol; force_refresh UI cleanup) | ✅ |
 | 29    | Arch deepening — activeJob deep setter (D) + collapse providers seam (F) + embedding-identity owner (G) | ✅          |
-| 30    | Arch deepening — graph_nodes glue (E); parked on a StateGraph/checkpointer decision | ⏳ |
+| 30    | Arch deepening — prep-node glue (A/E) + readiness owner (B) + vector-SQL dedup (C) + ingestion.web shim deletion (D); ADR 0002 routing stays edge-defined | ✅ |
 | 14b   | RAG grounding — Tavily tech-spec corpus (opt)  | ⏳          |
 | 12b   | Eval harness — evaluator quality (full)        | ⏳          |
 | 15    | GitHub ingestion                               | ⏳          |
@@ -557,11 +557,25 @@ Three independent candidates bundled into one phase:
   `rag/model_identity.py` (`EMBEDDING_MODEL_NAME`/`EMBEDDING_DIM`) consumed by `rag/client.py`,
   `rag/tokenizer.py`, and `db/models.py`, with a drift-guard test.
 
-**Phase 30 (prospective) — E, graph_nodes glue.** The last candidate; ⏳ parked, gated on a separate
-StateGraph/checkpointer decision that must be resolved before it can be planned.
+**Phase 30 — E + readiness/SQL/shim cleanup (✅ shipped, branch `phase-30-arch-glue`).**
+Candidate E (the prep-node glue) plus three independent items from the 2026-05-26 sweep:
+- **A (E) — prep-node glue:** `emit_verdict` (`agents/prep_events.py`) concentrates the
+  verdict→lifecycle-event mapping the three linear prep nodes hand-copied; the vestigial `next_step`
+  is removed from every node except `prepare_mapping_suggestion` (the one node whose conditional edge
+  reads it).
+- **B — prep-readiness owner:** `repos.prep_readiness` + `PrepReadiness` own the "ready to practice?"
+  rule that `GET /sessions/prepare/status` inlined; the route just maps the result.
+- **C — vector-SQL dedup:** one `_query_chunks_by_vector` (`rag/retrieval.py`) feeds both the
+  vector-only and hybrid paths.
+- **D — shim deletion:** the overdue `ingestion/web.py` re-export shim is gone; callers repoint to
+  `providers.tavily` / `providers.base`.
 
-> All 7 review candidates are now accounted for: B/A/C shipped (26/27/28), D/F/G in Phase 29, E parked
-> (Phase 30). No deepening candidates remain unassigned.
+The StateGraph/checkpointer question that parked E is resolved as **ADR 0002**: routing stays
+edge-defined (no `Command(goto)`).
+
+> All 2026-05-24 review candidates shipped: B/A/C (26/27/28), D/F/G (29), E (30). Phase 30 also
+> absorbed the 2026-05-26 sweep's readiness/SQL/shim items; its remaining sweep candidates
+> (03/05/07/08/09) are deferred — see the Phase 30 plan.
 
 ---
 
