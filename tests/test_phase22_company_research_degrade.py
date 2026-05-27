@@ -104,7 +104,6 @@ async def _run_node(
     )
     # Sanity: graph reports prep_done so /prepare/status can flip can_start.
     assert out["prep_done"] is True
-    assert out["next_step"] == "END"
     return fake_writer
 
 

@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import delete, func, select
@@ -780,6 +781,82 @@ async def upsert_company_snapshot(
     await session.commit()
     await session.refresh(row)
     return row
+
+
+# --- prep readiness (Phase 30) -------------------------------------------
+
+
+@dataclass
+class PrepReadiness:
+    """The "ready to practice?" rollup for one ``(user, job)``.
+
+    One owner for the readiness rule that ``GET /sessions/prepare/status``
+    used to compute inline in the HTTP handler. Carries the raw ``profile`` /
+    ``job`` / ``snapshot`` rows so the route can still build its
+    ``?detail=true`` payload off the same reads.
+    """
+
+    job: Job
+    profile: ProfileRow | None
+    snapshot: CompanySnapshotRow | None
+    has_cv: bool
+    profile_ready: bool
+    job_analyzed: bool
+    company_researched: bool
+    missing: list[str]
+    can_start: bool
+    unmapped_project_doc_count: int
+
+
+async def prep_readiness(
+    session: AsyncSession, user_id: uuid.UUID, job_id: uuid.UUID
+) -> PrepReadiness | None:
+    """Gather everything the setup flow needs to decide whether the user can
+    start an interview for ``job_id``. Returns ``None`` when the job doesn't
+    exist (the route maps that to 404).
+
+    Five sequential reads on the request-scoped session — async sessions
+    aren't concurrency-safe, so no ``gather``. The win is locality (one owner
+    for the rule), not parallelism. A degraded company snapshot still counts
+    as ``company_researched`` (a placeholder row exists), matching the
+    pre-Phase-30 behavior.
+    """
+    job = await get_job(session, job_id, user_id)
+    if job is None:
+        return None
+
+    docs = await list_documents_for_user(session, user_id)
+    profile = await get_profile(session, user_id)
+    snapshot = await get_company_snapshot_by_job(session, job_id)
+    unmapped = await list_unmapped_project_docs_for_user(session, user_id)
+
+    has_cv = any(d.kind == "cv" for d in docs)
+    profile_ready = profile is not None
+    job_analyzed = bool(job.parsed_json)
+    company_researched = snapshot is not None
+
+    missing: list[str] = []
+    if not has_cv:
+        missing.append("cv")
+    if not profile_ready:
+        missing.append("profile")
+    if not job_analyzed:
+        missing.append("job_analysis")
+    if not company_researched:
+        missing.append("company_research")
+
+    return PrepReadiness(
+        job=job,
+        profile=profile,
+        snapshot=snapshot,
+        has_cv=has_cv,
+        profile_ready=profile_ready,
+        job_analyzed=job_analyzed,
+        company_researched=company_researched,
+        missing=missing,
+        can_start=not missing,
+        unmapped_project_doc_count=len(unmapped),
+    )
 
 
 # --- Phase 22: account reset ---------------------------------------------

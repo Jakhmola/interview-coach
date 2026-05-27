@@ -10,8 +10,10 @@ Two compiled graphs share this same state:
   ``round_type``, ``n_questions``; mutates ``current_question``,
   ``current_answer``, ``evaluation``, ``turn_index``, ``session_status``.
 
-Both graphs use ``next_step`` for observability (Langfuse Phase 11) and
-to make the conditional-edge routing self-documenting.
+``next_step`` is read by exactly one edge: the conditional edge out of
+``prepare_mapping_suggestion`` that drives the doc-mapping HITL loop (loop
+back to handle the next unmapped doc vs. advance to ``job_analyzer``). Every
+other edge in both graphs is static, so only that node sets ``next_step``.
 """
 
 from __future__ import annotations
@@ -61,7 +63,10 @@ class InterviewState(TypedDict, total=False):
     # fresh ``/prepare`` POST so a returning user can re-decide.
     skipped_mapping_doc_ids: list[str]
 
-    # --- supervisor routing / observability ---
+    # --- doc-mapping loop routing ---
+    # Read only by prepare_mapping_suggestion's conditional edge (loop vs.
+    # advance to job_analyzer); all other edges are static. Set only by that
+    # node.
     next_step: str
 
     # --- LangGraph chat history (reserved; unused in v1) ---

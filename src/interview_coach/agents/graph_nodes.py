@@ -70,8 +70,8 @@ from interview_coach.agents.prep_events import (
     NodeDone,
     NodeError,
     NodeSkipped,
-    NodeStarted,
     emit,
+    emit_verdict,
 )
 from interview_coach.agents.state import InterviewState
 from interview_coach.db import repos
@@ -102,24 +102,16 @@ async def node_profile_builder(state: InterviewState) -> dict[str, Any]:
         stored_doc_ids=existing.source_doc_ids if existing is not None else None,
         current_doc_ids=current_doc_ids,
     )
-    if verdict.skip:
-        emit(writer, NodeSkipped(node="profile_builder", reason=verdict.reason))
-        return {
-            "profile": existing.profile_json,
-            "next_step": "doc_intake_fanout",
-        }
+    if emit_verdict(writer, node="profile_builder", verdict=verdict):
+        return {"profile": existing.profile_json}
 
-    emit(writer, NodeStarted(node="profile_builder", reason=verdict.reason))
     try:
         profile = await build_profile(user_id)
     except NoDocumentsError as e:
         emit(writer, NodeError(node="profile_builder", code="no_documents", detail=str(e)))
         raise
     emit(writer, NodeDone(node="profile_builder"))
-    return {
-        "profile": profile.model_dump(),
-        "next_step": "doc_intake_fanout",
-    }
+    return {"profile": profile.model_dump()}
 
 
 async def node_prepare_mapping_suggestion(state: InterviewState) -> dict[str, Any]:
@@ -226,7 +218,7 @@ async def node_await_mapping_confirm(state: InterviewState) -> dict[str, Any]:
     # Failed-intake doc: nothing to confirm — apply_or_skip_mapping will
     # immediately advance. Don't burn an interrupt cycle on it.
     if pending.get("skip_reason"):
-        return {"mapping_resume": None, "next_step": "apply_or_skip_mapping"}
+        return {"mapping_resume": None}
     resume = interrupt(
         {
             "awaiting": "mapping_confirm",
@@ -235,7 +227,6 @@ async def node_await_mapping_confirm(state: InterviewState) -> dict[str, Any]:
     )
     return {
         "mapping_resume": resume if isinstance(resume, dict) else {"action": "skip"},
-        "next_step": "apply_or_skip_mapping",
     }
 
 
@@ -263,7 +254,6 @@ async def node_apply_or_skip_mapping(state: InterviewState) -> dict[str, Any]:
             "pending_mapping": None,
             "mapping_resume": None,
             "skipped_mapping_doc_ids": skiplist,
-            "next_step": "prepare_mapping_suggestion",
         }
 
     resume = state.get("mapping_resume") or {}
@@ -307,7 +297,6 @@ async def node_apply_or_skip_mapping(state: InterviewState) -> dict[str, Any]:
         "pending_mapping": None,
         "mapping_resume": None,
         "skipped_mapping_doc_ids": skiplist,
-        "next_step": "prepare_mapping_suggestion",
     }
 
 
@@ -324,14 +313,12 @@ async def node_job_analyzer(state: InterviewState) -> dict[str, Any]:
         raise JobNotFoundError(f"job {job_id} not found")
 
     verdict = decide_job_cache(parsed_json=job.parsed_json)
-    if verdict.skip:
-        emit(writer, NodeSkipped(node="job_analyzer", reason=verdict.reason))
-        return {"job": job.parsed_json, "next_step": "company_researcher"}
+    if emit_verdict(writer, node="job_analyzer", verdict=verdict):
+        return {"job": job.parsed_json}
 
-    emit(writer, NodeStarted(node="job_analyzer", reason=verdict.reason))
     analysis = await analyze_job(job_id, user_id)
     emit(writer, NodeDone(node="job_analyzer"))
-    return {"job": analysis.model_dump(), "next_step": "company_researcher"}
+    return {"job": analysis.model_dump()}
 
 
 async def node_company_researcher(state: InterviewState) -> dict[str, Any]:
@@ -368,15 +355,9 @@ async def node_company_researcher(state: InterviewState) -> dict[str, Any]:
     )
     # On ``miss("degraded")`` we fall through to research — the self-heal
     # for a transient soft-fail (Phase 26 / OD-1).
-    if verdict.skip:
-        emit(writer, NodeSkipped(node="company_researcher", reason=verdict.reason))
-        return {
-            "company": existing.snapshot_json,
-            "prep_done": True,
-            "next_step": "END",
-        }
+    if emit_verdict(writer, node="company_researcher", verdict=verdict):
+        return {"company": existing.snapshot_json, "prep_done": True}
 
-    emit(writer, NodeStarted(node="company_researcher", reason=verdict.reason))
     try:
         snapshot = await research_company(job_id, user_id, force_refresh=force_refresh)
     except JobNotAnalyzed as e:
@@ -428,17 +409,9 @@ async def node_company_researcher(state: InterviewState) -> dict[str, Any]:
                 detail=str(e),
             ),
         )
-        return {
-            "company": placeholder.model_dump(),
-            "prep_done": True,
-            "next_step": "END",
-        }
+        return {"company": placeholder.model_dump(), "prep_done": True}
     emit(writer, NodeDone(node="company_researcher"))
-    return {
-        "company": snapshot.model_dump(),
-        "prep_done": True,
-        "next_step": "END",
-    }
+    return {"company": snapshot.model_dump(), "prep_done": True}
 
 
 # --- interview graph nodes -------------------------------------------
@@ -481,7 +454,6 @@ async def node_question_generator(state: InterviewState) -> dict[str, Any]:
     return {
         "current_question": done_payload,
         "turn_index": done_payload["turn_index"],
-        "next_step": "await_answer",
     }
 
 
@@ -494,7 +466,7 @@ async def node_await_answer(state: InterviewState) -> dict[str, Any]:
     current_q = state.get("current_question") or {}
     resume_payload = interrupt({"awaiting": "answer", "turn_id": current_q.get("question_id")})
     answer = (resume_payload or {}).get("answer", "")
-    return {"current_answer": answer, "next_step": "evaluator"}
+    return {"current_answer": answer}
 
 
 async def node_evaluator(state: InterviewState) -> dict[str, Any]:
@@ -529,5 +501,4 @@ async def node_evaluator(state: InterviewState) -> dict[str, Any]:
     return {
         "evaluation": done_payload,
         "session_status": done_payload["session_status"],
-        "next_step": "END",
     }

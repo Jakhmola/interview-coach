@@ -2,7 +2,7 @@ import httpx
 import pytest
 
 from interview_coach.ingestion.errors import FetchFailed, KeyMissing
-from interview_coach.ingestion.web import TAVILY_EXTRACT_URL, fetch_url_text
+from interview_coach.providers.tavily import TAVILY_EXTRACT_URL, fetch_url_text
 
 
 async def test_fetch_url_text_missing_key() -> None:

@@ -20,7 +20,7 @@ from interview_coach.agents.schemas import CompanySnapshot
 from interview_coach.db import models, repos
 from interview_coach.db.models import Job, User
 from interview_coach.ingestion.errors import KeyMissing
-from interview_coach.ingestion.web import SearchResult
+from interview_coach.providers.base import SearchResult
 
 
 @pytest.fixture

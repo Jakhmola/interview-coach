@@ -1,7 +1,7 @@
 """Shared result type for web-search providers.
 
 `SearchResult` is the single shape every search helper returns; it's imported
-by `tavily.py`, `company_researcher`, and the `ingestion.web` re-export shim.
+by `tavily.py` and `company_researcher`.
 """
 
 from __future__ import annotations

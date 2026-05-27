@@ -150,41 +150,23 @@ async def prepare_status(
     payloads (callers should pass that flag explicitly — SetupPage's
     2-4 s poll loop doesn't need them).
     """
-    job = await repos.get_job(session, job_id, user.id)
-    if job is None:
+    readiness = await repos.prep_readiness(session, user.id, job_id)
+    if readiness is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "job_not_found")
 
-    docs = await repos.list_documents_for_user(session, user.id)
-    has_cv = any(d.kind == "cv" for d in docs)
-    profile = await repos.get_profile(session, user.id)
-    snapshot = await repos.get_company_snapshot_by_job(session, job_id)
-    unmapped = await repos.list_unmapped_project_docs_for_user(session, user.id)
-
-    profile_ready = profile is not None
-    job_analyzed = bool(job.parsed_json)
-    company_researched = snapshot is not None
-
-    missing: list[str] = []
-    if not has_cv:
-        missing.append("cv")
-    if not profile_ready:
-        missing.append("profile")
-    if not job_analyzed:
-        missing.append("job_analysis")
-    if not company_researched:
-        missing.append("company_research")
-
+    profile = readiness.profile
+    snapshot = readiness.snapshot
     return PrepStatusOut(
-        job_id=job.id,
-        has_cv=has_cv,
-        profile_ready=profile_ready,
-        job_analyzed=job_analyzed,
-        company_researched=company_researched,
-        can_start=not missing,
-        missing=missing,
-        unmapped_project_doc_count=len(unmapped),
+        job_id=readiness.job.id,
+        has_cv=readiness.has_cv,
+        profile_ready=readiness.profile_ready,
+        job_analyzed=readiness.job_analyzed,
+        company_researched=readiness.company_researched,
+        can_start=readiness.can_start,
+        missing=readiness.missing,
+        unmapped_project_doc_count=readiness.unmapped_project_doc_count,
         profile=(profile.profile_json if (detail and profile is not None) else None),
-        job=(job.parsed_json if detail else None),
+        job=(readiness.job.parsed_json if detail else None),
         company=(
             {
                 "company_name": snapshot.company_name,

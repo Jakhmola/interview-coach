@@ -19,7 +19,7 @@ from interview_coach.db import repos
 from interview_coach.db.models import User
 from interview_coach.db.session import get_db
 from interview_coach.ingestion.errors import FetchFailed, KeyMissing
-from interview_coach.ingestion.web import fetch_url_text
+from interview_coach.providers.tavily import fetch_url_text
 
 logger = logging.getLogger(__name__)
 

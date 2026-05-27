@@ -27,7 +27,7 @@ import uuid
 from sqlalchemy import text
 
 from interview_coach.db.session import AsyncSessionLocal
-from interview_coach.rag.retrieval import GroundingHit
+from interview_coach.rag.retrieval import GroundingHit, _query_chunks_by_vector
 
 
 async def hybrid_search(
@@ -168,44 +168,17 @@ async def _vector_search_raw(
     document_ids: tuple[uuid.UUID, ...],
     k: int,
 ) -> list[GroundingHit]:
-    """pgvector branch — same SQL as `retrieval._vector_search` but populates
+    """pgvector branch — shares `retrieval._query_chunks_by_vector` but populates
     `cosine_score` instead of `score` so fusion stays unambiguous about which
     component contributed what.
     """
-    doc_clause = ""
-    if document_ids:
-        doc_clause = "           AND gc.document_id = ANY(:doc_ids)\n"
-
-    sql = text(
-        f"""
-        SELECT gc.text AS text,
-               gc.document_id AS document_id,
-               gc.source_doc_kind AS source_doc_kind,
-               gc.chunk_index AS chunk_index,
-               d.filename AS filename,
-               1 - (gc.embedding <=> CAST(:qvec AS vector)) AS score
-          FROM grounding_chunks gc
-          JOIN documents d ON d.id = gc.document_id
-         WHERE gc.user_id = :uid
-           AND gc.source_doc_kind = ANY(:kinds)
-{doc_clause}         ORDER BY gc.embedding <=> CAST(:qvec AS vector)
-         LIMIT :k
-        """
+    rows = await _query_chunks_by_vector(
+        qvec=qvec,
+        user_id=user_id,
+        source_kinds=source_kinds,
+        document_ids=document_ids,
+        k=k,
     )
-
-    params: dict[str, object] = {
-        "qvec": _to_pgvector_literal(qvec),
-        "uid": str(user_id),
-        "kinds": list(source_kinds),
-        "k": k,
-    }
-    if document_ids:
-        params["doc_ids"] = [str(d) for d in document_ids]
-
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(sql, params)
-        rows = result.mappings().all()
-
     return [
         GroundingHit(
             text=r["text"],
@@ -265,7 +238,3 @@ def _rrf_fuse(
         hit.score = fused_score[key]
         out.append(hit)
     return out
-
-
-def _to_pgvector_literal(vec: list[float]) -> str:
-    return "[" + ",".join(f"{x:.7f}" for x in vec) + "]"

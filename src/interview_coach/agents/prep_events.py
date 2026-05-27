@@ -40,7 +40,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
-from interview_coach.agents.prep_cache import RunReason, SkipReason
+from interview_coach.agents.prep_cache import RunReason, SkipReason, SkipVerdict
 
 
 class NodeStarted(BaseModel):
@@ -97,3 +97,19 @@ def emit(writer: Callable[[dict[str, Any]], Any], event: PrepLifecycleEvent) -> 
     contract (a clean ``node_done`` is ``{event, node, outcome}``; ``code`` /
     ``detail`` appear only on a degraded one)."""
     writer(event.model_dump(exclude_none=True))
+
+
+def emit_verdict(
+    writer: Callable[[dict[str, Any]], Any], *, node: str, verdict: SkipVerdict
+) -> bool:
+    """Emit ``NodeSkipped`` (skip) or ``NodeStarted`` (run) from a cache verdict.
+
+    This is the one piece of verdict→lifecycle-event glue shared by the three
+    linear prep nodes. Returns ``True`` when the verdict says skip, so the
+    caller can early-return its cached payload; ``False`` when it ran the node.
+    """
+    if verdict.skip:
+        emit(writer, NodeSkipped(node=node, reason=verdict.reason))
+        return True
+    emit(writer, NodeStarted(node=node, reason=verdict.reason))
+    return False

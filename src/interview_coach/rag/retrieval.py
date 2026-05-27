@@ -15,7 +15,9 @@ about, when the question generator pre-picked a focus with doc provenance.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import bindparam, text
 
@@ -176,14 +178,21 @@ def _update_obs(obs: object, *, output: dict[str, object]) -> None:
         pass
 
 
-async def _vector_search(
+async def _query_chunks_by_vector(
     *,
     qvec: list[float],
     user_id: uuid.UUID,
     source_kinds: tuple[str, ...],
     document_ids: tuple[uuid.UUID, ...],
     k: int,
-) -> list[GroundingHit]:
+) -> Sequence[Mapping[str, Any]]:
+    """Single owner of the ``grounding_chunks`` pgvector cosine query.
+
+    Returns the raw row mappings (``score`` is ``1 - cosine_distance``). The
+    vector-only path (``_vector_search``) and the hybrid path
+    (``hybrid._vector_search_raw``) each map these rows to ``GroundingHit``
+    their own way — the cosine lands in ``score`` vs. ``cosine_score``.
+    """
     doc_clause = ""
     if document_ids:
         doc_clause = "           AND gc.document_id = ANY(:doc_ids)\n"
@@ -216,8 +225,24 @@ async def _vector_search(
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(sql, params)
-        rows = result.mappings().all()
+        return result.mappings().all()
 
+
+async def _vector_search(
+    *,
+    qvec: list[float],
+    user_id: uuid.UUID,
+    source_kinds: tuple[str, ...],
+    document_ids: tuple[uuid.UUID, ...],
+    k: int,
+) -> list[GroundingHit]:
+    rows = await _query_chunks_by_vector(
+        qvec=qvec,
+        user_id=user_id,
+        source_kinds=source_kinds,
+        document_ids=document_ids,
+        k=k,
+    )
     return [
         GroundingHit(
             text=r["text"],
