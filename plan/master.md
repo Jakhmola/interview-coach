@@ -161,7 +161,7 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 28    | Arch deepening — render prep run reason (setup UI consumes Phase 27 protocol; force_refresh UI cleanup) | ✅ |
 | 29    | Arch deepening — activeJob deep setter (D) + collapse providers seam (F) + embedding-identity owner (G) | ✅          |
 | 30    | Arch deepening — prep-node glue (A/E) + readiness owner (B) + vector-SQL dedup (C) + ingestion.web shim deletion (D); ADR 0002 routing stays edge-defined | ✅ |
-| 31    | CI pipeline — GitHub Actions gating test/lint/fmt on PRs | ⏳ |
+| 31    | CI pipeline — GitHub Actions gating test/lint/fmt on PRs | ✅ |
 | 32    | GitHub ingestion — gather repos from CV/user URL, scrape public repos into grounding | ⏳ |
 | 33    | Technical interview round type (grounded in GitHub repos from P32) | ⏳ |
 | 34    | Speech-to-text — voice answers in the interview loop | ⏳ |
