@@ -162,6 +162,16 @@ async def test_generate_resume_walkthrough_streams_and_persists(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sess = await _make_session(agent_session, alice, seeded_job, round_type="resume_walkthrough")
+    # Pin the weighted focus pick to the AsyncAPI project. The picker is
+    # randomised in production, so without this the slice shipped to the LLM
+    # (and the "AsyncAPI" assertion below) is seed-dependent and flaky.
+    monkeypatch.setattr(
+        question_generator.random.Random,
+        "choices",
+        lambda self, population, weights=None, k=1: [
+            next(t for t in population if "AsyncAPI" in t[1])
+        ],
+    )
     captured = _patch_streaming_llm(
         monkeypatch,
         [
