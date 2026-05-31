@@ -242,7 +242,9 @@ backend with a React frontend served behind a local llama.cpp model."
 - ``tech`` must name the REAL frameworks and libraries — read them out of the \
 manifests, the Dockerfile and the README (e.g. "fastapi", "react", \
 "postgres", "pgvector", "docker", "langgraph"). Do NOT just list programming \
-languages like "python" or "javascript" unless nothing more specific is named.
+languages like "python" or "javascript" unless nothing more specific is named. \
+List AT MOST the 10 most influential technologies, most important first — not \
+every transitive dependency.
 - ``key_features`` are 3-5 concrete capabilities or components the repo \
 delivers, grounded in the README + manifests (e.g. "JWT auth", "pgvector \
 retrieval", "streaming SSE API"). Return [] when the material doesn't \

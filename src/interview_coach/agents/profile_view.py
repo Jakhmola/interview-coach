@@ -27,6 +27,34 @@ from __future__ import annotations
 from typing import Any
 
 
+def _drop_empty_role(project: dict[str, Any]) -> dict[str, Any]:
+    """Return ``project`` without a ``role`` key when it's empty/null.
+
+    The model never needs an empty ``role`` — github projects never have one,
+    and a null ``role`` on any project is noise. Non-empty roles pass through.
+    """
+    if isinstance(project, dict) and not (project.get("role") or "").strip():
+        return {k: v for k, v in project.items() if k != "role"}
+    return project
+
+
+def _strip_empty_project_roles(profile: dict[str, Any]) -> dict[str, Any]:
+    """Copy of ``profile`` with empty ``role`` dropped from each project.
+
+    Returns ``profile`` itself when no project has an empty role, so the common
+    case stays allocation- and identity-stable.
+    """
+    projects = profile.get("projects")
+    if not isinstance(projects, list):
+        return profile
+    cleaned = [_drop_empty_role(p) if isinstance(p, dict) else p for p in projects]
+    if cleaned == projects:
+        return profile
+    out = dict(profile)
+    out["projects"] = cleaned
+    return out
+
+
 def profile_slice_for_focus(
     profile: dict[str, Any] | None,
     focus_key: str | None,
@@ -42,15 +70,15 @@ def profile_slice_for_focus(
 
     if focus_key and focus_key.startswith("highlight:"):
         sliced = _slice_highlight(profile, focus_key)
-        return sliced if sliced is not None else profile
+        return sliced if sliced is not None else _strip_empty_project_roles(profile)
     if focus_key and focus_key.startswith("project:"):
         sliced = _slice_project(profile, focus_key)
-        return sliced if sliced is not None else profile
+        return sliced if sliced is not None else _strip_empty_project_roles(profile)
 
     # Behavioral signal, None, or unknown key prefix — keep the full
     # profile. The LLM may need cross-experience signal that we can't
     # pre-identify without re-running the picker's scoring.
-    return profile
+    return _strip_empty_project_roles(profile)
 
 
 def _slice_highlight(profile: dict[str, Any], focus_key: str) -> dict[str, Any] | None:
@@ -125,5 +153,5 @@ def _slice_project(profile: dict[str, Any], focus_key: str) -> dict[str, Any] | 
         "summary": profile.get("summary", ""),
         "skills": list(profile.get("skills") or []),
         "focus": {"kind": "project", "project_idx": chosen_idx},
-        "anchor_project": chosen,
+        "anchor_project": _drop_empty_role(chosen),
     }

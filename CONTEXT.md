@@ -72,10 +72,21 @@ _Avoid_: "the user's repos" when you mean this chosen subset.
 
 **GitHub project**
 The standalone `ProjectItem` (`source='github'`) a **selected repo** contributes
-to the **Profile**: `name`←repo, `description`←README, `tech`←language stats,
-`urls`←repo URL. Folded in at profile-assembly time (no per-repo HITL — selection
+to the **Profile**: `name`←repo, `description`/`tech`/`key_features`/`architecture`
+←LLM-extracted (code-free) from README + manifests + tree, `urls`←repo URL. No
+`role` (a public repo doesn't state one). `tech` is capped to the 10 most
+influential. Folded in at profile-assembly time (no per-repo HITL — selection
 already confirmed it), and its `github_repo` document id joins the **Profile
-document set** so selection changes invalidate the profile cache. A github project
-is an ordinary focus candidate for **Project Deep-Dive**; the future technical
-round adds *code-level* grounding over the same repo's chunks.
+document set** so selection changes invalidate the profile cache.
 _Avoid_: treating a github project like a `project_doc` — it skips the mapping loop.
+
+**Extraction vs grounding split** (one ingest feeds two layers)
+The **profile/ProjectItem** is built **code-free** (README + manifests + tree) — a
+deliberate cap that keeps the extraction LLM inside its 8192 ctx. **Grounding** is
+richer: the stored/embedded `raw_text` adds a *bounded, ranked slice of source
+files* (`select_source_files`: ≤10 files / ~300 KB, dominant-language-first, no
+vendored/test/generated, **token-gated** — skipped without a `GITHUB_TOKEN`). So
+**Project Deep-Dive** and the future technical round (P33) retrieve code-level
+detail the profile never quotes. `select_source_files` is the deliberate
+re-introduction of a source fetcher, scoped to grounding only.
+_Avoid_: feeding source code into the ProjectItem extraction — that's the cap.

@@ -139,9 +139,45 @@ _DOCKERFILES = frozenset(
     {"dockerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yaml", "compose.yml"}
 )
 
+# Source-code file extensions worth embedding for *grounding* (NOT extraction —
+# the profile/ProjectItem is still built code-free from README + manifests).
+# Lockfiles, data and minified assets are excluded by extension / ``_is_excluded``.
+_SOURCE_EXTS = frozenset(
+    {
+        ".py",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".go",
+        ".rs",
+        ".java",
+        ".kt",
+        ".rb",
+        ".php",
+        ".c",
+        ".h",
+        ".cpp",
+        ".hpp",
+        ".cc",
+        ".cs",
+        ".swift",
+        ".scala",
+        ".sql",
+        ".sh",
+        ".vue",
+        ".svelte",
+    }
+)
+
 
 def _basename(path: str) -> str:
     return path.rsplit("/", 1)[-1]
+
+
+def _ext(path: str) -> str:
+    base = _basename(path).lower()
+    return base[base.rfind(".") :] if "." in base else ""
 
 
 def _is_excluded(path: str) -> bool:
@@ -204,6 +240,58 @@ MAX_TREE_LINES = 40
 # representative of the whole project, so keep only the shallowest few.
 MAX_MANIFESTS = 2
 MAX_DOCKERFILES = 2
+
+# Grounding-only code slice (NOT extraction). Bounds keep per-repo API calls and
+# embedding cost in check; only fetched when a token lifts the 60 req/hr cap.
+MAX_CODE_FILES = 10
+MAX_CODE_TOTAL_BYTES = 300_000  # greedy-pack budget across selected files
+MAX_CODE_FILE_BYTES = 50_000  # skip larger blobs — usually generated / data
+MAX_CODE_FILE_CHARS = 8_000  # per-file truncation of the stored/embedded text
+
+
+def select_source_files(entries: list[gh.TreeEntry]) -> list[str]:
+    """Pick the most representative source files to embed for *grounding*.
+
+    Deterministic, bounded: drop vendored/test/generated/minified paths
+    (``_is_excluded``), keep only allow-listed source extensions that aren't
+    manifests/Dockerfiles/READMEs, skip oversize blobs, then rank by
+    dominant-extension → shallowest → largest and greedy-pack to the file +
+    byte budget. Returns repo-relative paths. Never used for the ProjectItem.
+    """
+    cands: list[gh.TreeEntry] = []
+    for e in entries:
+        if e.type != "blob" or _is_excluded(e.path):
+            continue
+        base = _basename(e.path).lower()
+        if base.startswith("readme") or base in _MANIFEST_FILES:
+            continue
+        if base in _DOCKERFILES or base.startswith("dockerfile"):
+            continue
+        if _ext(e.path) not in _SOURCE_EXTS:
+            continue
+        if not 0 < e.size <= MAX_CODE_FILE_BYTES:
+            continue
+        cands.append(e)
+    if not cands:
+        return []
+
+    # Dominant language first (most files of an extension), then central
+    # (shallow) files, then the more substantial ones.
+    from collections import Counter
+
+    counts = Counter(_ext(e.path) for e in cands)
+    cands.sort(key=lambda e: (-counts[_ext(e.path)], e.path.count("/"), -e.size))
+
+    out: list[str] = []
+    total = 0
+    for e in cands:
+        if len(out) >= MAX_CODE_FILES:
+            break
+        if total + e.size > MAX_CODE_TOTAL_BYTES:
+            continue
+        out.append(e.path)
+        total += e.size
+    return out
 
 
 def directory_structure(entries: list[gh.TreeEntry]) -> str:
@@ -289,16 +377,34 @@ def _assemble_repo_text(
     return "\n\n".join(parts)
 
 
+def _assemble_grounding_text(extract_text: str, code_files: list[tuple[str, str]]) -> str:
+    """The extraction blob plus selected source files, for grounding only.
+
+    Each file is headed ``# <path>`` so the markdown-aware chunker splits it
+    into its own section (stored chunk tagged ``[Section: <path>]``). The
+    extraction LLM never sees this — it gets ``extract_text`` (code-free).
+    """
+    if not code_files:
+        return extract_text
+    parts = [extract_text]
+    for path, text in code_files:
+        parts.append(f"# {path}\n" + text[:MAX_CODE_FILE_CHARS])
+    return "\n\n".join(parts)
+
+
 async def _fetch_repo_text(
     *, owner: str, repo: str, branch: str, description: str | None, token: str | None
-) -> str:
-    """Fetch tree → README → dependency manifests / Dockerfiles → layout.
+) -> tuple[str, str]:
+    """Fetch tree → README → manifests / Dockerfiles → layout, and (token-only)
+    a bounded slice of source files.
 
-    Deliberately fetches **no source files**: the manifests name the real
-    frameworks and the directory tree shows the project's shape, which is what
-    the extraction LLM and the grounding layer need — and skipping per-file
-    blob fetches keeps a repo's ingest to a handful of API calls (fast, and
-    well under the unauthenticated rate cap).
+    Returns ``(extract_text, grounding_text)``. ``extract_text`` is **code-free**
+    (README + manifests + tree) and feeds the ProjectItem LLM; ``grounding_text``
+    is ``extract_text`` plus the ranked source files, stored as ``raw_text`` and
+    chunked for retrieval. Source files are fetched **only when a token is
+    present** — without one the 60 req/hr cap can't afford the extra blob calls,
+    so grounding falls back to the README + manifests (``grounding_text ==
+    extract_text``).
     """
     full_name = f"{owner}/{repo}"
     entries = await gh.get_tree(owner, repo, branch, token)
@@ -321,7 +427,7 @@ async def _fetch_repo_text(
     manifests = [m for p in cats["manifests"] if (m := await _grab(p))]
     dockerfiles = [d for p in cats["dockerfiles"] if (d := await _grab(p))]
 
-    return _assemble_repo_text(
+    extract_text = _assemble_repo_text(
         full_name=full_name,
         description=description,
         readme=readme_text,
@@ -329,6 +435,12 @@ async def _fetch_repo_text(
         dockerfiles=dockerfiles,
         tree=directory_structure(entries),
     )
+
+    code_paths = select_source_files(entries) if token else []
+    code_files = [c for p in code_paths if (c := await _grab(p))]
+    if code_files:
+        logger.info("github ingest: %s grounding code files=%d", full_name, len(code_files))
+    return extract_text, _assemble_grounding_text(extract_text, code_files)
 
 
 async def ingest_repo(
@@ -348,7 +460,7 @@ async def ingest_repo(
     Returns the document id.
     """
     owner, repo = parse_owner_repo(full_name)
-    raw_text = await _fetch_repo_text(
+    extract_text, grounding_text = await _fetch_repo_text(
         owner=owner, repo=repo, branch=default_branch, description=description, token=token
     )
 
@@ -358,7 +470,7 @@ async def ingest_repo(
             user_id=user_id,
             source_url=html_url,
             project_title=repo,
-            raw_text=raw_text,
+            raw_text=grounding_text,
         )
         doc_id = doc.id
 
@@ -377,7 +489,7 @@ async def ingest_repo(
             GithubProjectExtract,
             [
                 SystemMessage(content=GITHUB_INTAKE_SYSTEM),
-                HumanMessage(content=raw_text[:10000]),
+                HumanMessage(content=extract_text[:10000]),
             ],
             temperature=0.0,
             enable_thinking=False,
@@ -387,7 +499,9 @@ async def ingest_repo(
     project = ProjectItem(
         name=repo,
         description=extract.description,
-        tech=extract.tech,
+        # Top 10 most-influential only — guards a noisy manifest from dumping a
+        # 40-item dependency list into the profile / focus-weighting corpus.
+        tech=extract.tech[:10],
         role=None,  # public repos rarely state a role; we no longer extract one
         urls=[html_url],
         key_features=extract.key_features,
@@ -395,8 +509,13 @@ async def ingest_repo(
         source="github",
         source_document_ids=[doc_id],
     )
+    # github projects carry no role — drop the null key so the stored ProjectItem
+    # and everything folded from it stay role-free (the model-facing slice also
+    # strips empty roles, but keeping it out of the doc is cleaner).
+    payload = project.model_dump(mode="json")
+    payload.pop("role", None)
     async with AsyncSessionLocal() as s:
-        await repos.set_document_parsed_json(s, doc_id, project.model_dump(mode="json"))
+        await repos.set_document_parsed_json(s, doc_id, payload)
 
     logger.info("github ingest: %s → doc=%s tech=%s", full_name, doc_id, extract.tech)
     return doc_id

@@ -453,6 +453,159 @@ def test_categorize_paths_caps_manifests_to_shallowest() -> None:
     assert set(cats["manifests"]) == {"package.json", "pyproject.toml"}
 
 
+# --- follow-up 2: code grounding (decoupled from extraction) ---------------
+
+
+def test_select_source_files_excludes_and_caps() -> None:
+    from interview_coach.ingestion import github_repo as gr
+
+    entries = [
+        _blob("README.md", 100),  # readme — not code
+        _blob("pyproject.toml", 100),  # manifest — not code
+        _blob("Dockerfile", 100),  # dockerfile — not code
+        _blob("node_modules/x/index.js", 100),  # vendored — excluded
+        _blob("tests/test_app.py", 100),  # test — excluded
+        _blob("data.csv", 100),  # not a source ext
+        _blob("huge.py", gr.MAX_CODE_FILE_BYTES + 1),  # oversize — skipped
+        _blob("src/app.py", 200),
+        _blob("src/util.py", 150),
+        _blob("main.py", 120),
+    ]
+    picked = gr.select_source_files(entries)
+    assert set(picked) == {"src/app.py", "src/util.py", "main.py"}
+
+
+def test_select_source_files_respects_file_count_cap() -> None:
+    from interview_coach.ingestion import github_repo as gr
+
+    entries = [_blob(f"src/mod{i}.py", 100) for i in range(gr.MAX_CODE_FILES + 5)]
+    picked = gr.select_source_files(entries)
+    assert len(picked) == gr.MAX_CODE_FILES
+
+
+async def test_ingest_repo_grounds_code_but_extracts_without_it(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stored/embedded blob carries the code file; the LLM extraction input
+    does not (decoupled — the 'no code in profile' rule holds where it matters)."""
+    from interview_coach.db import models, repos
+    from interview_coach.ingestion import github_repo
+
+    user = await repos.create_user(db_session, "ground@example.com", "x")
+    factory = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    monkeypatch.setattr(github_repo, "AsyncSessionLocal", factory)
+    monkeypatch.setattr(
+        github_repo.gh,
+        "get_tree",
+        lambda *a, **k: _async([_blob("README.md", 50), _blob("src/app.py", 80)]),
+    )
+
+    async def fake_blob(owner, repo, path, branch, token):  # noqa: ANN001, ANN202
+        return {"README.md": "readme prose", "src/app.py": "SECRET_CODE_TOKEN = 1"}[path]
+
+    monkeypatch.setattr(github_repo.gh, "fetch_blob", fake_blob)
+    monkeypatch.setattr(github_repo, "embed_and_store_document", lambda _d: _async(1))
+
+    seen: dict[str, str] = {}
+
+    async def fake_extract(_schema, messages, **k):  # noqa: ANN001, ANN202
+        seen["input"] = messages[1].content
+        return GithubProjectExtract(description="d", tech=["fastapi"])
+
+    monkeypatch.setattr(github_repo, "chat_model_structured", fake_extract)
+
+    doc_id = await github_repo.ingest_repo(
+        user_id=user.id,
+        full_name="u/r",
+        html_url="https://github.com/u/r",
+        description=None,
+        default_branch="main",
+        token="tok",
+    )
+    # Extraction input never saw the source file.
+    assert "SECRET_CODE_TOKEN" not in seen["input"]
+    # But the stored (grounding) raw_text did.
+    doc = await db_session.get(models.Document, doc_id)
+    assert "SECRET_CODE_TOKEN" in doc.raw_text
+
+
+async def test_ingest_repo_skips_code_without_token(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from interview_coach.db import models, repos
+    from interview_coach.ingestion import github_repo
+
+    user = await repos.create_user(db_session, "notok@example.com", "x")
+    factory = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    monkeypatch.setattr(github_repo, "AsyncSessionLocal", factory)
+    monkeypatch.setattr(
+        github_repo.gh,
+        "get_tree",
+        lambda *a, **k: _async([_blob("src/app.py", 80)]),
+    )
+
+    fetched: list[str] = []
+
+    async def fake_blob(owner, repo, path, branch, token):  # noqa: ANN001, ANN202
+        fetched.append(path)
+        return "code"
+
+    monkeypatch.setattr(github_repo.gh, "fetch_blob", fake_blob)
+    monkeypatch.setattr(github_repo, "embed_and_store_document", lambda _d: _async(1))
+    monkeypatch.setattr(
+        github_repo,
+        "chat_model_structured",
+        lambda *a, **k: _async(GithubProjectExtract(description="d", tech=[])),
+    )
+
+    doc_id = await github_repo.ingest_repo(
+        user_id=user.id,
+        full_name="u/r",
+        html_url="https://github.com/u/r",
+        description=None,
+        default_branch="main",
+        token=None,  # no token → no code fetch
+    )
+    assert "src/app.py" not in fetched
+    doc = await db_session.get(models.Document, doc_id)
+    assert "src/app.py" not in doc.raw_text
+
+
+async def test_ingest_repo_caps_tech_to_10(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from interview_coach.db import repos
+    from interview_coach.ingestion import github_repo
+
+    user = await repos.create_user(db_session, "tech10@example.com", "x")
+    factory = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    monkeypatch.setattr(github_repo, "AsyncSessionLocal", factory)
+    monkeypatch.setattr(github_repo.gh, "get_tree", lambda *a, **k: _async([_blob("a.py", 10)]))
+    monkeypatch.setattr(github_repo.gh, "fetch_blob", lambda *a, **k: _async("x"))
+    monkeypatch.setattr(github_repo, "embed_and_store_document", lambda _d: _async(1))
+    monkeypatch.setattr(
+        github_repo,
+        "chat_model_structured",
+        lambda *a, **k: _async(
+            GithubProjectExtract(description="d", tech=[f"lib{i}" for i in range(15)])
+        ),
+    )
+
+    doc_id = await github_repo.ingest_repo(
+        user_id=user.id,
+        full_name="u/r",
+        html_url="https://github.com/u/r",
+        description=None,
+        default_branch="main",
+        token="tok",
+    )
+    docs = await repos.list_github_repo_docs_for_user(db_session, user.id)
+    proj = next(d for d in docs if d.id == doc_id).parsed_json
+    assert len(proj["tech"]) == 10
+    # github projects carry no role key.
+    assert "role" not in proj
+
+
 # --- follow-up: richer extract (key_features + architecture) ---------------
 
 

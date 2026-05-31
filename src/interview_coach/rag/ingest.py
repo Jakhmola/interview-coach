@@ -43,7 +43,10 @@ async def embed_and_store_document(document_id: uuid.UUID) -> int:
         raise ValueError(f"document {document_id} not found")
 
     tokenizer = await get_tokenizer()
-    project_title = doc.project_title if doc.kind == "project_doc" else None
+    # github_repo docs also carry a project_title (the repo name) — tagging the
+    # chunks with [Project: <repo>] gives code-file grounding the same in-band
+    # provenance project_docs get.
+    project_title = doc.project_title if doc.kind in ("project_doc", "github_repo") else None
     chunks = chunk_text(doc.raw_text, tokenizer=tokenizer, project_title=project_title)
     if not chunks:
         logger.info("doc %s produced 0 chunks; skipping", document_id)

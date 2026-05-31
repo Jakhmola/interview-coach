@@ -74,20 +74,39 @@ FULL_PROFILE = {
     "education": [{"school": "MIT", "degree": "BS CS"}],
 }
 
+# The model-facing fallback is FULL_PROFILE with empty project ``role`` keys
+# dropped (the second project's ``role`` is None). Non-empty roles are kept.
+EXPECTED_FALLBACK = {
+    **FULL_PROFILE,
+    "projects": [
+        FULL_PROFILE["projects"][0],
+        {k: v for k, v in FULL_PROFILE["projects"][1].items() if k != "role"},
+    ],
+}
+
 
 def test_empty_profile_returns_empty_dict() -> None:
     assert profile_slice_for_focus(None, None) == {}
     assert profile_slice_for_focus({}, "highlight:0:0") == {}
 
 
-def test_no_focus_returns_full_profile_unchanged() -> None:
+def test_no_focus_returns_full_profile_with_empty_roles_stripped() -> None:
     out = profile_slice_for_focus(FULL_PROFILE, None)
-    assert out is FULL_PROFILE
+    assert out == EXPECTED_FALLBACK
+    # The empty-role project lost its role; the real role survives.
+    assert "role" not in out["projects"][1]
+    assert out["projects"][0]["role"] == "maintainer"
 
 
-def test_behavioral_signal_focus_returns_full_profile_unchanged() -> None:
+def test_behavioral_signal_focus_returns_full_profile_with_empty_roles_stripped() -> None:
     out = profile_slice_for_focus(FULL_PROFILE, "ownership")
-    assert out is FULL_PROFILE
+    assert out == EXPECTED_FALLBACK
+
+
+def test_profile_without_empty_roles_keeps_identity() -> None:
+    # Nothing to strip → same object back (no needless copy).
+    profile = {**FULL_PROFILE, "projects": [FULL_PROFILE["projects"][0]]}
+    assert profile_slice_for_focus(profile, None) is profile
 
 
 def test_highlight_focus_returns_anchor_plus_other_stubs() -> None:
@@ -120,12 +139,12 @@ def test_highlight_focus_with_only_one_experience_omits_other_experiences_key() 
 
 def test_highlight_focus_invalid_experience_falls_back_to_full_profile() -> None:
     out = profile_slice_for_focus(FULL_PROFILE, "highlight:99:0")
-    assert out is FULL_PROFILE
+    assert out == EXPECTED_FALLBACK
 
 
 def test_highlight_focus_malformed_key_falls_back_to_full_profile() -> None:
     out = profile_slice_for_focus(FULL_PROFILE, "highlight:not-an-int:0")
-    assert out is FULL_PROFILE
+    assert out == EXPECTED_FALLBACK
 
 
 def test_project_focus_by_name() -> None:
@@ -149,16 +168,16 @@ def test_project_focus_by_idx_for_unnamed_project() -> None:
 
 def test_project_focus_unknown_name_falls_back_to_full_profile() -> None:
     out = profile_slice_for_focus(FULL_PROFILE, "project:DoesNotExist")
-    assert out is FULL_PROFILE
+    assert out == EXPECTED_FALLBACK
 
 
 def test_project_focus_bad_idx_falls_back_to_full_profile() -> None:
     out = profile_slice_for_focus(FULL_PROFILE, "project:idx_nope")
-    assert out is FULL_PROFILE
+    assert out == EXPECTED_FALLBACK
     out2 = profile_slice_for_focus(FULL_PROFILE, "project:idx_99")
-    assert out2 is FULL_PROFILE
+    assert out2 == EXPECTED_FALLBACK
 
 
 def test_unknown_focus_prefix_falls_back_to_full_profile() -> None:
     out = profile_slice_for_focus(FULL_PROFILE, "experience:0")
-    assert out is FULL_PROFILE
+    assert out == EXPECTED_FALLBACK
