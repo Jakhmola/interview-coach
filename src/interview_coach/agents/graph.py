@@ -44,6 +44,11 @@ from interview_coach.agents.graph_nodes import (
     node_profile_builder,
     node_question_generator,
 )
+from interview_coach.agents.nodes.github_ingest import (
+    node_await_repo_selection,
+    node_github_discover,
+    node_github_ingest_and_fold,
+)
 from interview_coach.agents.state import InterviewState
 
 
@@ -54,6 +59,10 @@ def build_prep_graph(checkpointer: BaseCheckpointSaver | None) -> Any:
 
         START
           → profile_builder
+          → github_discover ─┐ (next_step: prompt / fold-only / skip)
+              ├── await_repo_selection → github_ingest_and_fold ┐
+              └── github_ingest_and_fold ──────────────────────┤
+                                                                ↓
           → prepare_mapping_suggestion ─┐
               ↑                         │ (when no more unmapped docs)
               │                         ↓
@@ -76,6 +85,9 @@ def build_prep_graph(checkpointer: BaseCheckpointSaver | None) -> Any:
     """
     g: StateGraph = StateGraph(InterviewState)
     g.add_node("profile_builder", node_profile_builder)
+    g.add_node("github_discover", node_github_discover)
+    g.add_node("await_repo_selection", node_await_repo_selection)
+    g.add_node("github_ingest_and_fold", node_github_ingest_and_fold)
     g.add_node("prepare_mapping_suggestion", node_prepare_mapping_suggestion)
     g.add_node("await_mapping_confirm", node_await_mapping_confirm)
     g.add_node("apply_or_skip_mapping", node_apply_or_skip_mapping)
@@ -83,7 +95,22 @@ def build_prep_graph(checkpointer: BaseCheckpointSaver | None) -> Any:
     g.add_node("company_researcher", node_company_researcher)
 
     g.add_edge(START, "profile_builder")
-    g.add_edge("profile_builder", "prepare_mapping_suggestion")
+    # Phase 32: github segment runs after profile_builder, before the
+    # doc-mapping loop. ``github_discover`` routes three ways via next_step:
+    # prompt (await_repo_selection), re-fold only (github_ingest_and_fold), or
+    # skip the segment entirely (prepare_mapping_suggestion).
+    g.add_edge("profile_builder", "github_discover")
+    g.add_conditional_edges(
+        "github_discover",
+        lambda s: s.get("next_step") or "prepare_mapping_suggestion",
+        {
+            "await_repo_selection": "await_repo_selection",
+            "github_ingest_and_fold": "github_ingest_and_fold",
+            "prepare_mapping_suggestion": "prepare_mapping_suggestion",
+        },
+    )
+    g.add_edge("await_repo_selection", "github_ingest_and_fold")
+    g.add_edge("github_ingest_and_fold", "prepare_mapping_suggestion")
     # prepare_mapping_suggestion returns next_step ∈
     #   {"job_analyzer", "await_mapping_confirm", "apply_or_skip_mapping"}
     g.add_conditional_edges(

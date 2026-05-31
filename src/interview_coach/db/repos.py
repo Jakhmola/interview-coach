@@ -34,6 +34,23 @@ async def create_user(session: AsyncSession, email: str, hashed_password: str) -
     return user
 
 
+async def get_user(session: AsyncSession, user_id: uuid.UUID) -> User | None:
+    return await session.get(User, user_id)
+
+
+async def set_user_github_handle(
+    session: AsyncSession, user_id: uuid.UUID, github_handle: str | None
+) -> bool:
+    """Phase 32: persist the verified GitHub handle from the wizard card.
+    ``None`` clears it. Returns True on hit."""
+    user = await session.get(User, user_id)
+    if user is None:
+        return False
+    user.github_handle = github_handle
+    await session.commit()
+    return True
+
+
 # --- documents ---
 
 
@@ -115,8 +132,12 @@ async def current_profile_doc_ids(session: AsyncSession, user_id: uuid.UUID) -> 
     """
     docs = await list_documents_for_user(session, user_id)
     cv_ids = {str(d.id) for d in docs if d.kind == "cv"}
+    github_ids = {str(d.id) for d in docs if d.kind == "github_repo"}
     mapped_ids = await list_document_mapping_doc_ids_for_user(session, user_id)
-    return sorted(cv_ids | {str(x) for x in mapped_ids})
+    # Phase 32: selected github repos contribute github ProjectItems to the
+    # Profile, so they belong in the cache key — a repo selection change must
+    # invalidate the profile_builder cache (the github node re-folds projects).
+    return sorted(cv_ids | github_ids | {str(x) for x in mapped_ids})
 
 
 async def get_document(
@@ -224,6 +245,97 @@ async def find_document_by_content_hash(
         )
     )
     return result.scalar_one_or_none()
+
+
+# --- github repo documents (Phase 32) ---
+
+
+async def list_github_repo_docs_for_user(
+    session: AsyncSession, user_id: uuid.UUID
+) -> Sequence[Document]:
+    """Every ``github_repo`` document the user has selected, oldest-first."""
+    result = await session.execute(
+        select(Document)
+        .where(Document.user_id == user_id, Document.kind == "github_repo")
+        .order_by(Document.created_at.asc())
+    )
+    return result.scalars().all()
+
+
+async def upsert_github_repo_document(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    source_url: str,
+    project_title: str,
+    raw_text: str,
+) -> Document:
+    """Insert-or-replace a ``github_repo`` doc keyed on ``(user_id, source_url)``.
+
+    Re-selecting a repo refreshes its ``raw_text`` (and clears stale
+    ``parsed_json`` until re-extracted) on the same row, so the partial unique
+    index ``uq_documents_user_github_url`` never trips and chunks/projects stay
+    tied to one identity.
+    """
+    result = await session.execute(
+        select(Document).where(
+            Document.user_id == user_id,
+            Document.kind == "github_repo",
+            Document.source_url == source_url,
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if doc is None:
+        doc = Document(
+            user_id=user_id,
+            kind="github_repo",
+            filename=f"{project_title} (github)",
+            content_type="text/x-github-repo",
+            byte_size=len(raw_text.encode("utf-8")),
+            raw_text=raw_text,
+            project_title=project_title,
+            source_url=source_url,
+        )
+        session.add(doc)
+    else:
+        doc.raw_text = raw_text
+        doc.project_title = project_title
+        doc.byte_size = len(raw_text.encode("utf-8"))
+        doc.parsed_json = None
+    await session.commit()
+    await session.refresh(doc)
+    return doc
+
+
+async def set_document_parsed_json(
+    session: AsyncSession, document_id: uuid.UUID, parsed: dict[str, Any]
+) -> bool:
+    """Phase 32: stash the LLM-extracted ProjectItem dict on a github_repo doc."""
+    doc = await session.get(Document, document_id)
+    if doc is None:
+        return False
+    doc.parsed_json = parsed
+    await session.commit()
+    return True
+
+
+async def delete_github_repo_docs_not_selected(
+    session: AsyncSession, user_id: uuid.UUID, selected_urls: Sequence[str]
+) -> list[str]:
+    """Deselect = delete: drop every github_repo doc whose URL is not in
+    ``selected_urls``. FK cascade wipes their chunks; the github prep node
+    then re-folds the Profile so the deselected projects drop out. Returns the
+    URLs that were deleted."""
+    docs = await list_github_repo_docs_for_user(session, user_id)
+    keep = {u for u in selected_urls}
+    deleted: list[str] = []
+    for d in docs:
+        if d.source_url not in keep:
+            await session.delete(d)
+            deleted.append(d.source_url or "")
+    if deleted:
+        await session.commit()
+    return deleted
 
 
 # --- document mappings ---

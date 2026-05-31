@@ -43,13 +43,14 @@ def patched_agent_session(monkeypatch: pytest.MonkeyPatch, db_session):  # noqa:
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from interview_coach.agents import graph_nodes
-    from interview_coach.agents.nodes import doc_intake, profile_builder
+    from interview_coach.agents.nodes import doc_intake, github_ingest, profile_builder
 
     bind = db_session.bind
     factory = async_sessionmaker(bind, expire_on_commit=False)
     monkeypatch.setattr(doc_intake, "AsyncSessionLocal", factory)
     monkeypatch.setattr(graph_nodes, "AsyncSessionLocal", factory)
     monkeypatch.setattr(profile_builder, "AsyncSessionLocal", factory)
+    monkeypatch.setattr(github_ingest, "AsyncSessionLocal", factory)
     return factory
 
 

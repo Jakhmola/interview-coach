@@ -364,12 +364,16 @@ def _patch_node_session_factory(monkeypatch: pytest.MonkeyPatch, db_session: Asy
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from interview_coach.agents import graph_nodes
+    from interview_coach.agents.nodes import github_ingest
 
     bind = db_session.bind
     factory = async_sessionmaker(bind, expire_on_commit=False)
     monkeypatch.setattr(question_generator, "AsyncSessionLocal", factory)
     monkeypatch.setattr(evaluator, "AsyncSessionLocal", factory)
     monkeypatch.setattr(graph_nodes, "AsyncSessionLocal", factory)
+    # Phase 32: the github segment opens its own AsyncSessionLocal; with the
+    # test user carrying no github_handle it skips after one read.
+    monkeypatch.setattr(github_ingest, "AsyncSessionLocal", factory)
 
 
 def _patch_streaming_llm(
@@ -974,9 +978,11 @@ async def test_prepare_skips_when_all_cached(
     skipped = [d for ev, d in events if ev == "node_skipped"]
     # Phase 21.1: prepare_mapping_suggestion (emits node="doc_mapping")
     # short-circuits when the user has no unmapped project_docs (only a
-    # CV was seeded here).
+    # CV was seeded here). Phase 32: the github segment skips too (the
+    # seeded user has no github_handle and no ingested repos).
     assert [d["node"] for d in skipped] == [
         "profile_builder",
+        "github",
         "doc_mapping",
         "job_analyzer",
         "company_researcher",

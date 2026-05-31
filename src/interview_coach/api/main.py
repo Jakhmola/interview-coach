@@ -13,6 +13,7 @@ from interview_coach.agents.graph import (
 )
 from interview_coach.api.auth import router as auth_router
 from interview_coach.api.documents import router as documents_router
+from interview_coach.api.github import router as github_router
 from interview_coach.api.jobs import router as jobs_router
 from interview_coach.api.sessions import router as sessions_router
 from interview_coach.config import settings
@@ -71,6 +72,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(documents_router)
+app.include_router(github_router)
 app.include_router(jobs_router)
 app.include_router(sessions_router)
 

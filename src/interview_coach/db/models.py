@@ -33,6 +33,11 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Phase 32: the verified GitHub username (the account handle, max 39
+    # chars). Set by the setup-wizard GitHub card after a `GET /users/{h}`
+    # existence check; survives across jobs (one handle per user). NULL until
+    # the user verifies a handle (the card is skippable).
+    github_handle: Mapped[str | None] = mapped_column(String(39), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -57,6 +62,10 @@ class Document(Base):
     )
     project_title: Mapped[str | None] = mapped_column(String(160), nullable=True)
     content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Phase 32: the canonical repo URL for a `github_repo` document — its
+    # identity for upsert (re-selecting a repo replaces in place) and for
+    # the cascade-on-deselect path. NULL for cv / project_doc rows.
+    source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     # Phase 25 (B11): set every time embedding is scheduled for this doc
     # (initial upload, apply_mapping, retry-embed). The status helper
     # treats "recently attempted" as ``pending``, so a retry after the
@@ -72,13 +81,23 @@ class Document(Base):
     )
 
     __table_args__ = (
-        CheckConstraint("kind in ('cv', 'project_doc')", name="ck_documents_kind"),
+        CheckConstraint("kind in ('cv', 'project_doc', 'github_repo')", name="ck_documents_kind"),
         Index(
             "uq_documents_user_cv",
             "user_id",
             unique=True,
             postgresql_where=text("kind = 'cv'"),
             sqlite_where=text("kind = 'cv'"),
+        ),
+        # Phase 32: a repo URL is unique per user among github_repo docs, so
+        # re-selecting upserts onto the same row instead of duplicating.
+        Index(
+            "uq_documents_user_github_url",
+            "user_id",
+            "source_url",
+            unique=True,
+            postgresql_where=text("kind = 'github_repo'"),
+            sqlite_where=text("kind = 'github_repo'"),
         ),
         Index(
             "uq_documents_user_kind_content_hash",
@@ -276,7 +295,7 @@ class GroundingChunk(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "source_doc_kind in ('cv','project_doc')",
+            "source_doc_kind in ('cv','project_doc','github_repo')",
             name="ck_grounding_chunks_source_doc_kind",
         ),
         Index("ix_grounding_chunks_user_kind", "user_id", "source_doc_kind"),

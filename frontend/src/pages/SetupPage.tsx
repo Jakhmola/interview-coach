@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, CheckCircle2, FileUp, LinkIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, FileUp, GitBranch, LinkIcon } from "lucide-react";
 import { Link, useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 
 import {
@@ -13,13 +13,16 @@ import {
   PrepRunReason,
   PrepSkipReason,
   PrepStatus,
+  RepoListing,
   SseFrame,
   api,
+  prepareSessionResumeReposStream,
   prepareSessionResumeStream,
   prepareSessionStream,
 } from "../api";
 import { LoadingStatus } from "../components/LoadingStatus";
 import { MappingModal } from "../components/MappingModal";
+import { RepoSelectModal } from "../components/RepoSelectModal";
 import { ErrorBanner, StatusPill } from "../components/ui";
 import { codeFrom } from "../errors";
 import { useStreamAbort } from "../hooks/useStreamAbort";
@@ -29,6 +32,7 @@ import { useAuth } from "../state/auth";
 
 const nodeLabels: Record<string, string> = {
   profile_builder: "Reading your CV",
+  github: "Ingesting GitHub repos",
   doc_mapping: "Mapping supporting docs",
   job_analyzer: "Analyzing the JD",
   company_researcher: "Researching the company",
@@ -39,6 +43,11 @@ const nodeLoadingMessages: Record<string, string[]> = {
     "Reading your CV",
     "Finding signal in your projects",
     "Building candidate profile",
+  ],
+  github: [
+    "Listing your public repos",
+    "Reading READMEs and manifests",
+    "Folding repos into your profile",
   ],
   doc_mapping: [
     "Reading your supporting docs",
@@ -57,7 +66,13 @@ const nodeLoadingMessages: Record<string, string[]> = {
   ],
 };
 
-const PREP_NODE_KEYS = ["profile_builder", "doc_mapping", "job_analyzer", "company_researcher"];
+const PREP_NODE_KEYS = [
+  "profile_builder",
+  "github",
+  "doc_mapping",
+  "job_analyzer",
+  "company_researcher",
+];
 
 // Per-node prep state: the settled pill plus the verdict reason that rode in on
 // node_started/node_skipped (Phase 27 protocol). node_done merges — it updates
@@ -97,16 +112,18 @@ type SetupOutletContext = {
   isSetupComplete: boolean;
 };
 
-type Step = "cv" | "jd" | "docs" | "prep";
-const STEPS: Step[] = ["cv", "jd", "docs", "prep"];
+type Step = "cv" | "github" | "jd" | "docs" | "prep";
+const STEPS: Step[] = ["cv", "github", "jd", "docs", "prep"];
 const STEP_TITLES: Record<Step, string> = {
   cv: "Upload your CV",
+  github: "Link your GitHub (optional)",
   jd: "Paste the job description",
   docs: "Add supporting docs (optional)",
   prep: "Process the setup",
 };
 const STEP_BLURBS: Record<Step, string> = {
   cv: "We'll read it once and use it to ground every question.",
+  github: "Verify your handle now; you'll pick which public repos to include during prep.",
   jd: "Role, company, must-haves — we'll extract them automatically.",
   docs: "Architecture notes, take-homes, or project write-ups. Skip if you don't have any.",
   prep: "Reads your CV, walks supporting docs, analyzes the JD, researches the company.",
@@ -139,6 +156,10 @@ export function SetupPage() {
   // the page renders <MappingModal /> at the wizard top level; on user
   // submit we POST /sessions/prepare/resume which re-opens the SSE stream.
   const [pendingMapping, setPendingMapping] = useState<MappingSuggestion | null>(null);
+  // Phase 32: the repo list the prep_graph paused on (``repos_available``).
+  // Non-null → render <RepoSelectModal />; on submit we POST
+  // /sessions/prepare/resume_repos which re-opens the SSE stream.
+  const [pendingRepos, setPendingRepos] = useState<RepoListing[] | null>(null);
   const [step, setStep] = useState<Step>("cv");
   const [didInitStep, setDidInitStep] = useState(false);
   // Phase 22: when the user explicitly enters the wizard from
@@ -218,6 +239,7 @@ export function SetupPage() {
       prepAbort.abort();
       setIsPreparing(false);
       setPendingMapping(null);
+      setPendingRepos(null);
     }
     api
       .prepStatus(token, activeJobId)
@@ -260,7 +282,7 @@ export function SetupPage() {
   useEffect(() => {
     if (isLoading || didInitStep) return;
     if (!hasCv) setStep("cv");
-    else if (!selectedJob) setStep("jd");
+    else if (!selectedJob) setStep("github"); // resume at the cv → github → jd sequence
     else if (!status?.can_start) setStep("prep");
     setDidInitStep(true);
   }, [isLoading, didInitStep, hasCv, selectedJob, status?.can_start]);
@@ -292,9 +314,11 @@ export function SetupPage() {
       code?: string;
       detail?: string;
       document_id?: string;
-      payload?: MappingSuggestion;
+      payload?: MappingSuggestion | { repos?: RepoListing[] };
       remaining?: number;
       n_rows?: number;
+      html_url?: string;
+      n_projects?: number;
     };
     if (frame.event === "node_started" && data.node) {
       // Keep the run reason — node_done merges it through to the settled pill.
@@ -314,23 +338,45 @@ export function SetupPage() {
       // nodeReasonLabel can render the terminal sub-label (Phase 28).
       setNodeState((c) => ({ ...c, [data.node!]: { ...c[data.node!], pill } }));
       if (data.outcome === "degraded" && data.code) {
-        setMessage(
-          data.code === "CompanyNameMissing"
-            ? "Couldn't extract a company name from this JD — questions will be less company-specific. Fix it any time via Manage → Re-analyze."
-            : "Company research came up empty — questions will be less company-specific. Try again later from Manage.",
-        );
+        if (data.node === "github") {
+          setMessage(
+            data.code === "no_github_token"
+              ? "GitHub ingestion is rate-limited without a token, so only one repo was ingested. Set GITHUB_TOKEN to include more."
+              : "Some repos couldn't be ingested — the rest were folded into your profile.",
+          );
+        } else {
+          setMessage(
+            data.code === "CompanyNameMissing"
+              ? "Couldn't extract a company name from this JD — questions will be less company-specific. Fix it any time via Manage → Re-analyze."
+              : "Company research came up empty — questions will be less company-specific. Try again later from Manage.",
+          );
+        }
       }
     } else if (frame.event === "node_skipped" && data.node) {
       // Phase 25: a doc_mapping skip is the loop finishing (no unmapped
       // docs left, or a company-only refresh) — never a cache hit. The
       // mapping it just walked ran fresh, so don't render "Using cached
       // result". Only profile/JD/company skips are genuine cache hits.
-      const pill = data.node === "doc_mapping" ? "done" : "cached";
+      // Phase 32: a github skip ("no_repos_selected") is likewise a "nothing
+      // to do", not a cache hit.
+      const pill = data.node === "doc_mapping" || data.node === "github" ? "done" : "cached";
       setNodeState((c) => ({ ...c, [data.node!]: { pill, reason: data.reason } }));
+    } else if (frame.event === "repos_available") {
+      // Phase 32: the github segment paused for repo selection. Mark the
+      // github node running and surface the picker modal.
+      const repos = (data.payload as { repos?: RepoListing[] })?.repos ?? [];
+      setNodeState((c) => ({ ...c, github: { ...c.github, pill: "running" } }));
+      setPendingRepos(repos);
+    } else if (frame.event === "repo_ingest_failed") {
+      setMessage(`Couldn't ingest one of your repos${data.html_url ? ` (${data.html_url})` : ""}.`);
+    } else if (frame.event === "github_folded") {
+      setPendingRepos(null);
+    } else if (frame.event === "awaiting_repos") {
+      // Stream ended pending repo selection; pendingRepos already set above.
     } else if (frame.event === "mapping_suggestion" && data.payload) {
       // Mark doc_mapping as running and show the inline mapping panel.
       setNodeState((c) => ({ ...c, doc_mapping: { ...c.doc_mapping, pill: "running" } }));
-      setPendingMapping(data.payload);
+      setPendingMapping(data.payload as MappingSuggestion);
     } else if (frame.event === "mapping_suggestion_failed") {
       // The intake LLM call failed for this doc; the graph already
       // skiplisted it. Surface a soft warning; the loop carries on.
@@ -353,6 +399,7 @@ export function SetupPage() {
         return next;
       });
       setPendingMapping(null);
+      setPendingRepos(null);
     } else if (frame.event === "error") {
       setError(data.code || data.detail || "stream_interrupted");
       // Phase 22: a node-level error never emits ``node_done`` for the
@@ -388,6 +435,7 @@ export function SetupPage() {
     setIsPreparing(true);
     setNodeState({
       profile_builder: { pill: "pending" },
+      github: { pill: "pending" },
       doc_mapping: { pill: "pending" },
       job_analyzer: { pill: "pending" },
       company_researcher: { pill: "pending" },
@@ -395,6 +443,7 @@ export function SetupPage() {
     setError(null);
     setMessage(null);
     setPendingMapping(null);
+    setPendingRepos(null);
     failedAutoPrepJobsRef.current.delete(runJobId);
     const signal = prepAbort.fresh();
     const frameHandler = (frame: SseFrame) => handlePrepFrameFor(frame, runJobId);
@@ -455,6 +504,40 @@ export function SetupPage() {
     }
   };
 
+  // Phase 32: resume after the repo-selection modal. Mirrors resumeMapping —
+  // same job-id pinning, same stream pump — but threads the chosen URLs into
+  // the github interrupt. The graph then ingests + folds and walks on into the
+  // doc-mapping loop, so the same SSE handler drives the rest of prep.
+  const resumeRepos = async (selectedUrls: string[]) => {
+    if (!token || !activeJobId) return;
+    const runJobId = activeJobId;
+    setIsPreparing(true);
+    setPendingRepos(null);
+    const signal = prepAbort.fresh();
+    const frameHandler = (frame: SseFrame) => handlePrepFrameFor(frame, runJobId);
+    try {
+      await prepareSessionResumeReposStream(
+        token,
+        { job_id: runJobId, selected_urls: selectedUrls },
+        frameHandler,
+        signal,
+      );
+      await load();
+      const nextStatus = await api.prepStatus(token, runJobId);
+      setStatus(nextStatus);
+      setStatusJobId(runJobId);
+      await refreshReadiness();
+      if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
+        setBypassLanding(false);
+      }
+    } catch (err) {
+      setError(codeFrom(err));
+    } finally {
+      setIsPreparing(false);
+      lastAutoPrepKeyRef.current = null;
+    }
+  };
+
   // Phase 22: work-driven auto-prep. Fires whenever there's outstanding
   // setup work that prep would resolve — either a missing
   // profile/job-analysis/snapshot OR a project_doc the user uploaded
@@ -475,10 +558,14 @@ export function SetupPage() {
     // state mid-modal. Wait for the user's decision (apply/skip)
     // before allowing another run.
     if (pendingMapping) return;
+    // Phase 32: same for an open repo-selection modal — re-firing prep
+    // would destroy the github interrupt state mid-modal.
+    if (pendingRepos) return;
     // Phase 25 (B1): the docs step is where the user is actively
     // adding supporting docs. Auto-prep would yank them out mid-add.
-    // The wizard's Continue button is the explicit advance.
-    if (step === "cv" || step === "docs") return;
+    // The wizard's Continue button is the explicit advance. Phase 32: the
+    // github card is likewise user-driven (verify is explicit).
+    if (step === "cv" || step === "github" || step === "docs") return;
     if (statusJobId !== activeJobId) return;
     if (!status) return;
     // Don't auto-refire on a job that just failed — let the user
@@ -492,7 +579,7 @@ export function SetupPage() {
     lastAutoPrepKeyRef.current = key;
     void runPrep();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, activeJobId, hasCv, status, statusJobId, step, pendingMapping]);
+  }, [token, activeJobId, hasCv, status, statusJobId, step, pendingMapping, pendingRepos]);
 
   const uploadCv = async (event: ChangeEvent<HTMLInputElement>) => {
     if (!token || !event.target.files?.[0]) return;
@@ -512,7 +599,10 @@ export function SetupPage() {
           : "Got it.",
       );
       await load();
-      setStep(jobs.length === 0 ? "jd" : "prep");
+      // Fresh setup: surface the optional GitHub card next (cv → github → jd).
+      // A returning user replacing their CV already passed github, so route
+      // them to prep; they can reach github via Back if they want.
+      setStep(jobs.length === 0 ? "github" : "prep");
     } catch (err) {
       setError(codeFrom(err));
     } finally {
@@ -656,6 +746,8 @@ export function SetupPage() {
 
         {step === "cv" ? <StepCv cv={cv} onPick={uploadCv} /> : null}
 
+        {step === "github" ? <StepGithub token={token} /> : null}
+
         {step === "jd" ? (
           <StepJd
             mode={jdMode}
@@ -691,6 +783,16 @@ export function SetupPage() {
         busy={isPreparing}
         onDecision={resumeMapping}
         onClose={() => resumeMapping({ action: "skip" })}
+      />
+
+      {/* Phase 32: repo-selection HITL — same top-level modal pattern as
+          mapping. Closing / skipping resumes with an empty selection. */}
+      <RepoSelectModal
+        open={pendingRepos != null}
+        repos={pendingRepos}
+        busy={isPreparing}
+        onSubmit={(urls) => resumeRepos(urls)}
+        onClose={() => resumeRepos([])}
       />
 
       <footer className="wizard-footer">
@@ -766,6 +868,103 @@ function StepCv({
         <p className="wizard-note">
           <CheckCircle2 size={14} /> {cv.filename} · {cv.char_count.toLocaleString()} chars
         </p>
+      ) : null}
+    </div>
+  );
+}
+
+function StepGithub({ token }: { token: string | null }) {
+  const [handle, setHandle] = useState("");
+  const [phase, setPhase] = useState<"idle" | "verifying" | "ok" | "notfound" | "error">("idle");
+  const [result, setResult] = useState<{ name?: string | null; public_repos?: number | null } | null>(
+    null,
+  );
+
+  // Pre-fill from the persisted handle, falling back to a CV-mined suggestion.
+  // When the suggestion comes from the CV (and nothing's persisted yet) we
+  // auto-verify it so the card lands already-confirmed — the user only has to
+  // touch it to correct a wrong guess.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    api
+      .suggestGithubHandle(token)
+      .then((s) => {
+        if (cancelled) return;
+        const prefill = s.current || s.cv_suggested || "";
+        if (prefill) setHandle(prefill);
+        if (s.current) {
+          setPhase("ok"); // already verified in a prior session
+        } else if (s.cv_suggested) {
+          void verify(s.cv_suggested); // mined from the CV — confirm it for them
+        }
+      })
+      .catch(() => {
+        /* non-fatal — the card still works with manual entry */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const verify = async (explicit?: string) => {
+    if (!token) return;
+    const h = (explicit ?? handle).trim().replace(/^@/, "");
+    if (!h) return;
+    setPhase("verifying");
+    setResult(null);
+    try {
+      const r = await api.verifyGithubHandle(token, h);
+      if (r.exists) {
+        setPhase("ok");
+        setResult({ name: r.name, public_repos: r.public_repos });
+        if (r.handle) setHandle(r.handle);
+      } else {
+        setPhase("notfound");
+      }
+    } catch {
+      setPhase("error");
+    }
+  };
+
+  return (
+    <div className="wizard-body">
+      <div className="input-with-icon">
+        <GitBranch size={16} />
+        <input
+          value={handle}
+          onChange={(e) => {
+            setHandle(e.target.value);
+            if (phase !== "idle") setPhase("idle");
+          }}
+          placeholder="your-github-username"
+          autoFocus
+        />
+      </div>
+      <button
+        className="btn-secondary"
+        type="button"
+        onClick={() => void verify()}
+        disabled={phase === "verifying" || !handle.trim()}
+      >
+        {phase === "verifying" ? "Verifying…" : "Verify handle"}
+      </button>
+
+      {phase === "ok" ? (
+        <p className="wizard-note">
+          <CheckCircle2 size={14} /> {result?.name ? `${result.name} · ` : ""}
+          {typeof result?.public_repos === "number"
+            ? `${result.public_repos} public repos`
+            : "Verified"}
+          {" — you'll pick which to include during prep."}
+        </p>
+      ) : null}
+      {phase === "notfound" ? (
+        <p className="wizard-note wizard-note--warn">No GitHub account by that name. Check the spelling, or skip.</p>
+      ) : null}
+      {phase === "error" ? (
+        <p className="wizard-note wizard-note--warn">Couldn&apos;t reach GitHub. Try again, or skip.</p>
       ) : null}
     </div>
   );

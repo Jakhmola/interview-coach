@@ -26,7 +26,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from interview_coach.agents.nodes import doc_intake, profile_builder
+from interview_coach.agents.nodes import doc_intake, github_ingest, profile_builder
 from interview_coach.db import models, repos
 from interview_coach.db.models import Document, User
 
@@ -323,6 +323,7 @@ async def test_doc_mapping_apply_advances_to_next_doc_then_end(
     from interview_coach.agents.graph import build_prep_graph
 
     monkeypatch.setattr(graph_nodes, "AsyncSessionLocal", db)
+    monkeypatch.setattr(github_ingest, "AsyncSessionLocal", db)
     monkeypatch.setattr(doc_intake, "AsyncSessionLocal", db)
     monkeypatch.setattr(doc_intake, "embed_and_store_document", _noop_async)
 
@@ -423,6 +424,7 @@ async def test_doc_mapping_skip_advances_without_persisting(
     from interview_coach.agents.graph import build_prep_graph
 
     monkeypatch.setattr(graph_nodes, "AsyncSessionLocal", db)
+    monkeypatch.setattr(github_ingest, "AsyncSessionLocal", db)
     monkeypatch.setattr(doc_intake, "AsyncSessionLocal", db)
     monkeypatch.setattr(doc_intake, "embed_and_store_document", _noop_async)
 
@@ -494,6 +496,7 @@ async def test_doc_mapping_intake_failure_skips_without_interrupt(
     from interview_coach.agents.graph import build_prep_graph
 
     monkeypatch.setattr(graph_nodes, "AsyncSessionLocal", db)
+    monkeypatch.setattr(github_ingest, "AsyncSessionLocal", db)
     monkeypatch.setattr(doc_intake, "AsyncSessionLocal", db)
     monkeypatch.setattr(doc_intake, "embed_and_store_document", _noop_async)
 

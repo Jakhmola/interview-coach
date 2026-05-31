@@ -1,4 +1,8 @@
+import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from interview_coach.db import repos
 
 DOCX_CT = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -103,6 +107,149 @@ async def test_upload_multiple_project_docs_allowed(client: AsyncClient, auth_to
     assert len(project_docs) == 2
 
 
+async def test_list_documents_survives_github_repo_doc(
+    client: AsyncClient, auth_token: str, db_session: AsyncSession
+) -> None:
+    """Phase 32 regression: a github_repo doc must not 500 GET /documents.
+
+    github_repo is a valid DB DocumentKind but was missing from the API
+    StrEnum, so ``DocumentKind(d.kind)`` raised once a repo was ingested —
+    crashing the Manage page and bouncing the user back to setup.
+    """
+    user = await repos.get_user_by_email(db_session, "alice@example.com")
+    assert user is not None
+    await repos.upsert_github_repo_document(
+        db_session,
+        user_id=user.id,
+        source_url="https://github.com/alice/widget",
+        project_title="widget",
+        raw_text="# Repository: alice/widget\n\n# README\nA thing.",
+    )
+
+    r = await client.get("/documents", headers=_auth(auth_token))
+    assert r.status_code == 200, r.text
+    kinds = {d["kind"] for d in r.json()}
+    assert "github_repo" in kinds
+
+
+def _github_project(name: str, url: str, doc_id: str) -> dict:
+    return {
+        "name": name,
+        "description": name,
+        "tech": ["go"],
+        "role": None,
+        "urls": [url],
+        "key_features": [],
+        "architecture": None,
+        "source": "github",
+        "source_document_ids": [doc_id],
+    }
+
+
+async def test_delete_github_repo_refolds_profile_no_orphan(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Phase 32 follow-up (C1): deleting a github_repo doc on Manage must drop
+    its folded ``source='github'`` project from the Profile, while sibling
+    github + non-github projects survive — no orphaned enrichment."""
+    from interview_coach.agents.nodes import github_ingest
+
+    user = await repos.get_user_by_email(db_session, "alice@example.com")
+    assert user is not None
+    # The route's re-fold opens its own AsyncSessionLocal session; bind it to
+    # the test engine so it sees the committed delete (same pattern as the
+    # phase32 fold test).
+    factory = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    monkeypatch.setattr(github_ingest, "AsyncSessionLocal", factory)
+
+    doc_ids: dict[str, str] = {}
+    for name, url in [
+        ("alpha", "https://github.com/u/alpha"),
+        ("beta", "https://github.com/u/beta"),
+    ]:
+        doc = await repos.upsert_github_repo_document(
+            db_session, user_id=user.id, source_url=url, project_title=name, raw_text="r"
+        )
+        doc_ids[name] = str(doc.id)
+        await repos.set_document_parsed_json(
+            db_session, doc.id, _github_project(name, url, str(doc.id))
+        )
+
+    await repos.upsert_profile(
+        db_session,
+        user_id=user.id,
+        profile_json={
+            "summary": "x",
+            "skills": [],
+            "experiences": [],
+            "projects": [
+                {
+                    "name": "DocProj",
+                    "description": "d",
+                    "tech": [],
+                    "role": None,
+                    "urls": [],
+                    "source": "project_doc",
+                    "source_document_ids": [],
+                },
+                _github_project("alpha", "https://github.com/u/alpha", doc_ids["alpha"]),
+                _github_project("beta", "https://github.com/u/beta", doc_ids["beta"]),
+            ],
+            "education": [],
+        },
+        source_doc_ids=[],
+        model_name="m",
+    )
+
+    r = await client.delete(f"/documents/{doc_ids['beta']}", headers=_auth(auth_token))
+    assert r.status_code == 204, r.text
+
+    profile = await repos.get_profile(db_session, user.id)
+    await db_session.refresh(profile)
+    names = {p["name"] for p in profile.profile_json["projects"]}
+    assert names == {"DocProj", "alpha"}
+
+
+async def test_list_documents_returns_parsed_json_for_github(
+    client: AsyncClient, auth_token: str, db_session: AsyncSession
+) -> None:
+    """Phase 32 follow-up (C2): the Manage GitHub-repo section reads tech +
+    key_features off ``parsed_json`` in the list payload (no per-row fetch)."""
+    user = await repos.get_user_by_email(db_session, "alice@example.com")
+    assert user is not None
+    doc = await repos.upsert_github_repo_document(
+        db_session,
+        user_id=user.id,
+        source_url="https://github.com/u/widget",
+        project_title="widget",
+        raw_text="r",
+    )
+    await repos.set_document_parsed_json(
+        db_session,
+        doc.id,
+        {
+            "name": "widget",
+            "description": "d",
+            "tech": ["fastapi"],
+            "role": None,
+            "urls": ["https://github.com/u/widget"],
+            "key_features": ["auth"],
+            "architecture": "fastapi",
+            "source": "github",
+            "source_document_ids": [str(doc.id)],
+        },
+    )
+
+    r = await client.get("/documents", headers=_auth(auth_token))
+    assert r.status_code == 200, r.text
+    gh_row = next(d for d in r.json() if d["kind"] == "github_repo")
+    assert gh_row["parsed_json"]["tech"] == ["fastapi"]
+    assert gh_row["parsed_json"]["key_features"] == ["auth"]
+
+
 async def test_list_payload_excludes_raw_text(
     client: AsyncClient, auth_token: str, sample_pdf: bytes
 ) -> None:
@@ -116,7 +263,10 @@ async def test_list_payload_excludes_raw_text(
     assert r.status_code == 200
     for d in r.json():
         assert "raw_text" not in d
-        assert "parsed_json" not in d
+        # Phase 32 follow-up: parsed_json IS now in the list payload (the Manage
+        # GitHub-repo section reads tech/features off it); null for a cv row.
+        assert "parsed_json" in d
+        assert d["parsed_json"] is None
         assert "char_count" in d
 
 

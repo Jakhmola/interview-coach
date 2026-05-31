@@ -1,5 +1,14 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
-import { ArrowLeft, FileUp, LinkIcon, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ExternalLink,
+  FileUp,
+  LinkIcon,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
 import {
@@ -8,10 +17,12 @@ import {
   EmbeddingStatus,
   JobItem,
   MappingSuggestion,
+  RepoListing,
   api,
 } from "../api";
 import { ArmedDeleteButton } from "../components/ArmedDeleteButton";
 import { MappingModal, MappingDecision } from "../components/MappingModal";
+import { RepoSelectModal } from "../components/RepoSelectModal";
 import { ErrorBanner, StatusPill, formatDate } from "../components/ui";
 import { codeFrom } from "../errors";
 import { jobLabel, jobSubtitle } from "../jobLabel";
@@ -61,6 +72,7 @@ export function ManagePage() {
 
   const cv = docs.find((d) => d.kind === "cv");
   const techDocs = docs.filter((d) => d.kind === "project_doc");
+  const githubRepos = docs.filter((d) => d.kind === "github_repo");
 
   const load = async () => {
     if (!token) return;
@@ -107,7 +119,7 @@ export function ManagePage() {
     return true;
   };
 
-  const deleteProjectDoc = async (id: string) => {
+  const deleteDoc = async (id: string) => {
     if (!token) return;
     setError(null);
     try {
@@ -454,7 +466,7 @@ export function ManagePage() {
                       <ArmedDeleteButton
                         label="Delete"
                         icon={<Trash2 size={14} />}
-                        onConfirm={() => deleteProjectDoc(d.id)}
+                        onConfirm={() => deleteDoc(d.id)}
                       />
                     </div>
                   </div>
@@ -464,6 +476,14 @@ export function ManagePage() {
           </div>
         )}
       </section>
+
+      {/* ─── GitHub repos ─────────────────────────────────────────── */}
+      <GithubReposSection
+        token={token}
+        repos={githubRepos}
+        onDeleteDoc={deleteDoc}
+        onChanged={load}
+      />
 
       {/* ─── Danger zone ──────────────────────────────────────────── */}
       <DangerZone onReset={resetAccount} busy={busy === "reset"} />
@@ -682,6 +702,225 @@ function DangerZone({
         </div>
       ) : null}
     </section>
+  );
+}
+
+// ─────────────────────────── GitHub repos section ───────────────────────
+
+/**
+ * Phase 32 follow-up: post-setup repo management. Lists the user's ingested
+ * ``github_repo`` docs and exposes an "Add / manage repos" picker that calls
+ * the out-of-graph ``/github/repos`` + ``/github/repos/select`` endpoints —
+ * the same ``fold_github_projects`` re-fold the prep graph uses, so the
+ * Profile, docs and grounding chunks stay consistent. If no handle is stored
+ * yet, the button first reveals an inline verify step.
+ */
+function GithubReposSection({
+  token,
+  repos,
+  onDeleteDoc,
+  onChanged,
+}: {
+  token: string | null;
+  repos: DocumentItem[];
+  onDeleteDoc: (id: string) => Promise<void> | void;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [handle, setHandle] = useState<string | null>(null);
+  const [showHandleInput, setShowHandleInput] = useState(false);
+  const [handleInput, setHandleInput] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [loadingList, setLoadingList] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [repoList, setRepoList] = useState<RepoListing[] | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!token) return;
+    api
+      .suggestGithubHandle(token)
+      .then((s) => setHandle(s.current ?? null))
+      .catch(() => {});
+  }, [token]);
+
+  const openPicker = async () => {
+    if (!token) return;
+    setNote(null);
+    setLoadingList(true);
+    try {
+      const res = await api.listGithubRepos(token);
+      setHandle(res.handle);
+      setShowHandleInput(false);
+      setRepoList(res.repos);
+    } catch (err) {
+      // 400 no_handle → the user hasn't verified a handle yet; reveal the
+      // inline verify step instead of erroring.
+      if (err instanceof ApiError && err.status === 400) {
+        setShowHandleInput(true);
+        setHandleInput(handle ?? "");
+      } else {
+        setNote("Couldn't reach GitHub. Try again.");
+      }
+    } finally {
+      setLoadingList(false);
+    }
+  };
+
+  const verifyAndList = async () => {
+    if (!token) return;
+    const h = handleInput.trim().replace(/^@/, "");
+    if (!h) return;
+    setVerifying(true);
+    setNote(null);
+    try {
+      const r = await api.verifyGithubHandle(token, h);
+      if (r.exists && r.handle) {
+        setHandle(r.handle);
+        await openPicker();
+      } else {
+        setNote("No GitHub account by that name. Check the spelling.");
+      }
+    } catch {
+      setNote("Couldn't reach GitHub. Try again.");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const submit = async (urls: string[]) => {
+    if (!token) return;
+    setSubmitting(true);
+    setNote(null);
+    try {
+      const res = await api.selectGithubRepos(token, urls);
+      setRepoList(null);
+      await onChanged();
+      const bits: string[] = [];
+      if (res.ingested) bits.push(`added ${res.ingested}`);
+      if (res.removed) bits.push(`removed ${res.removed}`);
+      setNote(bits.length ? `Repos updated (${bits.join(", ")}).` : "No changes.");
+    } catch {
+      setNote("Couldn't update repos. Try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <section className="manage-section">
+      <div className="manage-section-head">
+        <h2>GitHub repos</h2>
+        <button
+          className="btn-ghost"
+          type="button"
+          onClick={() => void openPicker()}
+          disabled={loadingList}
+        >
+          <Plus size={14} /> {repos.length > 0 ? "Add / manage repos" : "Add repos"}
+        </button>
+      </div>
+
+      {note ? <p className="wizard-note wizard-note--warn">{note}</p> : null}
+
+      {showHandleInput ? (
+        <div className="manage-editor">
+          <label className="wizard-form">
+            <span className="wizard-label">Your GitHub username</span>
+            <input
+              value={handleInput}
+              onChange={(e) => setHandleInput(e.target.value)}
+              placeholder="your-github-username"
+              autoFocus
+              disabled={verifying}
+            />
+          </label>
+          <button
+            className="btn-secondary"
+            type="button"
+            onClick={() => void verifyAndList()}
+            disabled={verifying || !handleInput.trim()}
+          >
+            {verifying ? "Verifying…" : "Verify & list repos"}
+          </button>
+        </div>
+      ) : null}
+
+      {repos.length === 0 ? (
+        <p className="muted">
+          No repos ingested{handle ? ` for @${handle}` : ""}. Use{" "}
+          <strong>Add repos</strong> to pick from your public repositories.
+        </p>
+      ) : (
+        <div className="manage-list">
+          {repos.map((d) => (
+            <GithubRepoCard key={d.id} doc={d} onDelete={() => onDeleteDoc(d.id)} />
+          ))}
+        </div>
+      )}
+
+      <RepoSelectModal
+        open={repoList != null}
+        repos={repoList}
+        busy={submitting}
+        onSubmit={(urls) => void submit(urls)}
+        onClose={() => setRepoList(null)}
+        closeLabel="Cancel"
+      />
+    </section>
+  );
+}
+
+// ─────────────────────────── GitHub repo card ───────────────────────────
+
+/**
+ * Phase 32: a read-only Manage row for an ingested ``github_repo`` doc.
+ * Tech chips, key features and the repo link come straight off the folded
+ * ProjectItem on ``parsed_json`` (no extra fetch). Adding / re-selecting
+ * repos stays in the setup wizard — Manage only surfaces and deletes them.
+ */
+function GithubRepoCard({ doc, onDelete }: { doc: DocumentItem; onDelete: () => void }) {
+  const pj = (doc.parsed_json ?? {}) as {
+    tech?: unknown;
+    key_features?: unknown;
+    urls?: unknown;
+  };
+  const asStrings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  const tech = asStrings(pj.tech);
+  const features = asStrings(pj.key_features).slice(0, 4);
+  const repoUrl = asStrings(pj.urls)[0];
+
+  return (
+    <div className="manage-card manage-card--repo">
+      <div>
+        <strong>{doc.project_title ?? doc.filename}</strong>
+        {repoUrl ? (
+          <a className="repo-link" href={repoUrl} target="_blank" rel="noreferrer">
+            <ExternalLink size={12} /> {repoUrl.replace(/^https?:\/\/(www\.)?github\.com\//, "")}
+          </a>
+        ) : null}
+        {tech.length > 0 ? (
+          <div className="repo-chips">
+            {tech.slice(0, 8).map((t) => (
+              <span key={t} className="repo-chip">
+                {t}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {features.length > 0 ? (
+          <ul className="repo-features">
+            {features.map((f) => (
+              <li key={f}>{f}</li>
+            ))}
+          </ul>
+        ) : null}
+        {doc.embedding_status ? <EmbedPill status={doc.embedding_status} /> : null}
+      </div>
+      <div className="manage-card-actions">
+        <ArmedDeleteButton label="Delete" icon={<Trash2 size={14} />} onConfirm={onDelete} />
+      </div>
+    </div>
   );
 }
 

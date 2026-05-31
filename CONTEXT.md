@@ -48,3 +48,34 @@ next prep run re-attempts research rather than serving the placeholder. The term
 surfaces in two faithful-but-distinct places: as a **run** cache reason (the
 *prior* snapshot was degraded, so this prep re-attempts) and as a node
 **outcome** (*this* run produced the placeholder).
+
+## GitHub ingestion
+
+**GitHub handle**
+The user's GitHub username — the canonical entry point for repo discovery. Either
+**extracted** from the CV (a `github.com/<handle>` link) or **supplied** by the
+user, then **verified** on its own wizard card (a `GET /users/{handle}` existence
+check) *before* setup runs — failing fast on a typo. One handle per user;
+resolving it lists that account's public repos. The handle is verified at the
+card; the repo *selection* HITL happens later, inside the prep graph.
+_Avoid_: "GitHub URL" / "repo link" when you mean the account handle — a handle
+discovers the whole public set; a repo link names one repo.
+
+**Selected repo**
+A public repository the user has **chosen** (from the discovered list) to ingest.
+Discovery lists *all* public repos; only selected repos are scraped and embedded.
+Selection is itself the **inclusion HITL** — distinct from the doc-mapping loop's
+*routing* HITL: a repo is never ambiguous about where it goes (it always becomes
+one standalone **github project**), so the only human decision is *whether* to
+include it, not *how* to route it.
+_Avoid_: "the user's repos" when you mean this chosen subset.
+
+**GitHub project**
+The standalone `ProjectItem` (`source='github'`) a **selected repo** contributes
+to the **Profile**: `name`←repo, `description`←README, `tech`←language stats,
+`urls`←repo URL. Folded in at profile-assembly time (no per-repo HITL — selection
+already confirmed it), and its `github_repo` document id joins the **Profile
+document set** so selection changes invalidate the profile cache. A github project
+is an ordinary focus candidate for **Project Deep-Dive**; the future technical
+round adds *code-level* grounding over the same repo's chunks.
+_Avoid_: treating a github project like a `project_doc` — it skips the mapping loop.

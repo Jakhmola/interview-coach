@@ -23,6 +23,12 @@ class Settings(BaseSettings):
 
     tavily_api_key: str | None = None
 
+    # Phase 32: app-level GitHub PAT for public-repo ingestion. Public repos
+    # need no scopes; the token only lifts the unauthenticated 60 req/hr cap
+    # to 5000 req/hr. Absent token ⇒ verify still works (1 call) but ingest
+    # hard-caps to ~1 repo with a clear log line.
+    github_token: str | None = None
+
     # OpenAI-compatible LLM endpoint. In compose, the api service reaches the
     # `llama` container over the docker network; the .env file overrides this
     # to localhost for host-side runs (pytest, scripts).
