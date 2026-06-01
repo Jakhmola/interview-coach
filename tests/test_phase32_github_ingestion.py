@@ -25,6 +25,23 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from interview_coach.agents.schemas import GithubProjectExtract
 from interview_coach.providers import github as gh
 
+
+@pytest.fixture(autouse=True)
+def _github_token_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin ``settings.github_token`` for every test in this file.
+
+    The ingest node reads ``settings.github_token`` to decide the no-token repo
+    cap (``NO_TOKEN_REPO_CAP``). Without this, the node tests inherit the dev's
+    ambient ``.env`` — green locally when a token is set, but red in CI where it
+    isn't (the cap truncates a multi-repo selection). No test here exercises the
+    settings-level no-token path (the ``ingest_repo`` no-token test passes
+    ``token=None`` explicitly), so pinning a token keeps them deterministic.
+    """
+    from interview_coach.agents.nodes import github_ingest
+
+    monkeypatch.setattr(github_ingest.settings, "github_token", "test-token")
+
+
 # --- CV mining -------------------------------------------------------------
 
 
