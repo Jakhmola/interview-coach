@@ -32,6 +32,7 @@ from interview_coach.api.auth.deps import get_current_user
 from interview_coach.api.sessions.schemas import (
     AnswerSubmitRequest,
     PrepareMappingResumeRequest,
+    PrepareRepoResumeRequest,
     PrepareRequest,
     PrepStatusOut,
     RoundType,
@@ -193,10 +194,15 @@ MAPPING_EVENT_NAMES = frozenset(
     }
 )
 
+# Phase 32: the github HITL sub-protocol — also untyped (no verdict reason).
+# ``repos_available`` mirrors ``mapping_suggestion`` (pauses the graph on an
+# interrupt); the rest are progress/outcome events the FE renders.
+GITHUB_EVENT_NAMES = frozenset({"repos_available", "repo_ingest_failed", "github_folded"})
+
 # The node-lifecycle half is sourced from agents/prep_events so the allowlist
 # can't drift from the typed models. ``error`` is in this set but is
 # special-cased below (forward, then terminate the stream).
-PREP_FORWARDED_EVENTS = LIFECYCLE_EVENT_NAMES | MAPPING_EVENT_NAMES
+PREP_FORWARDED_EVENTS = LIFECYCLE_EVENT_NAMES | MAPPING_EVENT_NAMES | GITHUB_EVENT_NAMES
 
 
 def _prep_event_stream(
@@ -212,8 +218,10 @@ def _prep_event_stream(
     ``/prepare`` POST and the ``/prepare/resume`` POST that the FE sends
     after the user confirms / skips a mapping suggestion.
 
-    The stream ends in one of three states:
+    The stream ends in one of these states:
     * ``done``  — prep_graph reached END.
+    * ``awaiting_repos`` — prep_graph hit the repo-selection interrupt; the FE
+      already received the ``repos_available`` event.
     * ``awaiting_mapping`` — prep_graph hit a mapping interrupt; the FE
       already received the ``mapping_suggestion`` event for the doc.
     * ``error`` — a node-level failure surfaced before END.
@@ -221,6 +229,7 @@ def _prep_event_stream(
 
     async def gen() -> AsyncIterator[bytes]:
         saw_mapping_interrupt = False
+        saw_repo_interrupt = False
         try:
             with trace_attributes(
                 user_id=str(user_id),
@@ -233,6 +242,8 @@ def _prep_event_stream(
                     event = chunk.get("event")
                     if event == "mapping_suggestion":
                         saw_mapping_interrupt = True
+                    if event == "repos_available":
+                        saw_repo_interrupt = True
                     # ``error`` is in PREP_FORWARDED_EVENTS but keeps its own
                     # forward-then-terminate control flow (checked first).
                     if event == "error":
@@ -240,11 +251,13 @@ def _prep_event_stream(
                         return
                     if event in PREP_FORWARDED_EVENTS:
                         yield sse_event(event, {k: v for k, v in chunk.items() if k != "event"})
-                # astream exit: either the graph reached END or it paused
-                # at a mapping interrupt. The interrupt path ends the
-                # generator without emitting a langgraph-internal frame
-                # because we run stream_mode="custom".
-                if saw_mapping_interrupt:
+                # astream exit: the graph reached END, or it paused at the
+                # repo-selection interrupt, or at a mapping interrupt. The
+                # interrupt paths end the generator without a langgraph-internal
+                # frame because we run stream_mode="custom".
+                if saw_repo_interrupt:
+                    yield sse_event("awaiting_repos", {"job_id": str(job_id)})
+                elif saw_mapping_interrupt:
                     yield sse_event(
                         "awaiting_mapping",
                         {"job_id": str(job_id)},
@@ -258,6 +271,14 @@ def _prep_event_stream(
             # not as fatal stream errors — the user can still proceed
             # with a placeholder snapshot. Only genuinely fatal prep
             # exceptions terminate the stream here.
+            yield sse_event("error", {"code": type(e).__name__, "detail": str(e)})
+        except Exception as e:  # noqa: BLE001
+            # Any *other* node failure (e.g. a github ingest/fold raising) must
+            # still close the stream with a typed ``error`` frame. Without this
+            # the exception escapes the generator mid-SSE, the connection drops
+            # with no terminal event, and the FE renders a bare "internal server
+            # error" and silently reverts the user to setup. Log + surface it.
+            logger.exception("prep stream failed for user=%s job=%s", user_id, job_id)
             yield sse_event("error", {"code": type(e).__name__, "detail": str(e)})
         finally:
             await flush_langfuse()
@@ -374,6 +395,37 @@ async def prepare_session_resume(
     stream = _prep_event_stream(
         prep_graph=prep_graph,
         graph_input=Command(resume=resume_payload),
+        prep_config=prep_config,
+        user_id=user.id,
+        job_id=body.job_id,
+        trace_meta=trace_meta,
+    )
+    return StreamingResponse(stream, media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@router.post("/prepare/resume_repos")
+async def prepare_session_resume_repos(
+    body: PrepareRepoResumeRequest,
+    request: Request,
+    user: Annotated[User, Depends(get_current_user)],
+) -> StreamingResponse:
+    """Resume an interrupted prep_graph after the user picks GitHub repos.
+
+    Phase 32: same resume pump as mapping-confirm — the body's ``selected_urls``
+    are threaded into the ``await_repo_selection`` interrupt; the graph ingests
+    + folds the chosen repos, then proceeds into the doc-mapping loop.
+    """
+    prep_graph = request.app.state.prep_graph
+    prep_config = _with_callbacks(_thread_config_for_prep(user.id, body.job_id))
+    trace_meta = {
+        "graph": "prep",
+        "phase": "resume_repos",
+        "user_id": str(user.id),
+        "job_id": str(body.job_id),
+    }
+    stream = _prep_event_stream(
+        prep_graph=prep_graph,
+        graph_input=Command(resume={"selected_urls": body.selected_urls}),
         prep_config=prep_config,
         user_id=user.id,
         job_id=body.job_id,

@@ -57,6 +57,29 @@ def _patch_mapped_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+class _UserNoHandle:
+    github_handle: str | None = None
+
+
+async def _get_user_no_handle(*_a: Any, **_kw: Any) -> _UserNoHandle:
+    return _UserNoHandle()
+
+
+async def _no_github_docs(*_a: Any, **_kw: Any) -> list[Any]:
+    return []
+
+
+def _patch_github_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Phase 32: the prep graph now runs a github segment after
+    profile_builder. With no handle and no ingested repos it emits a single
+    ``node_skipped`` (node="github") and routes to the mapping loop. These
+    pure-graph tests stub the two reads it makes so it skips cleanly."""
+    from interview_coach.agents import graph_nodes
+
+    monkeypatch.setattr(graph_nodes.repos, "get_user", _get_user_no_handle)
+    monkeypatch.setattr(graph_nodes.repos, "list_github_repo_docs_for_user", _no_github_docs)
+
+
 # --- prep graph ----------------------------------------------------
 
 
@@ -96,6 +119,7 @@ async def test_prep_graph_runs_three_nodes_in_order(
     monkeypatch.setattr(graph_nodes.repos, "get_company_snapshot_by_job", fake_get_snapshot)
     monkeypatch.setattr(graph_nodes.repos, "list_documents_for_user", fake_list_documents)
     _patch_unmapped_empty(monkeypatch)
+    _patch_github_empty(monkeypatch)
 
     class _FakeProfile:
         def model_dump(self) -> dict[str, Any]:
@@ -192,6 +216,7 @@ async def test_prep_graph_short_circuits_on_cache_hits(
     monkeypatch.setattr(graph_nodes.repos, "get_profile", fake_get_profile)
     monkeypatch.setattr(graph_nodes.repos, "list_documents_for_user", fake_list_docs)
     _patch_unmapped_empty(monkeypatch)
+    _patch_github_empty(monkeypatch)
     _patch_mapped_empty(monkeypatch)
     monkeypatch.setattr(graph_nodes.repos, "get_job", fake_get_job)
     monkeypatch.setattr(graph_nodes.repos, "get_company_snapshot_by_job", fake_get_snapshot)
@@ -215,10 +240,11 @@ async def test_prep_graph_short_circuits_on_cache_hits(
 
     skipped = [c for c in chunks if c.get("event") == "node_skipped"]
     # Phase 21.1: with `_patch_unmapped_empty`, prepare_mapping_suggestion
-    # emits a `node_skipped` of its own (node="doc_mapping"). All four
-    # prep_graph cache layers short-circuit.
+    # emits a `node_skipped` of its own (node="doc_mapping"). Phase 32 adds
+    # the github segment, which skips (node="github") when no handle/repos.
     assert [c["node"] for c in skipped] == [
         "profile_builder",
+        "github",
         "doc_mapping",
         "job_analyzer",
         "company_researcher",
@@ -269,6 +295,7 @@ async def test_prep_graph_force_refresh_runs_company_only(
     monkeypatch.setattr(graph_nodes.repos, "get_profile", fake_get_profile)
     monkeypatch.setattr(graph_nodes.repos, "list_documents_for_user", fake_list_docs)
     _patch_unmapped_empty(monkeypatch)
+    _patch_github_empty(monkeypatch)
     _patch_mapped_empty(monkeypatch)
     monkeypatch.setattr(graph_nodes.repos, "get_job", fake_get_job)
     monkeypatch.setattr(graph_nodes.repos, "get_company_snapshot_by_job", fake_get_snapshot)
@@ -345,6 +372,7 @@ async def test_profile_node_reruns_when_doc_ids_differ(
     monkeypatch.setattr(graph_nodes.repos, "get_profile", fake_get_profile)
     monkeypatch.setattr(graph_nodes.repos, "list_documents_for_user", fake_list_docs)
     _patch_unmapped_empty(monkeypatch)
+    _patch_github_empty(monkeypatch)
     _patch_mapped_empty(monkeypatch)
     monkeypatch.setattr(graph_nodes.repos, "get_job", fake_get_job)
     monkeypatch.setattr(graph_nodes.repos, "get_company_snapshot_by_job", fake_get_snapshot)

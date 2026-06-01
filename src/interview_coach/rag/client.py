@@ -140,12 +140,19 @@ class EmbeddingClient:
     async def embed_passages(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        batch = max(1, settings.embedder_max_batch)
         with span(
             "embed.passages",
             input={"n_texts": len(texts), "total_chars": sum(len(t) for t in texts)},
             metadata={"model": EXPECTED_MODEL_NAME, "task": "retrieval.passage"},
         ):
-            return await self._embed(texts, "retrieval.passage")
+            # One giant POST (all of a doc's chunks at once) blows the 60s
+            # timeout under back-to-back ingests; slice into bounded batches and
+            # stitch the vectors back in order.
+            vectors: list[list[float]] = []
+            for i in range(0, len(texts), batch):
+                vectors.extend(await self._embed(texts[i : i + batch], "retrieval.passage"))
+            return vectors
 
     async def embed_query(self, text: str, *, retries: int | None = None) -> list[float]:
         """Embed a query for retrieval. ``retries`` overrides the instance

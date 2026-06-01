@@ -117,3 +117,17 @@ class PrepareMappingResumeRequest(BaseModel):
     rows: list[PrepareMappingRow] = Field(default_factory=list)
     title: str | None = None
     extracted: PrepareMappingExtracted | None = None
+
+
+# --- prep_graph repo-selection-resume payload (Phase 32) --------------
+
+
+class PrepareRepoResumeRequest(BaseModel):
+    """User's response to a paused ``repos_available`` interrupt. Sent to
+    ``POST /sessions/prepare/resume_repos``; LangGraph threads the chosen URLs
+    into the ``await_repo_selection`` interrupt and the prep_graph advances to
+    ingest + fold (then the doc-mapping loop). An empty list = "select none"
+    (deselects everything previously ingested)."""
+
+    job_id: uuid.UUID
+    selected_urls: list[str] = Field(default_factory=list)

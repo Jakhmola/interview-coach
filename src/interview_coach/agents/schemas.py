@@ -53,9 +53,10 @@ class ProjectItem(BaseModel):
     """A standalone project NOT tied to an Experience row.
 
     Project docs that describe work-at-a-company enrich an Experience
-    highlight instead of creating a ProjectItem. `source='github'` is
-    reserved for the future GitHub crawler (Phase 15); `source='manual'`
-    for user-added entries we don't yet have a UI for.
+    highlight instead of creating a ProjectItem. `source='github'` is a
+    repo ingested by the Phase 32 GitHub crawler (folded into the Profile
+    by the github prep-graph node); `source='manual'` for user-added
+    entries we don't yet have a UI for.
     """
 
     name: str
@@ -63,6 +64,12 @@ class ProjectItem(BaseModel):
     tech: list[str] = Field(default_factory=list)
     role: str | None = None
     urls: list[str] = Field(default_factory=list)
+    # Phase 32 follow-up: richer github extraction surfaced to the interview
+    # (resume deep-dive / question generator) and the Manage UI. Defaulted so
+    # CV / project_doc / manual projects and every already-persisted profile
+    # stay valid, and older github ``parsed_json`` still ``model_validate``s.
+    key_features: list[str] = Field(default_factory=list)
+    architecture: str | None = None
     source: Literal["project_doc", "github", "manual"] = "project_doc"
     source_document_ids: list[uuid.UUID] = Field(default_factory=list)
 
@@ -170,6 +177,51 @@ class DocIntakeResult(BaseModel):
     title: str = Field(description="Short project title, max ~80 chars.")
     extracted: DocIntakeExtracted
     suggestions: list[DocIntakeSuggestion] = Field(default_factory=list)
+
+
+class GithubProjectExtract(BaseModel):
+    """Phase 32: what the LLM pulls from a repo's README + manifests.
+
+    The github prep-graph node assembles a full ``ProjectItem`` around this
+    (``name`` ← repo, ``urls`` ← repo URL, ``source='github'``). Keeping the
+    LLM-facing schema narrow — just description + tech — sidesteps per-ecosystem
+    manifest parsing: the model reads ``pyproject.toml`` / ``package.json`` /
+    etc. as raw text and names the real frameworks. No ``role`` is extracted —
+    a public repo rarely states one and inventing it adds noise.
+    """
+
+    description: str = Field(
+        description=(
+            "A detailed 2–3 sentence project description in the candidate's first-person "
+            "voice: what the project does, the problem it solves, and how it is built "
+            "(key components / architecture), grounded in the README + manifests."
+        )
+    )
+    tech: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Concrete frameworks/libraries/tools the repo uses, read from manifests + "
+            "infra files. Real names (e.g. 'fastapi', 'pgvector'), not just "
+            "languages-by-bytes."
+        ),
+    )
+    key_features: list[str] = Field(
+        default_factory=list,
+        description=(
+            "3-5 concrete capabilities or components the repo delivers, grounded in "
+            "the README + manifests (e.g. 'JWT auth', 'pgvector retrieval', "
+            "'streaming SSE API'). Empty when the material doesn't evidence any — "
+            "never fabricate."
+        ),
+    )
+    architecture: str | None = Field(
+        default=None,
+        description=(
+            "One sentence on how the project is built / wired together "
+            "(e.g. 'FastAPI backend + React frontend behind a local llama.cpp "
+            "model, grounded by a pgvector layer'). Null when not evidenced."
+        ),
+    )
 
 
 class CompanySnapshot(BaseModel):

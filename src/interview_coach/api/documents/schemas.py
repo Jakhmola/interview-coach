@@ -9,6 +9,11 @@ from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validat
 class DocumentKind(StrEnum):
     cv = "cv"
     project_doc = "project_doc"
+    # Phase 32: github_repo docs are persisted like any other Document (the DB
+    # ck-constraint already allows the kind), so the serializer must accept it —
+    # otherwise GET /documents 500s on `DocumentKind(d.kind)` once a repo is
+    # ingested. The Manage UI only renders cv/project_doc, so these stay hidden.
+    github_repo = "github_repo"
 
 
 # Derived from (chunk count, doc age):
@@ -34,6 +39,10 @@ class _DocumentBase(BaseModel):
 class DocumentListItem(_DocumentBase):
     char_count: int = Field(description="Length of extracted text")
     project_title: str | None = None
+    # Phase 32 follow-up: the Manage "GitHub repos" section reads tech chips +
+    # key_features + repo link off the folded ProjectItem here, so it doesn't
+    # need a second per-row GET /documents/{id}. Null for cv/project_doc rows.
+    parsed_json: dict[str, Any] | None = None
     embedding_status: EmbeddingStatus = "pending"
 
 

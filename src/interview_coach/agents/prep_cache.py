@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 # skip=True reasons — reuse the cached output.
-SkipReason = Literal["cached", "already_analyzed", "no_unmapped_project_docs"]
+SkipReason = Literal["cached", "already_analyzed", "no_unmapped_project_docs", "no_repos_selected"]
 # skip=False reasons — recompute.
 RunReason = Literal["missing", "stale", "forced", "degraded"]
 

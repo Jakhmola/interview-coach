@@ -195,6 +195,7 @@ async def list_documents(
                 created_at=d.created_at,
                 char_count=len(d.raw_text),
                 project_title=d.project_title,
+                parsed_json=d.parsed_json,
                 embedding_status=await _embedding_status_for(d, session),
             )
         )
@@ -382,4 +383,21 @@ async def delete_document(
     deleted = await repos.delete_document(session, document_id, user.id)
     if not deleted:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+
+    if doc.kind == "github_repo":
+        # FK cascade already wiped the doc's chunks, but the folded
+        # ``source='github'`` ProjectItem still sits in the Profile. Re-fold
+        # *after* the commit so ``fold_github_projects``'s own session sees the
+        # deletion and rewrites the github projects to the remaining repos —
+        # dropping this orphan, keeping siblings. Same path the prep-graph
+        # re-fold trusts, so a Manage delete and a wizard de-select converge.
+        # Best-effort, like the project_doc revert branch (no 409 guard:
+        # github projects are enrichments, not the session-pinned CV).
+        try:
+            from interview_coach.agents.nodes.github_ingest import fold_github_projects
+
+            await fold_github_projects(user.id)
+        except Exception:  # noqa: BLE001
+            logger.exception("github re-fold failed after deleting doc=%s", document_id)
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)

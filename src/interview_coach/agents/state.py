@@ -63,10 +63,25 @@ class InterviewState(TypedDict, total=False):
     # fresh ``/prepare`` POST so a returning user can re-decide.
     skipped_mapping_doc_ids: list[str]
 
-    # --- doc-mapping loop routing ---
-    # Read only by prepare_mapping_suggestion's conditional edge (loop vs.
-    # advance to job_analyzer); all other edges are static. Set only by that
-    # node.
+    # --- prep_graph github segment (Phase 32) ---
+    # ``github_repos``: the repo listing the discover node fetched, stashed so
+    # the ingest node reads metadata (description, branch, url) without a second
+    # list call — and so a resume replay doesn't re-list.
+    github_repos: list[dict[str, Any]] | None
+    # ``github_resume``: the user's repo-selection resume payload
+    # (``{"selected_urls": [...]}``), set by the await node, read by ingest.
+    github_resume: dict[str, Any] | None
+    # ``github_failures`` (Phase 32 follow-up 3): per-repo ingest failures from
+    # the last ingest pass — ``[{html_url, full_name, step, code, reason}]``.
+    # Non-empty → the ingest node routes back to ``await_repo_selection`` (the
+    # prep⊥interview barrier) instead of finalizing; cleared on a clean run.
+    github_failures: list[dict[str, Any]]
+
+    # --- conditional-edge routing ---
+    # Read by the conditional edges out of ``prepare_mapping_suggestion`` (loop
+    # vs. advance) AND out of ``github_discover`` (prompt vs. fold-only vs. skip
+    # segment). Each setting node's value is consumed by the edge immediately
+    # after it, and the two nodes run sequentially, so they never collide.
     next_step: str
 
     # --- LangGraph chat history (reserved; unused in v1) ---

@@ -44,19 +44,21 @@ export type EmbeddingStatus = "ready" | "pending" | "failed" | "n_a";
 export type DocumentItem = {
   id: string;
   user_id: string;
-  kind: "cv" | "project_doc";
+  kind: "cv" | "project_doc" | "github_repo";
   filename: string;
   content_type: string;
   byte_size: number;
   char_count: number;
   created_at: string;
   project_title?: string | null;
+  // Phase 32: the folded github ProjectItem (tech / key_features / urls) so the
+  // Manage "GitHub repos" section renders without a second per-row fetch.
+  parsed_json?: Record<string, unknown> | null;
   embedding_status?: EmbeddingStatus;
 };
 
 export type DocumentDetail = DocumentItem & {
   raw_text: string;
-  parsed_json?: Record<string, unknown> | null;
 };
 
 export type DocIntakeSuggestion = {
@@ -104,6 +106,55 @@ export type MappingRow = {
   experience_idx?: number | null;
   highlight_idx?: number | null;
   project_idx?: number | null;
+};
+
+// Phase 32: one repo in the `repos_available` SSE payload from /sessions/prepare.
+// The repo-selection modal renders these; the chosen `html_url`s POST back to
+// /sessions/prepare/resume_repos.
+export type RepoListing = {
+  full_name: string;
+  name: string;
+  description?: string | null;
+  language?: string | null;
+  stars: number;
+  pushed_at?: string | null;
+  html_url: string;
+  default_branch: string;
+  archived: boolean;
+  cv_mentioned: boolean;
+  // Phase 32 follow-up: set by the post-setup Manage picker so already-stored
+  // repos start pre-checked. Absent (undefined) in the in-graph setup payload.
+  // Also set on every prior-selection repo when prep re-opens the picker after
+  // an ingest failure, so the user's whole selection stays checked for Retry.
+  already_ingested?: boolean;
+  // Phase 32 follow-up 3: present when this repo failed to ingest on the last
+  // pass. The picker re-opens (prep⊥interview barrier) with the failed row
+  // checked and annotated with which step broke and why.
+  ingest_error?: { step: string; code: string; reason: string } | null;
+};
+
+export type GithubRepoListResult = {
+  handle: string;
+  repos: RepoListing[];
+};
+
+export type SelectReposResult = {
+  n_projects: number;
+  ingested: number;
+  removed: number;
+};
+
+export type GithubVerifyResult = {
+  exists: boolean;
+  handle?: string | null;
+  name?: string | null;
+  avatar_url?: string | null;
+  public_repos?: number | null;
+};
+
+export type GithubSuggestResult = {
+  current?: string | null;
+  cv_suggested?: string | null;
 };
 
 export type JobItem = {
@@ -190,7 +241,11 @@ export type SseFrame = {
 // node_done. SetupPage renders the story reasons as a terminal sub-label via
 // nodeReasonLabel (Phase 28).
 export type PrepRunReason = "missing" | "stale" | "forced" | "degraded";
-export type PrepSkipReason = "cached" | "already_analyzed" | "no_unmapped_project_docs";
+export type PrepSkipReason =
+  | "cached"
+  | "already_analyzed"
+  | "no_unmapped_project_docs"
+  | "no_repos_selected";
 export type PrepNodeOutcome = "ok" | "degraded";
 
 export type PrepLifecycleEvent =
@@ -306,6 +361,29 @@ export const api = {
       method: "POST",
       token,
       body: JSON.stringify(body),
+    }),
+  /** Phase 32: verify a GitHub handle exists; persists it on a hit so the
+   * prep graph can list repos. Backs the setup-wizard GitHub card. */
+  verifyGithubHandle: (token: string, handle: string) =>
+    apiFetch<GithubVerifyResult>(
+      `/github/verify?handle=${encodeURIComponent(handle)}`,
+      { token },
+    ),
+  /** Phase 32: pre-fill source for the GitHub card — persisted handle + a
+   * CV-mined suggestion. */
+  suggestGithubHandle: (token: string) =>
+    apiFetch<GithubSuggestResult>("/github/suggest", { token }),
+  /** Phase 32 follow-up: list the verified handle's public repos for the
+   * post-setup Manage picker. 400 ``no_handle`` ⇒ verify a handle first. */
+  listGithubRepos: (token: string) =>
+    apiFetch<GithubRepoListResult>("/github/repos", { token }),
+  /** Phase 32 follow-up: apply a post-setup repo selection — ingest newly
+   * checked repos, delete deselected ones, re-fold the profile. */
+  selectGithubRepos: (token: string, selectedUrls: string[]) =>
+    apiFetch<SelectReposResult>("/github/repos/select", {
+      method: "POST",
+      token,
+      body: JSON.stringify({ selected_urls: selectedUrls }),
     }),
   submitJobText: (token: string, text: string) =>
     apiFetch<JobDetail>("/jobs", { method: "POST", token, body: JSON.stringify({ text }) }),
@@ -482,6 +560,19 @@ export function prepareSessionResumeStream(
   signal?: AbortSignal,
 ) {
   return streamPost("/sessions/prepare/resume", token, body, onFrame, signal);
+}
+
+/** Phase 32: resume prep_graph after the user picks GitHub repos. The
+ * backend threads ``selected_urls`` into the paused ``await_repo_selection``
+ * interrupt; the graph ingests + folds the chosen repos, then proceeds into
+ * the doc-mapping loop. An empty list deselects everything. */
+export function prepareSessionResumeReposStream(
+  token: string,
+  body: { job_id: string; selected_urls: string[] },
+  onFrame: (frame: SseFrame) => void,
+  signal?: AbortSignal,
+) {
+  return streamPost("/sessions/prepare/resume_repos", token, body, onFrame, signal);
 }
 
 export function nextQuestionStream(

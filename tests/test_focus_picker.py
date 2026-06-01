@@ -240,6 +240,71 @@ def test_behavioral_focus_key_is_signal_string_verbatim() -> None:
     assert doc_ids == []
 
 
+# --- Phase 32 Follow-up 4: sharpened weight + top-N restricted sampling -------
+
+
+def test_zero_overlap_candidate_never_picked_when_relevant_exist() -> None:
+    """D — a clearly off-target (zero JD-overlap) project is never sampled when
+    higher-overlap candidates exist, across many seeds."""
+    profile = {
+        "experiences": [],
+        "projects": [
+            {"name": "PyGateway", "description": "api gateway", "tech": ["python", "fastapi"]},
+            {"name": "PgTools", "description": "postgres tooling", "tech": ["postgres"]},
+            {"name": "PyPipe", "description": "etl", "tech": ["python"]},
+            {"name": "Offtopic", "description": "knitting blog", "tech": ["html"]},
+        ],
+    }
+    job = {"must_have_skills": ["python", "fastapi", "postgres"]}
+    picks: set[str] = set()
+    for seed in range(200):
+        p = _pick_focus_target(
+            round_type="resume_walkthrough",
+            profile=profile,
+            job_analysis=job,
+            company_snapshot=SNAPSHOT_EMPTY,
+            prior_focus_counts={},
+            rng=random.Random(seed),
+        )
+        assert p is not None
+        picks.add(p[0])
+    assert "project:Offtopic" not in picks, picks
+    # The relevant ones remain reachable (variety survives among the strong).
+    assert "project:PyGateway" in picks
+
+
+def test_squared_weight_concentrates_on_highest_overlap() -> None:
+    """D — squaring (1+overlap) shifts mass toward the highest-overlap
+    candidate vs. the old linear weight."""
+    profile = {
+        "experiences": [],
+        "projects": [
+            {"name": "Triple", "description": "x", "tech": ["python", "fastapi", "postgres"]},
+            {"name": "Single", "description": "y", "tech": ["python"]},
+            {"name": "SingleB", "description": "z", "tech": ["postgres"]},
+        ],
+    }
+    job = {"must_have_skills": ["python", "fastapi", "postgres"]}
+    counts = {"Triple": 0}
+    triple = 0
+    n = 300
+    for seed in range(n):
+        p = _pick_focus_target(
+            round_type="resume_walkthrough",
+            profile=profile,
+            job_analysis=job,
+            company_snapshot=SNAPSHOT_EMPTY,
+            prior_focus_counts=counts,
+            rng=random.Random(seed),
+        )
+        assert p is not None
+        if p[0] == "project:Triple":
+            triple += 1
+    # weight(Triple)=(1+3)^2=16 vs Single/SingleB=(1+1)^2=4 each → 16/24 ≈ 0.67.
+    # The old linear weight would give 4/(4+2+2)=0.5. Assert clearly above 0.5.
+    assert triple / n > 0.6, triple / n
+
+
 def test_count_focus_keys_helper() -> None:
     assert count_focus_keys([]) == {}
     assert count_focus_keys(["a", "b", "a", "c", "a"]) == {"a": 3, "b": 1, "c": 1}

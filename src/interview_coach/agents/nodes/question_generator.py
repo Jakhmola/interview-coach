@@ -99,6 +99,12 @@ async def _load_context(
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+.#]*")
 
+FOCUS_TOP_N = 3
+"""Only the ``FOCUS_TOP_N`` highest-weighted focus candidates are eligible for
+the weighted sample. Keeps run-to-run variety among the strongest matches while
+ensuring a clearly off-target (e.g. zero-overlap) candidate is never drilled
+when relevant ones exist."""
+
 
 def _tokens(text: str) -> set[str]:
     return set(_TOKEN_RE.findall(text.lower()))
@@ -162,9 +168,12 @@ def _pick_focus_target(
 
     Scoring:
       inv_freq(k) = 1 / (1 + prior_focus_counts.get(k, 0))
-      resume_walkthrough: weight = (1 + jd_overlap_count) * inv_freq
+      resume_walkthrough: weight = (1 + jd_overlap_count) ** 2 * inv_freq
       behavioral_star:    weight = inv_freq
-    Weighted-sample with `rng` so ties don't always pick the first.
+    Candidates are sorted by weight and truncated to the top ``FOCUS_TOP_N``,
+    then weighted-sampled with `rng` so relevance dominates while ties / strong
+    matches still vary run-to-run (a zero-overlap candidate can't be picked when
+    relevant ones exist).
     """
     candidates: list[tuple[str, str, list[str], float]] = []  # (key, label, doc_ids, weight)
 
@@ -181,7 +190,7 @@ def _pick_focus_target(
                 doc_ids = [str(d) for d in (hl.get("source_document_ids") or [])]
                 overlap = len(_highlight_candidate_corpus(exp, hl) & must_have)
                 inv_freq = 1.0 / (1.0 + prior_focus_counts.get(key, 0))
-                candidates.append((key, label, doc_ids, (1.0 + overlap) * inv_freq))
+                candidates.append((key, label, doc_ids, (1.0 + overlap) ** 2 * inv_freq))
         for k, proj in enumerate(profile.get("projects") or []):
             if not isinstance(proj, dict):
                 continue
@@ -190,7 +199,7 @@ def _pick_focus_target(
             doc_ids = [str(d) for d in (proj.get("source_document_ids") or [])]
             overlap = len(_project_candidate_corpus(proj) & must_have)
             inv_freq = 1.0 / (1.0 + prior_focus_counts.get(key, 0))
-            candidates.append((key, label, doc_ids, (1.0 + overlap) * inv_freq))
+            candidates.append((key, label, doc_ids, (1.0 + overlap) ** 2 * inv_freq))
     elif round_type == "behavioral_star":
         signals: list[str] = list(job_analysis.get("behavioral_signals") or [])
         if not signals:
@@ -207,8 +216,16 @@ def _pick_focus_target(
     if not candidates:
         return None
 
-    weights = [w for _, _, _, w in candidates]
-    triples = [(k, lbl, ids) for k, lbl, ids, _ in candidates]
+    # Relevance dominates: only the top-N weighted candidates are eligible, so a
+    # clearly off-target (e.g. zero-overlap) one is never sampled when stronger
+    # matches exist. Ties at the cutoff weight all stay in (don't arbitrarily
+    # drop an equally-strong candidate by sort order), so variety survives among
+    # the strongest via weighted sampling.
+    candidates.sort(key=lambda c: c[3], reverse=True)
+    cutoff = candidates[min(FOCUS_TOP_N, len(candidates)) - 1][3]
+    eligible = [c for c in candidates if c[3] >= cutoff]
+    weights = [w for _, _, _, w in eligible]
+    triples = [(k, lbl, ids) for k, lbl, ids, _ in eligible]
     chosen_key, chosen_label, chosen_doc_ids = rng.choices(triples, weights=weights, k=1)[0]
     return chosen_key, chosen_label, chosen_doc_ids
 
