@@ -410,15 +410,15 @@ async def test_picker_sees_prior_focus_keys_across_calls(
         return real_pick(**kwargs)
 
     monkeypatch.setattr(question_generator, "_pick_focus_target", capturing_pick)
-    # First call picks index 0, second call picks index 1 deterministically.
-    call_count = {"n": 0}
 
+    # Always pick the top-ranked candidate. The picker now sorts eligible
+    # candidates by weight (desc), so call 1 picks "ownership" (tie, built
+    # first); call 2 sees ownership down-weighted by inv_freq and thus sorted
+    # last, so the top-ranked rotates to "mentorship".
     def fake_choices(
         self: Any, population: list[Any], weights: Any = None, k: int = 1
     ) -> list[Any]:
-        idx = call_count["n"] % len(population)
-        call_count["n"] += 1
-        return [population[idx]]
+        return [population[0]]
 
     monkeypatch.setattr(question_generator.random.Random, "choices", fake_choices)
     _patch_streaming_llm(

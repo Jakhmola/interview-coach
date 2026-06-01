@@ -32,9 +32,28 @@ from interview_coach.db.session import AsyncSessionLocal
 from interview_coach.llm.client import chat_model_structured
 from interview_coach.llm.telemetry import set_node_context
 from interview_coach.providers import github as gh
+from interview_coach.rag.chunking import CODE_FENCE_PREFIX
+from interview_coach.rag.concurrency import ingest_sema
 from interview_coach.rag.ingest import embed_and_store_document
 
 logger = logging.getLogger(__name__)
+
+
+class RepoIngestError(Exception):
+    """A repo failed at one identifiable step of ``ingest_repo``.
+
+    Carries which ``step`` broke (``fetch`` | ``embed`` | ``extract``), a short
+    ``code`` (the underlying exception type), and a human-readable ``reason`` —
+    so the prep node can surface *what* failed and *why* in the repo picker
+    instead of finalizing with a silently-orphaned doc.
+    """
+
+    def __init__(self, *, step: str, code: str, reason: str) -> None:
+        self.step = step
+        self.code = code
+        self.reason = reason
+        super().__init__(f"{step}: {code}: {reason}")
+
 
 # --- CV mining -------------------------------------------------------------
 
@@ -380,15 +399,16 @@ def _assemble_repo_text(
 def _assemble_grounding_text(extract_text: str, code_files: list[tuple[str, str]]) -> str:
     """The extraction blob plus selected source files, for grounding only.
 
-    Each file is headed ``# <path>`` so the markdown-aware chunker splits it
-    into its own section (stored chunk tagged ``[Section: <path>]``). The
-    extraction LLM never sees this — it gets ``extract_text`` (code-free).
+    Each file is fenced with ``CODE_FENCE_PREFIX + <path>`` so the chunker keeps
+    it as one *atomic* code section (stored chunk tagged ``[Section: <path>]``)
+    instead of shredding it at every ``# comment`` line. The extraction LLM
+    never sees this — it gets ``extract_text`` (code-free).
     """
     if not code_files:
         return extract_text
     parts = [extract_text]
     for path, text in code_files:
-        parts.append(f"# {path}\n" + text[:MAX_CODE_FILE_CHARS])
+        parts.append(CODE_FENCE_PREFIX + path + "\n" + text[:MAX_CODE_FILE_CHARS])
     return "\n\n".join(parts)
 
 
@@ -460,9 +480,14 @@ async def ingest_repo(
     Returns the document id.
     """
     owner, repo = parse_owner_repo(full_name)
-    extract_text, grounding_text = await _fetch_repo_text(
-        owner=owner, repo=repo, branch=default_branch, description=description, token=token
-    )
+
+    # --- step: fetch -------------------------------------------------------
+    try:
+        extract_text, grounding_text = await _fetch_repo_text(
+            owner=owner, repo=repo, branch=default_branch, description=description, token=token
+        )
+    except Exception as e:  # noqa: BLE001
+        raise RepoIngestError(step="fetch", code=type(e).__name__, reason=str(e)) from e
 
     async with AsyncSessionLocal() as s:
         doc = await repos.upsert_github_repo_document(
@@ -474,9 +499,19 @@ async def ingest_repo(
         )
         doc_id = doc.id
 
-    # Embed through the shared grounding pipeline (source_doc_kind='github_repo').
-    await embed_and_store_document(doc_id)
+    # --- step: embed -------------------------------------------------------
+    # Hold ``ingest_sema`` around the embed so concurrent github ingests don't
+    # pile multiple big POSTs onto the single embedder. Acquired *here*, not
+    # inside ``embed_and_store_document`` — the CV background path already holds
+    # the sema when it calls that shared fn, so a sema there would self-deadlock
+    # (Semaphore(1)). github ingest runs inline in prep and holds nothing.
+    try:
+        async with ingest_sema:
+            await embed_and_store_document(doc_id)
+    except Exception as e:  # noqa: BLE001
+        raise RepoIngestError(step="embed", code=type(e).__name__, reason=str(e)) from e
 
+    # --- step: extract -----------------------------------------------------
     # LLM-extract the project narrative + tech stack.
     #
     # enable_thinking=False is load-bearing here: qwen3's <think> block plus a
@@ -484,17 +519,20 @@ async def ingest_repo(
     # before the JSON object closes ("Could not parse … length limit reached"),
     # so every repo failed to parse. This extraction (README → description+tech)
     # needs no chain-of-thought; turning thinking off keeps the completion small.
-    with set_node_context("github_intake"):
-        extract = await chat_model_structured(
-            GithubProjectExtract,
-            [
-                SystemMessage(content=GITHUB_INTAKE_SYSTEM),
-                HumanMessage(content=extract_text[:10000]),
-            ],
-            temperature=0.0,
-            enable_thinking=False,
-        )
-    assert isinstance(extract, GithubProjectExtract)
+    try:
+        with set_node_context("github_intake"):
+            extract = await chat_model_structured(
+                GithubProjectExtract,
+                [
+                    SystemMessage(content=GITHUB_INTAKE_SYSTEM),
+                    HumanMessage(content=extract_text[:10000]),
+                ],
+                temperature=0.0,
+                enable_thinking=False,
+            )
+        assert isinstance(extract, GithubProjectExtract)
+    except Exception as e:  # noqa: BLE001
+        raise RepoIngestError(step="extract", code=type(e).__name__, reason=str(e)) from e
 
     project = ProjectItem(
         name=repo,

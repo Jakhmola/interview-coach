@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check as CheckIcon, GitBranch, SkipForward, Star } from "lucide-react";
+import { AlertTriangle, Check as CheckIcon, GitBranch, SkipForward, Star } from "lucide-react";
 
 import { RepoListing } from "../api";
 
@@ -94,15 +94,22 @@ function RepoSelectBody({
   onClose: () => void;
   closeLabel: string;
 }) {
-  // Pre-check CV-mentioned repos (setup) and already-ingested ones (Manage),
-  // so on Manage the picker opens reflecting the current selection.
+  // Pre-check CV-mentioned repos (setup), already-ingested ones (Manage / the
+  // user's prior selection), and any that failed to ingest — so a retry
+  // resubmits the same set; unchecking a failed repo skips it instead.
   const [selected, setSelected] = useState<Set<string>>(
     () =>
       new Set(
-        repos.filter((r) => r.cv_mentioned || r.already_ingested).map((r) => r.html_url),
+        repos
+          .filter((r) => r.cv_mentioned || r.already_ingested || r.ingest_error)
+          .map((r) => r.html_url),
       ),
   );
   const [query, setQuery] = useState("");
+
+  // Follow-up 3: when prep re-opens the picker after an ingest failure, switch
+  // the framing from "pick repos" to "fix the broken ones".
+  const hasErrors = repos.some((r) => r.ingest_error);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -129,13 +136,21 @@ function RepoSelectBody({
       <header className="mapping-modal-header">
         <div>
           <span className="eyebrow">
-            <GitBranch size={13} /> {repos.length} public repo{repos.length === 1 ? "" : "s"}
+            {hasErrors ? (
+              <>
+                <AlertTriangle size={13} /> Some repos couldn&apos;t be ingested
+              </>
+            ) : (
+              <>
+                <GitBranch size={13} /> {repos.length} public repo{repos.length === 1 ? "" : "s"}
+              </>
+            )}
           </span>
-          <h2 id="repo-modal-title">Pick repos to include</h2>
+          <h2 id="repo-modal-title">{hasErrors ? "Retry or skip the failed repos" : "Pick repos to include"}</h2>
           <p className="wizard-blurb">
-            We&apos;ll read the README, dependency manifests and directory layout of each repo
-            you select, and add it to your profile as a project. Already-included repos start
-            checked; unchecking one removes it.
+            {hasErrors
+              ? "We can't finish setup until these are resolved. Keep a repo checked to retry it, or uncheck it to skip it and continue without it."
+              : "We'll read the README, dependency manifests and directory layout of each repo you select, and add it to your profile as a project. Already-included repos start checked; unchecking one removes it."}
           </p>
         </div>
       </header>
@@ -177,6 +192,12 @@ function RepoSelectBody({
                       </span>
                     ) : null}
                   </span>
+                  {r.ingest_error ? (
+                    <span className="wizard-doc-meta danger">
+                      <AlertTriangle size={11} /> {r.ingest_error.step} step failed —{" "}
+                      {r.ingest_error.reason}
+                    </span>
+                  ) : null}
                 </span>
               </label>
             ))
@@ -197,7 +218,9 @@ function RepoSelectBody({
           <CheckIcon size={14} />{" "}
           {selected.size === 0
             ? "Continue without repos"
-            : `Include ${selected.size} repo${selected.size === 1 ? "" : "s"}`}
+            : hasErrors
+              ? `Retry ${selected.size} repo${selected.size === 1 ? "" : "s"}`
+              : `Include ${selected.size} repo${selected.size === 1 ? "" : "s"}`}
         </button>
       </footer>
     </>

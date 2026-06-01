@@ -208,3 +208,81 @@ async def test_retrieve_grounding_vector_mode_returns_empty_when_embedder_down(
 
     hits = await retrieval_mod.retrieve_grounding(user_id=uuid.uuid4(), query="anything")
     assert hits == []
+
+
+# --- Phase 32 Follow-up 4: github_repo admitted by default + relaxed floor ----
+
+
+def _patch_vector_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force vector mode with a live embedder so the floor logic runs."""
+    from interview_coach.rag import retrieval as retrieval_mod
+
+    monkeypatch.setattr(retrieval_mod.settings, "retrieval_mode", "vector")
+
+    async def fake_get_client() -> Any:
+        class _C:
+            async def embed_query(self, *_a: Any, **_k: Any) -> list[float]:
+                return [0.0] * 1024
+
+        return _C()
+
+    monkeypatch.setattr(retrieval_mod, "get_embedding_client", fake_get_client)
+
+
+async def test_default_source_kinds_includes_github_repo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A — the bug fix: default retrieval now admits ``github_repo`` chunks;
+    an explicit ``("project_doc",)`` still excludes them."""
+    from interview_coach.rag import retrieval as retrieval_mod
+
+    _patch_vector_client(monkeypatch)
+    seen: dict[str, tuple[str, ...]] = {}
+
+    async def fake_query(**kwargs: Any) -> list[dict[str, Any]]:
+        seen["kinds"] = kwargs["source_kinds"]
+        return []
+
+    monkeypatch.setattr(retrieval_mod, "_query_chunks_by_vector", fake_query)
+
+    await retrieval_mod.retrieve_grounding(user_id=uuid.uuid4(), query="anything")
+    assert seen["kinds"] == ("project_doc", "github_repo")
+
+    await retrieval_mod.retrieve_grounding(
+        user_id=uuid.uuid4(), query="anything", source_kinds=("project_doc",)
+    )
+    assert seen["kinds"] == ("project_doc",)
+
+
+async def test_pinned_docs_relax_floor_to_mapped_min(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B — a chunk scoring 0.3 is returned when ``document_ids`` is pinned
+    (floor → 0.2) but dropped when unscoped (floor stays 0.5)."""
+    from interview_coach.rag import retrieval as retrieval_mod
+
+    _patch_vector_client(monkeypatch)
+    doc = uuid.uuid4()
+
+    async def fake_query(**_: Any) -> list[dict[str, Any]]:
+        return [
+            {
+                "text": "mid-score chunk",
+                "document_id": doc,
+                "source_doc_kind": "github_repo",
+                "chunk_index": 0,
+                "score": 0.3,
+                "filename": "app.py",
+            }
+        ]
+
+    monkeypatch.setattr(retrieval_mod, "_query_chunks_by_vector", fake_query)
+
+    pinned = await retrieval_mod.retrieve_grounding(
+        user_id=uuid.uuid4(), query="anything", document_ids=(doc,)
+    )
+    assert len(pinned) == 1
+    assert pinned[0].source_doc_kind == "github_repo"
+
+    unscoped = await retrieval_mod.retrieve_grounding(user_id=uuid.uuid4(), query="anything")
+    assert unscoped == []

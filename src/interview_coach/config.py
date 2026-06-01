@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     embedder_url: str = "http://embedder:8001"
     embedder_timeout_s: float = 60.0
     embedder_retries: int = 3
+    # Phase 32 follow-up 3: cap how many passages go in a single /embed POST.
+    # One giant POST per repo (all its chunks at once) was timing out under
+    # back-to-back github ingests; batching keeps each request small.
+    embedder_max_batch: int = 32
 
     # Phase 24: hybrid retrieval (BM25 + vector with RRF). `retrieval_mode`
     # is the kill-switch — set to `"vector"` to fall back to pure pgvector

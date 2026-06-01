@@ -887,3 +887,213 @@ async def test_select_repos_ingests_deselects_and_refolds(
 
 def _auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
+
+
+# --- follow-up 3: prep⊥interview barrier + repo-ingest retry ----------------
+
+
+def _project_json(name: str, url: str, doc_id: uuid.UUID) -> dict[str, Any]:
+    """A minimal valid ProjectItem dict for a github repo (no role)."""
+    return {
+        "name": name,
+        "description": f"{name} project",
+        "tech": ["python"],
+        "role": None,
+        "urls": [url],
+        "source": "github",
+        "source_document_ids": [str(doc_id)],
+    }
+
+
+async def _seed_github_doc(
+    factory: async_sessionmaker, user_id: uuid.UUID, url: str, name: str, *, fully: bool
+) -> None:
+    """Seed a github_repo doc. ``fully`` → also stash parsed_json + a chunk so
+    ``list_fully_ingested_github_urls`` counts it; otherwise leave it an orphan."""
+    from interview_coach.db import models, repos
+
+    async with factory() as s:
+        doc = await repos.upsert_github_repo_document(
+            s, user_id=user_id, source_url=url, project_title=name, raw_text="r"
+        )
+        if fully:
+            await repos.set_document_parsed_json(s, doc.id, _project_json(name, url, doc.id))
+            s.add(
+                models.GroundingChunk(
+                    user_id=user_id,
+                    document_id=doc.id,
+                    source_doc_kind="github_repo",
+                    chunk_index=0,
+                    text="c",
+                    n_tokens=1,
+                    embedding=[0.0] * 1024,
+                    model_name="m",
+                )
+            )
+            await s.commit()
+
+
+async def _seed_empty_profile(factory: async_sessionmaker, user_id: uuid.UUID) -> None:
+    from interview_coach.db import repos
+
+    async with factory() as s:
+        await repos.upsert_profile(
+            s,
+            user_id=user_id,
+            profile_json={
+                "summary": "",
+                "skills": [],
+                "experiences": [],
+                "projects": [],
+                "education": [],
+            },
+            source_doc_ids=[],
+            model_name="m",
+        )
+
+
+def _meta(name: str, url: str) -> dict[str, Any]:
+    return {
+        "full_name": f"u/{name}",
+        "name": name,
+        "html_url": url,
+        "default_branch": "main",
+        "description": None,
+    }
+
+
+async def test_ingest_node_blocks_on_failure(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A repo that fails to ingest does NOT finalize prep: the node routes back
+    to await_repo_selection and re-emits the picker with a step-tagged error."""
+    from interview_coach.agents.nodes import github_ingest
+    from interview_coach.db import repos
+    from interview_coach.ingestion.github_repo import RepoIngestError
+
+    user = await repos.create_user(db_session, "barrier@example.com", "x")
+    factory = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    monkeypatch.setattr(github_ingest, "AsyncSessionLocal", factory)
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(github_ingest, "get_stream_writer", lambda: events.append)
+    await _seed_empty_profile(factory, user.id)
+
+    a = "https://github.com/u/alpha"
+    b = "https://github.com/u/beta"
+
+    async def fake_ingest(*, user_id: uuid.UUID, html_url: str, **_kw: Any) -> uuid.UUID:
+        if html_url == b:
+            raise RepoIngestError(step="embed", code="EmbedderUnavailable", reason="read timeout")
+        await _seed_github_doc(factory, user_id, html_url, "alpha", fully=True)
+        return uuid.uuid4()
+
+    monkeypatch.setattr(github_ingest, "ingest_repo", fake_ingest)
+
+    out = await github_ingest.node_github_ingest_and_fold(
+        {
+            "user_id": str(user.id),
+            "github_resume": {"selected_urls": [a, b]},
+            "github_repos": [_meta("alpha", a), _meta("beta", b)],
+        }
+    )
+
+    assert out["next_step"] == "await_repo_selection"
+    assert [f["html_url"] for f in out["github_failures"]] == [b]
+    assert out["github_failures"][0]["step"] == "embed"
+    # Barrier: prep did NOT finalize — no fold event.
+    assert not any(e.get("event") == "github_folded" for e in events)
+    # The re-opened picker annotates the failed repo and keeps the selection checked.
+    ev = next(e for e in events if e.get("event") == "repos_available")
+    by_url = {r["html_url"]: r for r in ev["payload"]["repos"]}
+    assert by_url[b]["ingest_error"]["step"] == "embed"
+    assert by_url[b]["ingest_error"]["reason"] == "read timeout"
+    assert by_url[a].get("already_ingested") is True
+
+
+async def test_ingest_node_retry_skips_fully_ingested(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Retry re-ingests only the previously-broken repo; the one that already
+    fully ingested is skipped (not re-embedded), then both fold in."""
+    from interview_coach.agents.nodes import github_ingest
+    from interview_coach.db import repos
+
+    user = await repos.create_user(db_session, "retry@example.com", "x")
+    factory = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    monkeypatch.setattr(github_ingest, "AsyncSessionLocal", factory)
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(github_ingest, "get_stream_writer", lambda: events.append)
+    await _seed_empty_profile(factory, user.id)
+
+    a = "https://github.com/u/alpha"
+    b = "https://github.com/u/beta"
+    await _seed_github_doc(factory, user.id, a, "alpha", fully=True)  # already succeeded
+
+    called: list[str] = []
+
+    async def fake_ingest(*, user_id: uuid.UUID, html_url: str, **_kw: Any) -> uuid.UUID:
+        called.append(html_url)
+        await _seed_github_doc(factory, user_id, html_url, "beta", fully=True)
+        return uuid.uuid4()
+
+    monkeypatch.setattr(github_ingest, "ingest_repo", fake_ingest)
+
+    out = await github_ingest.node_github_ingest_and_fold(
+        {
+            "user_id": str(user.id),
+            "github_resume": {"selected_urls": [a, b]},
+            "github_repos": [_meta("alpha", a), _meta("beta", b)],
+        }
+    )
+
+    assert called == [b]  # alpha skipped by the fully-ingested guard
+    assert out["github_failures"] == []
+    assert out["next_step"] == "prepare_mapping_suggestion"
+    assert any(e.get("event") == "github_folded" for e in events)
+    profile = await repos.get_profile(db_session, user.id)
+    await db_session.refresh(profile)
+    assert {p["name"] for p in profile.profile_json["projects"]} == {"alpha", "beta"}
+
+
+async def test_ingest_node_proceed_deletes_orphan(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proceed-without: deselecting the failed (orphan) repo deletes its doc and
+    folds the survivors — no ingest attempt, no failures, prep finalizes."""
+    from interview_coach.agents.nodes import github_ingest
+    from interview_coach.db import repos
+
+    user = await repos.create_user(db_session, "proceed@example.com", "x")
+    factory = async_sessionmaker(db_session.bind, expire_on_commit=False)
+    monkeypatch.setattr(github_ingest, "AsyncSessionLocal", factory)
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(github_ingest, "get_stream_writer", lambda: events.append)
+    await _seed_empty_profile(factory, user.id)
+
+    a = "https://github.com/u/alpha"
+    b = "https://github.com/u/beta"
+    await _seed_github_doc(factory, user.id, a, "alpha", fully=True)
+    await _seed_github_doc(factory, user.id, b, "beta", fully=False)  # orphan from prior fail
+
+    async def fake_ingest(**_kw: Any) -> uuid.UUID:  # pragma: no cover
+        raise AssertionError("ingest should not run on the proceed path")
+
+    monkeypatch.setattr(github_ingest, "ingest_repo", fake_ingest)
+
+    out = await github_ingest.node_github_ingest_and_fold(
+        {
+            "user_id": str(user.id),
+            "github_resume": {"selected_urls": [a]},  # beta unchecked
+            "github_repos": [_meta("alpha", a), _meta("beta", b)],
+        }
+    )
+
+    assert out["github_failures"] == []
+    assert out["next_step"] == "prepare_mapping_suggestion"
+    assert any(e.get("event") == "github_folded" for e in events)
+    async with factory() as s:
+        remaining = {d.source_url for d in await repos.list_github_repo_docs_for_user(s, user.id)}
+    assert remaining == {a}  # the orphan was deleted
+    profile = await repos.get_profile(db_session, user.id)
+    await db_session.refresh(profile)
+    assert {p["name"] for p in profile.profile_json["projects"]} == {"alpha"}

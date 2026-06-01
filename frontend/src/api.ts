@@ -124,7 +124,13 @@ export type RepoListing = {
   cv_mentioned: boolean;
   // Phase 32 follow-up: set by the post-setup Manage picker so already-stored
   // repos start pre-checked. Absent (undefined) in the in-graph setup payload.
+  // Also set on every prior-selection repo when prep re-opens the picker after
+  // an ingest failure, so the user's whole selection stays checked for Retry.
   already_ingested?: boolean;
+  // Phase 32 follow-up 3: present when this repo failed to ingest on the last
+  // pass. The picker re-opens (prep⊥interview barrier) with the failed row
+  // checked and annotated with which step broke and why.
+  ingest_error?: { step: string; code: string; reason: string } | null;
 };
 
 export type GithubRepoListResult = {

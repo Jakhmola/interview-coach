@@ -110,7 +110,18 @@ def build_prep_graph(checkpointer: BaseCheckpointSaver | None) -> Any:
         },
     )
     g.add_edge("await_repo_selection", "github_ingest_and_fold")
-    g.add_edge("github_ingest_and_fold", "prepare_mapping_suggestion")
+    # Phase 32 follow-up 3: ingest_and_fold normally advances to the mapping
+    # loop, but on an unresolved repo-ingest failure it routes *back* to
+    # ``await_repo_selection`` (the prep⊥interview barrier) so the user retries
+    # or deselects the broken repos before prep can finalize.
+    g.add_conditional_edges(
+        "github_ingest_and_fold",
+        lambda s: s.get("next_step") or "prepare_mapping_suggestion",
+        {
+            "await_repo_selection": "await_repo_selection",
+            "prepare_mapping_suggestion": "prepare_mapping_suggestion",
+        },
+    )
     # prepare_mapping_suggestion returns next_step ∈
     #   {"job_analyzer", "await_mapping_confirm", "apply_or_skip_mapping"}
     g.add_conditional_edges(

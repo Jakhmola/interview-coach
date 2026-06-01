@@ -262,6 +262,28 @@ async def list_github_repo_docs_for_user(
     return result.scalars().all()
 
 
+async def list_fully_ingested_github_urls(session: AsyncSession, user_id: uuid.UUID) -> set[str]:
+    """URLs of ``github_repo`` docs that completed *all* ingest steps — i.e. have
+    grounding chunks **and** a stashed ``parsed_json`` ProjectItem.
+
+    A doc with ``raw_text`` but no chunks/``parsed_json`` is a half-ingested
+    orphan (embed or extract failed); excluding it lets a retry re-attempt only
+    the broken repos while skipping the ones that already succeeded.
+    """
+    chunks = (
+        select(GroundingChunk.document_id).where(GroundingChunk.document_id == Document.id).exists()
+    )
+    result = await session.execute(
+        select(Document.source_url).where(
+            Document.user_id == user_id,
+            Document.kind == "github_repo",
+            Document.parsed_json.isnot(None),
+            chunks,
+        )
+    )
+    return {u for u in result.scalars().all() if u}
+
+
 async def upsert_github_repo_document(
     session: AsyncSession,
     *,

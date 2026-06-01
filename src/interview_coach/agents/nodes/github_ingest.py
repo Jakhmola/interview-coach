@@ -34,6 +34,7 @@ from interview_coach.db.session import AsyncSessionLocal
 from interview_coach.ingestion.errors import FetchFailed
 from interview_coach.ingestion.github_repo import (
     NO_TOKEN_REPO_CAP,
+    RepoIngestError,
     extract_repo_full_names_from_cv,
     ingest_repo,
 )
@@ -169,6 +170,14 @@ async def node_github_ingest_and_fold(state: InterviewState) -> dict[str, Any]:
 
     With a resume payload: delete deselected repos, ingest selected ones, fold.
     Without one (the re-fold path): just re-fold the existing docs' projects.
+
+    **prep⊥interview barrier (follow-up 3):** if any selected repo fails to
+    ingest, prep does *not* finalize. The node routes back to
+    ``await_repo_selection`` and re-emits ``repos_available`` with per-repo
+    ``ingest_error`` annotations, so the user retries or deselects the broken
+    repos before entering the interview. A repo that already fully ingested (has
+    chunks + ``parsed_json``) is skipped, so Retry re-attempts only the broken
+    ones.
     """
     user_id = uuid.UUID(state["user_id"])
     writer = get_stream_writer()
@@ -176,6 +185,8 @@ async def node_github_ingest_and_fold(state: InterviewState) -> dict[str, Any]:
     discovered = {r["html_url"]: r for r in (state.get("github_repos") or [])}
     token = settings.github_token
     degraded_code: str | None = None
+    failures: list[dict[str, Any]] = []
+    selected_urls: list[str] = []
 
     if resume is not None:
         selected_urls = [u for u in (resume.get("selected_urls") or []) if isinstance(u, str)]
@@ -183,6 +194,9 @@ async def node_github_ingest_and_fold(state: InterviewState) -> dict[str, Any]:
         # Deselect = delete (FK cascade wipes chunks; fold drops the project).
         async with AsyncSessionLocal() as s:
             removed = await repos.delete_github_repo_docs_not_selected(s, user_id, selected_urls)
+            # Skip repos that already fully ingested on a prior pass so Retry
+            # re-attempts only the ones that broke (no needless re-embed).
+            already_done = await repos.list_fully_ingested_github_urls(s, user_id)
         if removed:
             logger.info("github ingest: deselected %d repo(s) for user=%s", len(removed), user_id)
 
@@ -199,6 +213,8 @@ async def node_github_ingest_and_fold(state: InterviewState) -> dict[str, Any]:
             degraded_code = "no_github_token"
 
         for url in to_ingest:
+            if url in already_done:
+                continue
             meta = discovered.get(url)
             if meta is None:
                 logger.warning("github ingest: no discovered metadata for %s; skipping", url)
@@ -212,17 +228,55 @@ async def node_github_ingest_and_fold(state: InterviewState) -> dict[str, Any]:
                     default_branch=meta.get("default_branch") or "main",
                     token=token,
                 )
-            except Exception as e:  # noqa: BLE001
-                logger.exception("github ingest failed for %s", url)
-                degraded_code = degraded_code or "ingest_failed"
-                writer(
+            except RepoIngestError as e:
+                logger.warning("github ingest failed for %s at step=%s: %s", url, e.step, e.reason)
+                failures.append(
                     {
-                        "event": "repo_ingest_failed",
                         "html_url": url,
-                        "code": type(e).__name__,
-                        "detail": str(e),
+                        "full_name": meta.get("full_name"),
+                        "step": e.step,
+                        "code": e.code,
+                        "reason": e.reason,
                     }
                 )
+            except Exception as e:  # noqa: BLE001
+                logger.exception("github ingest failed for %s", url)
+                failures.append(
+                    {
+                        "html_url": url,
+                        "full_name": meta.get("full_name"),
+                        "step": "unknown",
+                        "code": type(e).__name__,
+                        "reason": str(e),
+                    }
+                )
+
+    # Barrier: any unresolved failure → re-open the picker instead of finalizing.
+    if failures:
+        err_by_url = {f["html_url"]: f for f in failures}
+        selected_set = set(selected_urls)
+        annotated: list[dict[str, Any]] = []
+        for r in state.get("github_repos") or []:
+            rr = dict(r)
+            # Keep the user's whole current selection pre-checked so a plain
+            # Retry resubmits the same set (the succeeded ones are skip-guarded).
+            if r.get("html_url") in selected_set:
+                rr["already_ingested"] = True
+            err = err_by_url.get(r.get("html_url"))
+            if err is not None:
+                rr["ingest_error"] = {
+                    "step": err["step"],
+                    "code": err["code"],
+                    "reason": err["reason"],
+                }
+            annotated.append(rr)
+        writer({"event": "repos_available", "payload": {"repos": annotated}})
+        return {
+            "next_step": "await_repo_selection",
+            "github_repos": annotated,
+            "github_resume": None,
+            "github_failures": failures,
+        }
 
     try:
         n = await fold_github_projects(user_id)
@@ -236,4 +290,12 @@ async def node_github_ingest_and_fold(state: InterviewState) -> dict[str, Any]:
     else:
         emit(writer, NodeDone(node="github"))
     writer({"event": "github_folded", "n_projects": n})
-    return {"github_repos": None, "github_resume": None}
+    # Explicit next_step: ``next_step`` is sticky in the checkpoint (discover set
+    # it to await/ingest), and the edge out of this node is now conditional —
+    # without resetting it a clean run could re-route back to await.
+    return {
+        "next_step": "prepare_mapping_suggestion",
+        "github_repos": None,
+        "github_resume": None,
+        "github_failures": [],
+    }

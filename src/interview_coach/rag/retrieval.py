@@ -54,13 +54,25 @@ that would otherwise pollute the model-answer prompt when the question is
 about something the corpus doesn't cover.
 """
 
+MAPPED_DOC_MIN_SCORE = 0.2
+"""Relaxed cosine floor used when retrieval is pinned to specific
+``document_ids``.
+
+The 0.5 floor's job is to reject chunks bleeding in from *unrelated* corpora.
+But when ``document_ids`` is set, HITL doc-mapping already gave us high
+confidence the chunks belong to *this* project, so that bleed risk is gone —
+retrieval is already scoped to those docs. We keep a small (non-zero) floor as
+a garbage-guard so a wildly off-topic question can't drag in a random chunk,
+but otherwise admit the best-matching chunks from the right doc.
+"""
+
 
 async def retrieve_grounding(
     *,
     user_id: uuid.UUID,
     query: str,
     k: int = 4,
-    source_kinds: tuple[str, ...] = ("project_doc",),
+    source_kinds: tuple[str, ...] = ("project_doc", "github_repo"),
     document_ids: tuple[uuid.UUID, ...] = (),
     min_score: float = MIN_GROUNDING_SCORE,
     retries: int | None = None,
@@ -68,15 +80,22 @@ async def retrieve_grounding(
     """Embed the query, then return the top-k chunks belonging to `user_id`
     whose `source_doc_kind` is in `source_kinds`. When `document_ids` is
     non-empty, results are further scoped to chunks from those specific docs
-    (used when the question generator pinned a focus to a project_doc).
+    (used when the question generator pinned a focus to a project_doc or a
+    github_repo) and the score floor relaxes to ``MAPPED_DOC_MIN_SCORE``.
 
-    Hits with cosine similarity below ``min_score`` are dropped so the
+    The default ``source_kinds`` is the set of candidate-deep corpora the model
+    answer may draw from (``project_doc`` + ``github_repo``).
+
+    Hits with cosine similarity below the effective floor are dropped so the
     model-answer prompt never gets fed weakly-related chunks.
 
     Empty input string or no matching rows return `[]`.
     """
     if not query.strip() or not source_kinds:
         return []
+
+    # When scoped to pinned docs, relax the floor — bleed risk is gone.
+    effective_min = MAPPED_DOC_MIN_SCORE if document_ids else min_score
 
     mode = (settings.retrieval_mode or "hybrid").lower()
     if mode not in ("hybrid", "vector"):
@@ -90,6 +109,7 @@ async def retrieve_grounding(
             "source_kinds": list(source_kinds),
             "document_ids": [str(d) for d in document_ids],
             "min_score": min_score,
+            "effective_min": effective_min,
             "mode": mode,
         },
         metadata={"user_id": str(user_id)},
@@ -113,12 +133,13 @@ async def retrieve_grounding(
                 document_ids=document_ids,
                 k=k,
             )
-            hits = [h for h in raw_hits if h.score >= min_score]
+            hits = [h for h in raw_hits if h.score >= effective_min]
             _update_obs(
                 obs,
                 output={
                     "n_hits": len(hits),
                     "n_dropped_below_min_score": len(raw_hits) - len(hits),
+                    "effective_min": effective_min,
                     "mode": mode,
                     "hits": _telemetry_hits(hits),
                 },
@@ -137,12 +158,13 @@ async def retrieve_grounding(
             k=k,
             candidate_k=settings.hybrid_candidate_k,
             rrf_k=settings.rrf_k,
-            min_cosine_score=min_score,
+            min_cosine_score=effective_min,
         )
         _update_obs(
             obs,
             output={
                 "n_hits": len(hits),
+                "effective_min": effective_min,
                 "mode": mode,
                 "embedder_down": qvec is None,
                 "hits": _telemetry_hits(hits),

@@ -209,3 +209,33 @@ async def test_embed_query_retries_none_falls_back_to_instance_default() -> None
         await client.embed_query("x")
     assert calls["n"] == 2  # instance default
     await client.aclose()
+
+
+async def test_embed_passages_batches_and_preserves_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """N texts over the batch cap split into ceil(N/batch) POSTs, and the
+    concatenated vectors come back in the original order (follow-up 3)."""
+    import json
+
+    from interview_coach.config import settings
+
+    monkeypatch.setattr(settings, "embedder_max_batch", 2)
+    batches: list[list[str]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        texts = json.loads(req.read())["texts"]
+        batches.append(texts)
+        # Echo each text's index as its (1-d) vector so order is verifiable.
+        return httpx.Response(
+            200,
+            json={
+                "vectors": [[float(t[1:])] for t in texts],
+                "model": EXPECTED_MODEL_NAME,
+                "dim": EXPECTED_DIM,
+            },
+        )
+
+    client = _client_with_transport(handler)
+    out = await client.embed_passages([f"t{i}" for i in range(5)])
+    assert out == [[0.0], [1.0], [2.0], [3.0], [4.0]]
+    assert [len(b) for b in batches] == [2, 2, 1]  # ceil(5/2) = 3 POSTs
+    await client.aclose()

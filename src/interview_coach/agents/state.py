@@ -71,6 +71,11 @@ class InterviewState(TypedDict, total=False):
     # ``github_resume``: the user's repo-selection resume payload
     # (``{"selected_urls": [...]}``), set by the await node, read by ingest.
     github_resume: dict[str, Any] | None
+    # ``github_failures`` (Phase 32 follow-up 3): per-repo ingest failures from
+    # the last ingest pass — ``[{html_url, full_name, step, code, reason}]``.
+    # Non-empty → the ingest node routes back to ``await_repo_selection`` (the
+    # prep⊥interview barrier) instead of finalizing; cleared on a clean run.
+    github_failures: list[dict[str, Any]]
 
     # --- conditional-edge routing ---
     # Read by the conditional edges out of ``prepare_mapping_suggestion`` (loop
