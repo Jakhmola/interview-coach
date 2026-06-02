@@ -171,7 +171,7 @@ async def test_question_generator_real() -> None:
             s,
             user_id=user_id,
             job_id=job_id,
-            round_type="resume_walkthrough",
+            round_type="experience_deep_dive",
             n_questions=3,
         )
     session_id = sess.id
@@ -219,7 +219,7 @@ async def test_full_loop_real() -> None:
             s,
             user_id=user_id,
             job_id=job_id,
-            round_type="resume_walkthrough",
+            round_type="experience_deep_dive",
             n_questions=1,
         )
     session_id = sess.id
@@ -305,7 +305,7 @@ async def test_resumability_real(tmp_path: Any) -> None:
             s,
             user_id=user_id,
             job_id=job_id,
-            round_type="resume_walkthrough",
+            round_type="experience_deep_dive",
             n_questions=1,
         )
     session_id = sess.id
@@ -315,7 +315,7 @@ async def test_resumability_real(tmp_path: Any) -> None:
     initial_state = {
         "user_id": str(user_id),
         "session_id": str(session_id),
-        "round_type": "resume_walkthrough",
+        "round_type": "experience_deep_dive",
         "n_questions": 1,
         "turn_index": 0,
     }

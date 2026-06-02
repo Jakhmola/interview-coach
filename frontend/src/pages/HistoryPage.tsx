@@ -7,7 +7,8 @@ import { codeFrom } from "../errors";
 import { useAuth } from "../state/auth";
 
 const roundLabels = {
-  resume_walkthrough: "Resume / Project deep-dive",
+  experience_deep_dive: "Experience deep-dive",
+  technical_challenge: "Technical challenge",
   behavioral_star: "Behavioral / STAR",
 };
 

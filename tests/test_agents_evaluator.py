@@ -73,7 +73,7 @@ async def _make_session_with_turn(
         agent_session,
         user_id=alice.id,
         job_id=seeded_job.id,
-        round_type="resume_walkthrough",
+        round_type="experience_deep_dive",
         n_questions=n_questions,
     )
     turn = await repos.create_turn(

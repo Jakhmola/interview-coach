@@ -9,8 +9,9 @@ profile when no useful anchor exists.
 ``focus_key`` is the same opaque token the picker stamps onto
 ``turn.metadata_json``:
 
-* ``highlight:{exp_idx}:{hl_idx}`` — resume-walkthrough highlight.
-* ``project:{name|idx_N}`` — resume-walkthrough project.
+* ``highlight:{exp_idx}:{hl_idx}`` — experience-round highlight.
+* ``project:{name|idx_N}`` — experience-round project.
+* ``skill:{name}`` — technical round; returns a lean summary+skills slice.
 * free-form signal string — behavioral round; no anchor in the profile.
 * ``None`` — picker found no candidates (degenerate profile).
 
@@ -68,6 +69,13 @@ def profile_slice_for_focus(
     if not profile:
         return {}
 
+    if focus_key and focus_key.startswith("skill:"):
+        # Technical round: the round is about the role's domain, not the
+        # candidate's history — ship only summary + skills.
+        return {
+            "summary": profile.get("summary", ""),
+            "skills": list(profile.get("skills") or []),
+        }
     if focus_key and focus_key.startswith("highlight:"):
         sliced = _slice_highlight(profile, focus_key)
         return sliced if sliced is not None else _strip_empty_project_roles(profile)

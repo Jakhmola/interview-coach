@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 PHASE_TAG = os.environ.get("EVAL_PHASE_TAG", "14-baseline")
 RESULTS_CSV = Path(__file__).parent / "model_answer_results.csv"
 N_QUESTIONS = 3  # Lighter than question-quality (3*2 LLM calls per turn here).
-ROUND_TYPES = ["resume_walkthrough", "behavioral_star"]
+ROUND_TYPES = ["experience_deep_dive", "behavioral_star"]
 PLACEHOLDER_ANSWER = "I don't really know."
 
 pytestmark = pytest.mark.skipif(

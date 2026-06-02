@@ -204,7 +204,7 @@ class SessionRow(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "round_type in ('resume_walkthrough','behavioral_star')",
+            "round_type in ('experience_deep_dive','technical_challenge','behavioral_star')",
             name="ck_sessions_round_type",
         ),
         CheckConstraint(

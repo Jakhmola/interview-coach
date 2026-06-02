@@ -162,10 +162,13 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 29    | Arch deepening — activeJob deep setter (D) + collapse providers seam (F) + embedding-identity owner (G) | ✅          |
 | 30    | Arch deepening — prep-node glue (A/E) + readiness owner (B) + vector-SQL dedup (C) + ingestion.web shim deletion (D); ADR 0002 routing stays edge-defined | ✅ |
 | 31    | CI pipeline — GitHub Actions gating test/lint/fmt on PRs | ✅ |
-| 32    | GitHub ingestion — gather repos from CV/user URL, scrape public repos into grounding | ⏳ |
-| 33    | Technical interview round type (grounded in GitHub repos from P32) | ⏳ |
-| 34    | Speech-to-text — voice answers in the interview loop | ⏳ |
-| 35    | Deployability + CD — one-command setup, docs, LLM-provider switch (local GPU or cloud endpoint by config) | ⏳ |
+| 32    | GitHub ingestion — gather repos from CV/user URL, scrape public repos into grounding | ✅ |
+| 33    | Round-type system + grounded rounds — strategy registry; merge resume+github → experience deep-dive (repo-grounded, retrieval at question-gen); add technical-challenge round; fix behavioral model-answer; rename | ⏳ |
+| 34    | Probing follow-ups — interview loop digs deeper on the same answer thread (all rounds) | ⏳ |
+| 35    | System-design / web grounding — revive `providers/tavily`; web-ground the technical-challenge round | ⏳ |
+| 36    | Full mock interview — sequenced multi-segment session (intro → motivation → deep-dive → technical case study → wrap) | ⏳ |
+| 37    | Speech-to-text — voice answers in the interview loop | ⏳ |
+| 38    | Deployability + CD — one-command setup, docs, LLM-provider switch (local GPU or cloud endpoint by config) | ⏳ |
 
 
 ## Key files

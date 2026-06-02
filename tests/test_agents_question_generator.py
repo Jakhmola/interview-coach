@@ -153,7 +153,7 @@ def _patch_streaming_llm(monkeypatch: pytest.MonkeyPatch, deltas: list[str]) -> 
     return captured_messages
 
 
-async def test_generate_resume_walkthrough_streams_and_persists(
+async def test_generate_experience_deep_dive_streams_and_persists(
     agent_session: AsyncSession,
     alice: User,
     seeded_job: Job,
@@ -161,7 +161,7 @@ async def test_generate_resume_walkthrough_streams_and_persists(
     seeded_snapshot: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    sess = await _make_session(agent_session, alice, seeded_job, round_type="resume_walkthrough")
+    sess = await _make_session(agent_session, alice, seeded_job, round_type="experience_deep_dive")
     # Pin the weighted focus pick to the AsyncAPI project. The picker is
     # randomised in production, so without this the slice shipped to the LLM
     # (and the "AsyncAPI" assertion below) is seed-dependent and flaky.
@@ -169,7 +169,7 @@ async def test_generate_resume_walkthrough_streams_and_persists(
         question_generator.random.Random,
         "choices",
         lambda self, population, weights=None, k=1: [
-            next(t for t in population if "AsyncAPI" in t[1])
+            next(t for t in population if "AsyncAPI" in t.label)
         ],
     )
     captured = _patch_streaming_llm(
@@ -322,7 +322,7 @@ async def test_prereqs_missing_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Profile not built yet → typed error."""
-    sess = await _make_session(agent_session, alice, seeded_job, round_type="resume_walkthrough")
+    sess = await _make_session(agent_session, alice, seeded_job, round_type="experience_deep_dive")
     _patch_streaming_llm(monkeypatch, ['{"question": "X", "anchors": ["a"]}'])
 
     with pytest.raises(question_generator.GenerationPrereqsMissing) as exc:
@@ -344,7 +344,7 @@ async def test_session_complete_rejected(
         agent_session,
         user_id=alice.id,
         job_id=seeded_job.id,
-        round_type="resume_walkthrough",
+        round_type="experience_deep_dive",
         n_questions=1,
     )
     # Insert one already-answered turn.
@@ -456,7 +456,7 @@ async def test_prior_turns_threaded_into_prompt(
     seeded_snapshot: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    sess = await _make_session(agent_session, alice, seeded_job, round_type="resume_walkthrough")
+    sess = await _make_session(agent_session, alice, seeded_job, round_type="experience_deep_dive")
     await repos.create_turn(
         agent_session,
         session_id=sess.id,
