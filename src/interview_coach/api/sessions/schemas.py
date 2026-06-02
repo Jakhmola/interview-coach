@@ -7,7 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class RoundType(StrEnum):
-    resume_walkthrough = "resume_walkthrough"
+    experience_deep_dive = "experience_deep_dive"
+    technical_challenge = "technical_challenge"
     behavioral_star = "behavioral_star"
 
 

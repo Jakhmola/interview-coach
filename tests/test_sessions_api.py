@@ -100,11 +100,11 @@ async def test_create_session_happy_path(
     r = await client.post(
         "/sessions",
         headers=_auth(auth_token),
-        json={"job_id": seeds["job_id"], "round_type": "resume_walkthrough"},
+        json={"job_id": seeds["job_id"], "round_type": "experience_deep_dive"},
     )
     assert r.status_code == 201, r.text
     body = r.json()
-    assert body["round_type"] == "resume_walkthrough"
+    assert body["round_type"] == "experience_deep_dive"
     assert body["status"] == "active"
     assert body["n_questions"] == 5
 
@@ -128,7 +128,7 @@ async def test_create_session_missing_prereq(
     r = await client.post(
         "/sessions",
         headers=_auth(auth_token),
-        json={"job_id": seeds["job_id"], "round_type": "resume_walkthrough"},
+        json={"job_id": seeds["job_id"], "round_type": "experience_deep_dive"},
     )
     assert r.status_code == 400
     assert r.json()["detail"] == expected_detail
@@ -140,7 +140,7 @@ async def test_create_session_unknown_job(client: AsyncClient, auth_token: str) 
         headers=_auth(auth_token),
         json={
             "job_id": "00000000-0000-0000-0000-000000000000",
-            "round_type": "resume_walkthrough",
+            "round_type": "experience_deep_dive",
         },
     )
     assert r.status_code == 404
@@ -174,7 +174,7 @@ async def test_abandon(client: AsyncClient, auth_token: str, db_session: AsyncSe
         await client.post(
             "/sessions",
             headers=_auth(auth_token),
-            json={"job_id": seeds["job_id"], "round_type": "resume_walkthrough"},
+            json={"job_id": seeds["job_id"], "round_type": "experience_deep_dive"},
         )
     ).json()["id"]
 
@@ -193,7 +193,7 @@ async def test_abandon_does_not_downgrade_complete_session(
         await client.post(
             "/sessions",
             headers=_auth(auth_token),
-            json={"job_id": seeds["job_id"], "round_type": "resume_walkthrough"},
+            json={"job_id": seeds["job_id"], "round_type": "experience_deep_dive"},
         )
     ).json()["id"]
     await repos.update_session_status(
@@ -438,7 +438,7 @@ async def test_next_question_streams_and_persists(
         await client.post(
             "/sessions",
             headers=_auth(auth_token),
-            json={"job_id": seeds["job_id"], "round_type": "resume_walkthrough"},
+            json={"job_id": seeds["job_id"], "round_type": "experience_deep_dive"},
         )
     ).json()["id"]
 
@@ -475,7 +475,7 @@ async def test_next_question_locks_until_answered(
         await client.post(
             "/sessions",
             headers=_auth(auth_token),
-            json={"job_id": seeds["job_id"], "round_type": "resume_walkthrough"},
+            json={"job_id": seeds["job_id"], "round_type": "experience_deep_dive"},
         )
     ).json()["id"]
 
@@ -516,7 +516,7 @@ async def test_next_question_session_complete(
             headers=_auth(auth_token),
             json={
                 "job_id": seeds["job_id"],
-                "round_type": "resume_walkthrough",
+                "round_type": "experience_deep_dive",
                 "n_questions": 1,
             },
         )
@@ -567,7 +567,7 @@ async def _start_session_with_one_unanswered_turn(
             headers=_auth(auth_token),
             json={
                 "job_id": seeds["job_id"],
-                "round_type": "resume_walkthrough",
+                "round_type": "experience_deep_dive",
                 "n_questions": n_questions,
             },
         )
@@ -720,7 +720,7 @@ async def test_answer_no_active_turn_409(
         await client.post(
             "/sessions",
             headers=_auth(auth_token),
-            json={"job_id": seeds["job_id"], "round_type": "resume_walkthrough"},
+            json={"job_id": seeds["job_id"], "round_type": "experience_deep_dive"},
         )
     ).json()["id"]
 

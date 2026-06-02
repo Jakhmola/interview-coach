@@ -23,15 +23,13 @@ import random
 import re
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from interview_coach.agents.profile_view import profile_slice_for_focus
-from interview_coach.agents.prompts import (
-    QUESTION_BEHAVIORAL_STAR_SYSTEM,
-    QUESTION_RESUME_WALKTHROUGH_SYSTEM,
-)
+from interview_coach.agents.rounds import FocusMode, RoundStrategy, get_round_strategy
 from interview_coach.agents.schemas import Question
 from interview_coach.agents.state import RoundType
 from interview_coach.agents.streaming_json import (
@@ -43,6 +41,7 @@ from interview_coach.db.models import SessionRow
 from interview_coach.db.session import AsyncSessionLocal
 from interview_coach.llm.client import astream_with_telemetry, chat_model
 from interview_coach.llm.telemetry import set_node_context
+from interview_coach.rag.retrieval import GroundingHit, retrieve_grounding
 
 logger = logging.getLogger(__name__)
 
@@ -153,31 +152,47 @@ def _project_candidate_corpus(proj: dict[str, Any]) -> set[str]:
     return _tokens(" ".join(parts))
 
 
+@dataclass(frozen=True)
+class FocusPick:
+    """The highlight / project / skill / signal the question must drill into.
+
+    ``repo_backed`` is True only for an ``experience_projects`` focus whose
+    profile entry is a github project — it gates the question-gen-time code
+    retrieval. ``document_ids`` are the grounding-doc ids the focus points at
+    (a project_doc or github_repo), empty for skills / behavioral signals.
+    """
+
+    key: str
+    label: str
+    document_ids: list[str]
+    repo_backed: bool = False
+
+
 def _pick_focus_target(
     *,
-    round_type: str,
+    focus: FocusMode,
     profile: dict[str, Any],
     job_analysis: dict[str, Any],
     company_snapshot: dict[str, Any],
     prior_focus_counts: dict[str, int],
     rng: random.Random,
-) -> tuple[str, str, list[str]] | None:
-    """Pre-pick which highlight / project / signal the question must drill into.
+) -> FocusPick | None:
+    """Pre-pick which highlight / project / skill / signal the question drills into.
 
-    Returns ``(focus_key, focus_label, document_ids)`` or None.
+    Returns a :class:`FocusPick` or None (no candidates).
 
     Scoring:
       inv_freq(k) = 1 / (1 + prior_focus_counts.get(k, 0))
-      resume_walkthrough: weight = (1 + jd_overlap_count) ** 2 * inv_freq
-      behavioral_star:    weight = inv_freq
+      experience_projects: weight = (1 + jd_overlap_count) ** 2 * inv_freq
+      jd_skills / behavioral_signals: weight = inv_freq
     Candidates are sorted by weight and truncated to the top ``FOCUS_TOP_N``,
     then weighted-sampled with `rng` so relevance dominates while ties / strong
     matches still vary run-to-run (a zero-overlap candidate can't be picked when
     relevant ones exist).
     """
-    candidates: list[tuple[str, str, list[str], float]] = []  # (key, label, doc_ids, weight)
+    candidates: list[tuple[FocusPick, float]] = []
 
-    if round_type == "resume_walkthrough":
+    if focus == FocusMode.experience_projects:
         must_have = _tokens(" ".join(str(s) for s in (job_analysis.get("must_have_skills") or [])))
         for i, exp in enumerate(profile.get("experiences") or []):
             if not isinstance(exp, dict):
@@ -190,7 +205,8 @@ def _pick_focus_target(
                 doc_ids = [str(d) for d in (hl.get("source_document_ids") or [])]
                 overlap = len(_highlight_candidate_corpus(exp, hl) & must_have)
                 inv_freq = 1.0 / (1.0 + prior_focus_counts.get(key, 0))
-                candidates.append((key, label, doc_ids, (1.0 + overlap) ** 2 * inv_freq))
+                pick = FocusPick(key=key, label=label, document_ids=doc_ids)
+                candidates.append((pick, (1.0 + overlap) ** 2 * inv_freq))
         for k, proj in enumerate(profile.get("projects") or []):
             if not isinstance(proj, dict):
                 continue
@@ -199,8 +215,31 @@ def _pick_focus_target(
             doc_ids = [str(d) for d in (proj.get("source_document_ids") or [])]
             overlap = len(_project_candidate_corpus(proj) & must_have)
             inv_freq = 1.0 / (1.0 + prior_focus_counts.get(key, 0))
-            candidates.append((key, label, doc_ids, (1.0 + overlap) ** 2 * inv_freq))
-    elif round_type == "behavioral_star":
+            pick = FocusPick(
+                key=key,
+                label=label,
+                document_ids=doc_ids,
+                repo_backed=proj.get("source") == "github",
+            )
+            candidates.append((pick, (1.0 + overlap) ** 2 * inv_freq))
+    elif focus == FocusMode.jd_skills:
+        # The role's required skills are the candidate pool. Fall back to
+        # nice-to-haves, then a single synthetic focus from the title, so the
+        # technical round always has at least one thing to ask about.
+        skills: list[str] = list(job_analysis.get("must_have_skills") or [])
+        if not skills:
+            skills = list(job_analysis.get("nice_to_have_skills") or [])
+        if not skills:
+            title = (job_analysis.get("title") or "").strip()
+            skills = [title] if title else []
+        for skill in skills:
+            skill_str = str(skill).strip()
+            if not skill_str:
+                continue
+            key = f"skill:{skill_str}"
+            inv_freq = 1.0 / (1.0 + prior_focus_counts.get(key, 0))
+            candidates.append((FocusPick(key=key, label=skill_str, document_ids=[]), inv_freq))
+    elif focus == FocusMode.behavioral_signals:
         signals: list[str] = list(job_analysis.get("behavioral_signals") or [])
         if not signals:
             signals = list(company_snapshot.get("values_and_signals") or [])
@@ -209,9 +248,9 @@ def _pick_focus_target(
             if not sig_str:
                 continue
             inv_freq = 1.0 / (1.0 + prior_focus_counts.get(sig_str, 0))
-            candidates.append((sig_str, sig_str, [], inv_freq))
+            candidates.append((FocusPick(key=sig_str, label=sig_str, document_ids=[]), inv_freq))
     else:
-        raise ValueError(f"unknown round_type: {round_type!r}")
+        raise ValueError(f"unknown focus mode: {focus!r}")
 
     if not candidates:
         return None
@@ -221,13 +260,12 @@ def _pick_focus_target(
     # matches exist. Ties at the cutoff weight all stay in (don't arbitrarily
     # drop an equally-strong candidate by sort order), so variety survives among
     # the strongest via weighted sampling.
-    candidates.sort(key=lambda c: c[3], reverse=True)
-    cutoff = candidates[min(FOCUS_TOP_N, len(candidates)) - 1][3]
-    eligible = [c for c in candidates if c[3] >= cutoff]
-    weights = [w for _, _, _, w in eligible]
-    triples = [(k, lbl, ids) for k, lbl, ids, _ in eligible]
-    chosen_key, chosen_label, chosen_doc_ids = rng.choices(triples, weights=weights, k=1)[0]
-    return chosen_key, chosen_label, chosen_doc_ids
+    candidates.sort(key=lambda c: c[1], reverse=True)
+    cutoff = candidates[min(FOCUS_TOP_N, len(candidates)) - 1][1]
+    eligible = [c for c in candidates if c[1] >= cutoff]
+    picks = [p for p, _ in eligible]
+    weights = [w for _, w in eligible]
+    return rng.choices(picks, weights=weights, k=1)[0]
 
 
 def _first_sentence(text: str, max_chars: int = 160) -> str:
@@ -249,12 +287,18 @@ def _build_user_message(
     profile: dict[str, Any],
     prior_turns: list[dict[str, Any]],
     turn_index: int,
+    code_grounding: list[GroundingHit] | None = None,
 ) -> str:
     """JSON payload of the structured context we hand to the LLM.
 
     Phase 14.1: framing fields go first (`role`, `company`, `focus_target`)
     so the LLM sees them before the bulky profile. ``prior_turns`` is
     questions only — answers are stripped to keep the context tight.
+
+    Phase 33: ``code_grounding`` (experience round, repo-backed focus only)
+    carries repo passages retrieved at question-gen time. Included only when
+    non-empty, so the prompt's adaptive clause stays at the narrative altitude
+    for every other focus.
     """
     payload: dict[str, Any] = {
         "role": role_title,
@@ -263,6 +307,8 @@ def _build_user_message(
     }
     if focus_label is not None:
         payload["focus_target"] = focus_label
+    if code_grounding:
+        payload["code_grounding"] = [{"source": h.filename, "text": h.text} for h in code_grounding]
     payload["profile"] = profile
     payload["prior_turns"] = [{"question": t["question"]} for t in prior_turns]
     return json.dumps(payload, ensure_ascii=False, indent=2)
@@ -270,7 +316,7 @@ def _build_user_message(
 
 def _render_system_prompt(
     *,
-    round_type: RoundType,
+    strategy: RoundStrategy,
     job_analysis: dict[str, Any],
     company_snapshot: dict[str, Any],
 ) -> str:
@@ -281,20 +327,48 @@ def _render_system_prompt(
     values = [str(v).strip() for v in (company_snapshot.get("values_and_signals") or [])][:4]
     values_one_line = ", ".join(v for v in values if v) or "professionalism, ownership, clarity"
 
-    if round_type == "resume_walkthrough":
-        template = QUESTION_RESUME_WALKTHROUGH_SYSTEM
-    elif round_type == "behavioral_star":
-        template = QUESTION_BEHAVIORAL_STAR_SYSTEM
-    else:
-        raise ValueError(f"unknown round_type: {round_type!r}")
-
-    return template.format(
+    # Every round's question template accepts the same five framing slots;
+    # `str.format` ignores any a given template doesn't reference.
+    return strategy.question_system.format(
         company_name=company_name,
         role_title=role_title,
         seniority=seniority,
         mission_one_line=mission_one_line,
         values_one_line=values_one_line,
     )
+
+
+async def _retrieve_code_for_focus(
+    *,
+    user_id: uuid.UUID,
+    query: str,
+    document_ids: list[str],
+) -> list[GroundingHit]:
+    """Retrieve repo passages for a repo-backed experience focus, scoped to the
+    focus's ``github_repo`` docs.
+
+    Single-attempt, fail-fast → ``[]`` on any failure, so a slow or dead
+    embedder degrades the question to the narrative altitude instead of stalling
+    question generation. Mirrors the evaluator's in-turn retrieval policy.
+    """
+    doc_ids: list[uuid.UUID] = []
+    for d in document_ids:
+        try:
+            doc_ids.append(uuid.UUID(str(d)))
+        except (ValueError, TypeError):
+            logger.warning("skipping invalid focus_document_id %r in qgen grounding", d)
+    try:
+        return await retrieve_grounding(
+            user_id=user_id,
+            query=query,
+            k=3,
+            source_kinds=("github_repo",),
+            document_ids=tuple(doc_ids),
+            retries=1,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("qgen code grounding failed; degrading to narrative ([])")
+        return []
 
 
 async def stream_question(
@@ -341,6 +415,7 @@ async def stream_question(
     )
 
     round_type: RoundType = session_row.round_type  # type: ignore[assignment]
+    strategy = get_round_strategy(round_type)
 
     async with AsyncSessionLocal() as s:
         prior_keys = await repos.list_prior_focus_keys_for_user_job(
@@ -352,25 +427,33 @@ async def stream_question(
     prior_counts = repos.count_focus_keys(prior_keys)
 
     picked = _pick_focus_target(
-        round_type=round_type,
+        focus=strategy.focus,
         profile=context["profile"],
         job_analysis=context["job_analysis"],
         company_snapshot=context["company_snapshot"],
         prior_focus_counts=prior_counts,
         rng=random.Random(),
     )
-    focus_key: str | None
-    focus_label: str | None
-    focus_document_ids: list[str]
-    if picked is None:
-        focus_key, focus_label, focus_document_ids = None, None, []
-    else:
-        focus_key, focus_label, focus_document_ids = picked
+    focus_key = picked.key if picked is not None else None
+    focus_label = picked.label if picked is not None else None
+    focus_document_ids = picked.document_ids if picked is not None else []
 
     company_name = (
         context["job_analysis"].get("company_name") or ""
     ).strip() or "the hiring company"
     role_title = (context["job_analysis"].get("title") or "").strip() or "this role"
+
+    # Phase 33: for a repo-backed experience focus, retrieve the project's real
+    # repo code/manifests at question-gen time so the prompt can ask an
+    # implementation-level question. Only fires for the experience round's
+    # github projects; everything else stays at the narrative altitude.
+    code_grounding: list[GroundingHit] = []
+    if strategy.qgen_grounding and picked is not None and picked.repo_backed:
+        code_grounding = await _retrieve_code_for_focus(
+            user_id=user_id,
+            query=f"{role_title} {picked.label}",
+            document_ids=picked.document_ids,
+        )
 
     # Phase 20: ship only the focus-anchored slice of the profile to the
     # LLM, not the full 6-12 KB JSON. The picker's focus_key (or None)
@@ -384,9 +467,10 @@ async def stream_question(
         profile=profile_for_prompt,
         prior_turns=context["prior_turns"],
         turn_index=turn_index,
+        code_grounding=code_grounding,
     )
     system_msg = _render_system_prompt(
-        round_type=round_type,
+        strategy=strategy,
         job_analysis=context["job_analysis"],
         company_snapshot=context["company_snapshot"],
     )

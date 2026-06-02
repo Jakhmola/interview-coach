@@ -23,15 +23,18 @@ import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
 
 const roundLabels: Record<RoundType, string> = {
-  resume_walkthrough: "Resume / Project deep-dive",
+  experience_deep_dive: "Experience deep-dive",
+  technical_challenge: "Technical challenge",
   behavioral_star: "Behavioral / STAR",
 };
 
 const roundDescriptions: Record<RoundType, string> = {
-  resume_walkthrough:
-    "Drill into projects on your CV. Expect follow-ups on tradeoffs, scale, and your specific contribution.",
+  experience_deep_dive:
+    "Drill into what you've actually built — CV highlights, project docs, and your GitHub repos. Repo-backed projects get implementation-level questions.",
+  technical_challenge:
+    "Forward-looking problems on the role's must-have skills, scaled to seniority — from fundamentals through system design. Tests whether you can do the work.",
   behavioral_star:
-    "STAR-format questions about how you handled situations. Expect questions on conflict, ownership, and ambiguity.",
+    "STAR-format questions on how you work with people — conflict, ownership, ambiguity — grounded in the role's signals and the company's values.",
 };
 
 export function InterviewPage() {
@@ -44,7 +47,7 @@ export function InterviewPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
-  const [roundType, setRoundType] = useState<RoundType>("resume_walkthrough");
+  const [roundType, setRoundType] = useState<RoundType>("experience_deep_dive");
   const [nQuestions, setNQuestions] = useState(5);
   const [answer, setAnswer] = useState("");
   const [streamQuestion, setStreamQuestion] = useState("");

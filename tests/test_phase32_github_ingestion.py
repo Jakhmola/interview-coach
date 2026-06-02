@@ -376,6 +376,7 @@ def test_focus_weighting_fires_for_github_project() -> None:
     """A github ProjectItem is an ordinary focus candidate and its JD∩tech
     overlap is scored — no new weighting code, just proof it counts."""
     from interview_coach.agents.nodes.question_generator import _pick_focus_target
+    from interview_coach.agents.rounds import FocusMode
 
     profile = {
         "experiences": [],
@@ -404,7 +405,7 @@ def test_focus_weighting_fires_for_github_project() -> None:
     seen: set[str] = set()
     for seed in range(50):
         picked = _pick_focus_target(
-            round_type="resume_walkthrough",
+            focus=FocusMode.experience_projects,
             profile=profile,
             job_analysis=job,
             company_snapshot={"values_and_signals": []},
@@ -412,7 +413,7 @@ def test_focus_weighting_fires_for_github_project() -> None:
             rng=random.Random(seed),
         )
         assert picked is not None
-        seen.add(picked[0])
+        seen.add(picked.key)
     # The JD-overlapping github project must be reachable and is favoured.
     assert "project:GhRepo" in seen
 

@@ -32,10 +32,8 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from interview_coach.agents.profile_view import profile_slice_for_focus
-from interview_coach.agents.prompts import (
-    EVALUATOR_JUDGE_SYSTEM,
-    MODEL_ANSWER_SYSTEM,
-)
+from interview_coach.agents.prompts import EVALUATOR_JUDGE_SYSTEM
+from interview_coach.agents.rounds import AnswerGrounding, get_round_strategy
 from interview_coach.agents.schemas import Judgment, ModelAnswerOnly
 from interview_coach.agents.streaming_json import (
     StreamingJsonError,
@@ -178,11 +176,12 @@ async def _run_model_answer_call(
     profile: dict[str, Any],
     hits: list[GroundingHit],
     temperature: float,
+    model_answer_system: str,
 ) -> AsyncIterator[tuple[str, Any]]:
     user_msg = _build_model_answer_message(turn=turn, profile=profile, hits=hits)
     llm = chat_model(temperature=temperature).bind(response_format={"type": "json_object"})
     messages = [
-        SystemMessage(content=MODEL_ANSWER_SYSTEM),
+        SystemMessage(content=model_answer_system),
         HumanMessage(content=user_msg),
     ]
 
@@ -274,6 +273,7 @@ async def stream_evaluation(
     metadata = turn.metadata_json or {}
     focus_key = metadata.get("focus_key")
     slim_profile = profile_slice_for_focus(full_profile, focus_key)
+    strategy = get_round_strategy(sess.round_type)
 
     logger.info(
         "Evaluator: session=%s turn=%s (turn_index=%d)",
@@ -282,14 +282,19 @@ async def stream_evaluation(
         turn.turn_index,
     )
 
-    # Kick off retrieval BEFORE starting the judge stream. Judge runs on
-    # the llama.cpp service (GPU + small CPU footprint), retrieval hits the
-    # embedder sidecar + pgvector (CPU + DB) — different resources, fully
-    # overlappable. If the judge fails we cancel the task to avoid a
-    # dangling coroutine.
-    retrieve_task: asyncio.Task[list[GroundingHit]] = asyncio.create_task(
-        _retrieve_for_turn(user_id=user_id, turn=turn)
-    )
+    # Phase 33: only the experience round's model answer is RAG-grounded
+    # (``rag_docs``). The technical round's answer is authoritative and the
+    # behavioral round's is an illustrative hypothetical — both skip retrieval
+    # entirely. Skipping also fixes the behavioral bug where the focus carried
+    # no doc-ids and retrieval ran unscoped over every corpus.
+    retrieve_task: asyncio.Task[list[GroundingHit]] | None = None
+    if strategy.answer_grounding == AnswerGrounding.rag_docs:
+        # Kick off retrieval BEFORE starting the judge stream. Judge runs on
+        # the llama.cpp service (GPU + small CPU footprint), retrieval hits the
+        # embedder sidecar + pgvector (CPU + DB) — different resources, fully
+        # overlappable. If the judge fails we cancel the task to avoid a
+        # dangling coroutine.
+        retrieve_task = asyncio.create_task(_retrieve_for_turn(user_id=user_id, turn=turn))
 
     # --- Call 1: judge ---
     judgment: Judgment | None = None
@@ -302,21 +307,26 @@ async def stream_evaluation(
             else:
                 yield (event, data)
     except BaseException:
-        retrieve_task.cancel()
+        if retrieve_task is not None:
+            retrieve_task.cancel()
         raise
     assert judgment is not None  # _run_judge_call raises otherwise
 
     # --- Wait on the (most likely already-finished) retrieval task ---
-    try:
-        hits = await retrieve_task
-    except Exception:  # noqa: BLE001
-        # _retrieve_for_turn already swallows exceptions to []; this is a
-        # belt-and-braces guard in case asyncio plumbing surfaces one.
-        logger.exception("retrieve task raised unexpectedly; degrading to []")
-        hits = []
+    hits: list[GroundingHit] = []
+    if retrieve_task is not None:
+        try:
+            hits = await retrieve_task
+        except Exception:  # noqa: BLE001
+            # _retrieve_for_turn already swallows exceptions to []; this is a
+            # belt-and-braces guard in case asyncio plumbing surfaces one.
+            logger.exception("retrieve task raised unexpectedly; degrading to []")
+            hits = []
     logger.info(
-        "Evaluator grounding: turn=%s hits=%d (kinds=%s)",
+        "Evaluator grounding: turn=%s round=%s grounding=%s hits=%d (kinds=%s)",
         turn_id,
+        sess.round_type,
+        strategy.answer_grounding,
         len(hits),
         [h.source_doc_kind for h in hits],
     )
@@ -329,7 +339,11 @@ async def stream_evaluation(
     model_answer_failed_reason: str | None = None
     try:
         async for event, data in _run_model_answer_call(
-            turn=turn, profile=slim_profile, hits=hits, temperature=temperature
+            turn=turn,
+            profile=slim_profile,
+            hits=hits,
+            temperature=temperature,
+            model_answer_system=strategy.model_answer_system,
         ):
             if event == "__parsed__":
                 model_answer = data.model_answer

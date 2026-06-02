@@ -200,7 +200,7 @@ export type PrepStatus = {
   } | null;
 };
 
-export type RoundType = "resume_walkthrough" | "behavioral_star";
+export type RoundType = "experience_deep_dive" | "technical_challenge" | "behavioral_star";
 export type SessionStatus = "active" | "complete" | "abandoned";
 
 export type Session = {

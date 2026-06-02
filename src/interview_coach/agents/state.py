@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, TypedDict
 
-RoundType = Literal["resume_walkthrough", "behavioral_star"]
+RoundType = Literal["experience_deep_dive", "technical_challenge", "behavioral_star"]
 SessionStatus = Literal["active", "complete", "abandoned"]
 
 

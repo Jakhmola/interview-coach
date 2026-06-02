@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 PHASE_TAG = os.environ.get("EVAL_PHASE_TAG", "12a-baseline")
 RESULTS_CSV = Path(__file__).parent / "results.csv"
 N_QUESTIONS = 5
-ROUND_TYPES = ["resume_walkthrough", "behavioral_star"]
+ROUND_TYPES = ["experience_deep_dive", "behavioral_star"]
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("INTEGRATION") != "1",

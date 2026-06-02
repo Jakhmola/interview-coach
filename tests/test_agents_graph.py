@@ -441,7 +441,7 @@ async def test_interview_graph_interrupts_then_resumes(
         {
             "user_id": str(uuid.uuid4()),
             "session_id": str(uuid.uuid4()),
-            "round_type": "resume_walkthrough",
+            "round_type": "experience_deep_dive",
             "n_questions": 1,
             "turn_index": 0,
         },
