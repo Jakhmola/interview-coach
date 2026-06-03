@@ -36,28 +36,50 @@ class SessionOut(BaseModel):
     created_at: datetime
 
 
-class TurnOut(BaseModel):
+class MessageOut(BaseModel):
+    """One utterance in a thread (Phase 34)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    thread_id: uuid.UUID
+    seq: int
+    role: Literal["interviewer", "candidate"]
+    kind: Literal["question", "probe", "clarify", "nudge"] | None = None
+    text: str
+    created_at: datetime
+
+
+class ThreadOut(BaseModel):
+    """One topic + its transcript + its single evaluation (Phase 34)."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     session_id: uuid.UUID
-    turn_index: int
-    question: str
+    thread_index: int
+    focus_key: str | None = None
+    focus_label: str | None = None
+    focus_document_ids: list[str] | None = None
     anchors_json: list[str]
-    answer: str | None = None
+    status: Literal["open", "closed"]
     score: int | None = None
     feedback: str | None = None
     model_answer: str | None = None
-    metadata_json: dict[str, Any] | None = None
     created_at: datetime
+    messages: list[MessageOut] = Field(default_factory=list)
 
 
 class SessionDetail(SessionOut):
-    turns: list[TurnOut]
+    threads: list[ThreadOut]
 
 
-class AnswerSubmitRequest(BaseModel):
-    answer: str
+class MessageRequest(BaseModel):
+    """Body of ``POST /sessions/{id}/message``. ``message`` is null/empty to
+    open the session (first thread); otherwise it is the candidate's answer to
+    the interviewer's last move."""
+
+    message: str | None = None
 
 
 class PrepareRequest(BaseModel):

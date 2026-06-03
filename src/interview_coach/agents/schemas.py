@@ -123,11 +123,12 @@ class Question(BaseModel):
 
 
 class Evaluation(BaseModel):
-    """Combined evaluator output for a single turn (Phase 9).
+    """Combined evaluator output for a single thread (Phase 9, Phase 34).
 
     Phase 14 splits the LLM call into two — `Judgment` and `ModelAnswer` —
     but the persisted shape and external API still match this combined
-    schema, so we keep it.
+    schema, so we keep it. Phase 34 evaluates one **thread** (the whole
+    topic conversation) instead of a single turn; the shape is unchanged.
     """
 
     score: int = Field(ge=1, le=10, description="Single overall 1–10 score.")
@@ -151,6 +152,21 @@ class ModelAnswerOnly(BaseModel):
     """Phase 14 model-answer call output."""
 
     model_answer: str
+
+
+class ConductorMove(BaseModel):
+    """Phase 34 conductor output: the interviewer's next move within a thread.
+
+    The conductor LLM is asked for ``action`` first (a scalar the graph routes
+    on) and ``message`` second (the interviewer utterance, streamed). ``wrap``
+    is **not** here — it is the loop's terminal, reached when ``advance`` fires
+    with the topic budget spent, not a move the model can pick. For
+    ``action == "advance"`` the ``message`` is ignored (the thread closes; no
+    utterance is shown).
+    """
+
+    action: Literal["probe", "clarify", "nudge", "advance"]
+    message: str = ""
 
 
 class DocIntakeExtracted(BaseModel):

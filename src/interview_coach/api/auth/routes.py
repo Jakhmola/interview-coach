@@ -66,9 +66,9 @@ async def _delete_checkpoint_threads_for_user(
     user_id,
 ) -> None:
     """Best-effort cleanup of every langgraph checkpoint thread owned by
-    this user. Patterns:
-      * ``prep:{user_id}:{job_id}``               — prep_graph per JD
-      * ``{session_id}:turn_*``                   — interview graph per turn
+    this user. Both patterns are known keys (no enumeration needed):
+      * ``prep:{user_id}:{job_id}``   — prep_graph per JD
+      * ``interview:{session_id}``    — interview graph per session (Phase 34)
 
     Failures are logged and swallowed so a flaky saver doesn't abort the
     account reset — the DB scrub is the source of truth and orphan
@@ -80,33 +80,19 @@ async def _delete_checkpoint_threads_for_user(
     if adelete is None:
         return
 
-    # Per-job prep threads — pattern known, no enumeration needed.
+    # Per-job prep threads.
     for jid in job_ids:
         try:
             await adelete(f"prep:{user_id}:{jid}")
         except Exception:  # noqa: BLE001
             logger.exception("adelete_thread failed for prep:%s:%s", user_id, jid)
 
-    # Per-session turn threads — ``n`` is unbounded, so query the saver's
-    # underlying connection for distinct thread_ids matching the prefix.
-    conn = getattr(checkpointer, "conn", None)
-    if conn is None or not session_ids:
-        return
+    # Per-session interview threads.
     for sid in session_ids:
         try:
-            async with conn.execute(
-                "SELECT DISTINCT thread_id FROM checkpoints WHERE thread_id LIKE ?",
-                (f"{sid}:turn_%",),
-            ) as cur:
-                rows = await cur.fetchall()
-            for (thread_id,) in rows:
-                try:
-                    await adelete(thread_id)
-                except Exception:  # noqa: BLE001
-                    logger.exception("adelete_thread failed for %s", thread_id)
+            await adelete(f"interview:{sid}")
         except Exception:  # noqa: BLE001
-            # Saver table might be missing in a fresh install — never fatal.
-            logger.exception("checkpoint thread enumeration failed for session %s", sid)
+            logger.exception("adelete_thread failed for interview:%s", sid)
 
 
 @router.post("/me/reset", status_code=status.HTTP_204_NO_CONTENT)

@@ -20,17 +20,19 @@ from fastapi.responses import StreamingResponse
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from interview_coach.agents.nodes.evaluator import (
-    TurnNotAnswered,
-    TurnNotFound,
+from interview_coach.agents.interview_events import (
+    ENVELOPE_EVENT_NAMES,
+    INNER_EVENT_NAMES,
 )
+from interview_coach.agents.nodes.evaluator import ThreadNotFound
 from interview_coach.agents.nodes.profile_builder import NoDocumentsError
 from interview_coach.agents.nodes.question_generator import GenerationPrereqsMissing
 from interview_coach.agents.prep_events import LIFECYCLE_EVENT_NAMES
 from interview_coach.agents.streaming_json import StreamingJsonError
 from interview_coach.api.auth.deps import get_current_user
 from interview_coach.api.sessions.schemas import (
-    AnswerSubmitRequest,
+    MessageOut,
+    MessageRequest,
     PrepareMappingResumeRequest,
     PrepareRepoResumeRequest,
     PrepareRequest,
@@ -40,7 +42,7 @@ from interview_coach.api.sessions.schemas import (
     SessionDetail,
     SessionOut,
     SessionStatus,
-    TurnOut,
+    ThreadOut,
 )
 from interview_coach.api.streaming import SSE_HEADERS, sse_event
 from interview_coach.db import repos
@@ -105,7 +107,27 @@ async def get_session_detail(
     row = await repos.get_session(session, session_id, user.id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "session_not_found")
-    turns = await repos.list_turns_for_session(session, session_id)
+    threads = await repos.list_threads_for_session(session, session_id)
+    thread_outs: list[ThreadOut] = []
+    for t in threads:
+        msgs = await repos.list_messages_for_thread(session, t.id)
+        thread_outs.append(
+            ThreadOut(
+                id=t.id,
+                session_id=t.session_id,
+                thread_index=t.thread_index,
+                focus_key=t.focus_key,
+                focus_label=t.focus_label,
+                focus_document_ids=t.focus_document_ids,
+                anchors_json=list(t.anchors_json or []),
+                status=t.status,  # type: ignore[arg-type]
+                score=t.score,
+                feedback=t.feedback,
+                model_answer=t.model_answer,
+                created_at=t.created_at,
+                messages=[MessageOut.model_validate(m) for m in msgs],
+            )
+        )
     return SessionDetail(
         id=row.id,
         user_id=row.user_id,
@@ -114,7 +136,7 @@ async def get_session_detail(
         status=SessionStatus(row.status),
         n_questions=row.n_questions,
         created_at=row.created_at,
-        turns=[TurnOut.model_validate(t) for t in turns],
+        threads=thread_outs,
     )
 
 
@@ -437,14 +459,14 @@ async def prepare_session_resume_repos(
 # --- Phase 8/9 routes, rewritten to drive interview_graph -----------
 
 
-def _thread_config(session_id: uuid.UUID, turn_index: int) -> dict[str, Any]:
-    """One graph thread per (session, turn_index).
+def _thread_config(session_id: uuid.UUID) -> dict[str, Any]:
+    """One graph thread per **session** (Phase 34).
 
-    Each turn is its own pipeline (question_generator → interrupt →
-    evaluator → END). Per-turn thread_ids let a session walk forward
-    cleanly without colliding with prior turn checkpoints.
+    The interview graph owns the whole session loop as a single logical run
+    that spans many ``/message`` round-trips (ADR 0004), so the checkpoint
+    thread is keyed to the session — not, as before, to each turn.
     """
-    return {"configurable": {"thread_id": f"{session_id}:turn_{turn_index}"}}
+    return {"configurable": {"thread_id": f"interview:{session_id}"}}
 
 
 def _thread_config_for_prep(user_id: uuid.UUID, job_id: uuid.UUID) -> dict[str, Any]:
@@ -495,130 +517,79 @@ async def _hydrate_interview_context(
     }
 
 
-@router.post("/{session_id}/next_question")
-async def next_question(
+@router.post("/{session_id}/message")
+async def session_message(
     session_id: uuid.UUID,
+    body: MessageRequest,
     request: Request,
     user: Annotated[User, Depends(get_current_user)],
     session: Annotated[AsyncSession, Depends(get_db)],
 ) -> StreamingResponse:
-    """SSE stream of the next question's tokens.
+    """The single conversational endpoint (Phase 34 / ADR 0004).
 
-    Drives ``interview_graph`` until it interrupts on the answer gate.
+    An empty body opens the session (the first thread); otherwise ``message``
+    is the candidate's answer to the interviewer's last move. The SSE stream
+    carries the interviewer's next move(s) as a typed action envelope
+    (``move`` / ``move_done`` / ``evaluation`` / ``evaluation_done`` /
+    ``wrap``, framing the Phase-9 token streams). The graph pauses on an
+    ``interrupt`` after each move that awaits an answer — the stream then ends
+    FE-awaiting, like prep. Each call resumes the session-keyed checkpoint;
+    a fresh session is told apart from a paused one by the checkpoint state,
+    not the request shape.
     """
-    row = await repos.get_session(session, session_id, user.id)
-    if row is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "session_not_found")
-    if row.status != "active":
-        raise HTTPException(status.HTTP_409_CONFLICT, f"session_status_{row.status}")
-
-    turns = await repos.list_turns_for_session(session, session_id)
-    if turns and turns[-1].answer is None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "previous_turn_unanswered")
-    if len(turns) >= row.n_questions:
-        raise HTTPException(status.HTTP_409_CONFLICT, "session_complete")
-
-    turn_index = len(turns)
-    hydrated = await _hydrate_interview_context(session, user_id=user.id, job_id=row.job_id)
-    interview_graph = request.app.state.interview_graph
-    config = _with_callbacks(_thread_config(session_id, turn_index))
-    initial_state: dict[str, Any] = {
-        "user_id": str(user.id),
-        "session_id": str(session_id),
-        "round_type": row.round_type,
-        "n_questions": row.n_questions,
-        "turn_index": turn_index,
-        "profile": hydrated["profile"],
-        "job": hydrated["job"],
-        "company": hydrated["company"],
-    }
-    trace_meta = {
-        "graph": "interview",
-        "phase": "next_question",
-        "user_id": str(user.id),
-        "session_id": str(session_id),
-        "round_type": row.round_type,
-        # Langfuse v4 propagated-attribute values must be strings.
-        "turn_index": str(turn_index),
-    }
-    trace_tags = ["graph:interview", f"round:{row.round_type}", "phase:next_question"]
-
-    async def event_stream() -> AsyncIterator[bytes]:
-        try:
-            with trace_attributes(
-                user_id=str(user.id),
-                session_id=str(session_id),
-                metadata=trace_meta,
-                tags=trace_tags,
-            ):
-                async for chunk in interview_graph.astream(
-                    initial_state, config=config, stream_mode="custom"
-                ):
-                    event = chunk.get("event")
-                    if event == "token":
-                        yield sse_event("token", chunk.get("data", ""))
-                    elif event == "done":
-                        yield sse_event("done", chunk.get("data", {}))
-                    elif event == "error":
-                        yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
-                        return
-        except GenerationPrereqsMissing as e:
-            logger.warning("Generation prereqs missing for session=%s: %s", session_id, e)
-            yield sse_event("error", {"code": str(e)})
-        except StreamingJsonError as e:
-            logger.exception("Streaming JSON failed for session=%s", session_id)
-            yield sse_event("error", {"code": "streaming_json_error", "detail": str(e)})
-        finally:
-            await flush_langfuse()
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers=SSE_HEADERS,
-    )
-
-
-@router.post("/{session_id}/answer")
-async def submit_answer(
-    session_id: uuid.UUID,
-    body: AnswerSubmitRequest,
-    request: Request,
-    user: Annotated[User, Depends(get_current_user)],
-    session: Annotated[AsyncSession, Depends(get_db)],
-) -> StreamingResponse:
-    """Save the answer, resume the graph, and stream the evaluator output."""
-    answer = body.answer.strip()
-    if not answer:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty_answer")
-
     sess = await repos.get_session(session, session_id, user.id)
     if sess is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "session_not_found")
     if sess.status != "active":
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"session_status_{sess.status}")
-
-    turns = await repos.list_turns_for_session(session, session_id)
-    if not turns:
-        raise HTTPException(status.HTTP_409_CONFLICT, "no_active_turn")
-    latest = turns[-1]
-    if latest.answer is not None and latest.score is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "turn_already_evaluated")
-
-    if latest.answer is None:
-        await repos.update_turn_answer(session, latest.id, answer)
+        raise HTTPException(status.HTTP_409_CONFLICT, f"session_status_{sess.status}")
 
     interview_graph = request.app.state.interview_graph
-    config = _with_callbacks(_thread_config(session_id, latest.turn_index))
+    config = _with_callbacks(_thread_config(session_id))
+
+    # Paused (mid-thread, awaiting an answer) vs. fresh: read the checkpoint.
+    try:
+        gstate = await interview_graph.aget_state(config)
+    except Exception:  # noqa: BLE001
+        gstate = None
+    is_paused = gstate is not None and bool(gstate.next)
+
+    graph_input: Any
+    if is_paused:
+        msg = (body.message or "").strip()
+        if not msg:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty_message")
+        graph_input = Command(resume={"message": msg})
+    else:
+        hydrated = await _hydrate_interview_context(session, user_id=user.id, job_id=sess.job_id)
+        graph_input = {
+            "user_id": str(user.id),
+            "session_id": str(session_id),
+            "round_type": sess.round_type,
+            "n_questions": sess.n_questions,
+            "thread_id": None,
+            "thread_index": 0,
+            "anchors": [],
+            "focus_key": None,
+            "focus_label": None,
+            "focus_document_ids": [],
+            "grounding": [],
+            "followups_used": 0,
+            "pending_message": None,
+            "next_move": None,
+            "profile": hydrated["profile"],
+            "job": hydrated["job"],
+            "company": hydrated["company"],
+        }
+
     trace_meta = {
         "graph": "interview",
-        "phase": "submit_answer",
+        "phase": "message",
         "user_id": str(user.id),
         "session_id": str(session_id),
         "round_type": sess.round_type,
-        # Langfuse v4 propagated-attribute values must be strings.
-        "turn_index": str(latest.turn_index),
+        "resume": str(is_paused),
     }
-    trace_tags = ["graph:interview", f"round:{sess.round_type}", "phase:submit_answer"]
+    trace_tags = ["graph:interview", f"round:{sess.round_type}", "phase:message"]
 
     async def event_stream() -> AsyncIterator[bytes]:
         try:
@@ -629,32 +600,26 @@ async def submit_answer(
                 tags=trace_tags,
             ):
                 async for chunk in interview_graph.astream(
-                    Command(resume={"answer": answer}),
-                    config=config,
-                    stream_mode="custom",
+                    graph_input, config=config, stream_mode="custom"
                 ):
                     event = chunk.get("event")
-                    if event == "score":
-                        score_data = chunk.get("data")
-                        payload = (
-                            score_data if isinstance(score_data, dict) else {"score": score_data}
-                        )
-                        yield sse_event("score", payload)
-                    elif event in ("feedback_token", "model_answer_token"):
-                        yield sse_event(event, chunk.get("data", ""))
-                    elif event in ("feedback_done", "model_answer_done"):
-                        yield sse_event(event, {})
-                    elif event == "model_answer_error":
-                        yield sse_event(event, chunk.get("data", {}))
-                    elif event == "done":
-                        yield sse_event("done", chunk.get("data", {}))
-                    elif event == "error":
+                    # ``error`` keeps its own forward-then-terminate flow.
+                    if event == "error":
                         yield sse_event("error", {k: v for k, v in chunk.items() if k != "event"})
                         return
-        except (TurnNotFound, TurnNotAnswered) as e:
+                    if event in INNER_EVENT_NAMES:
+                        # Phase-9 sub-protocol: the payload rides under ``data``.
+                        yield sse_event(event, chunk.get("data"))
+                    elif event in ENVELOPE_EVENT_NAMES:
+                        # Framing events carry their fields at the top level.
+                        yield sse_event(event, {k: v for k, v in chunk.items() if k != "event"})
+        except GenerationPrereqsMissing as e:
+            logger.warning("Generation prereqs missing for session=%s: %s", session_id, e)
+            yield sse_event("error", {"code": str(e)})
+        except ThreadNotFound as e:
             yield sse_event("error", {"code": type(e).__name__, "detail": str(e)})
         except StreamingJsonError as e:
-            logger.exception("Evaluator streaming failed for session=%s", session_id)
+            logger.exception("Interview streaming failed for session=%s", session_id)
             yield sse_event("error", {"code": "streaming_json_error", "detail": str(e)})
         finally:
             await flush_langfuse()

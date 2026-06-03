@@ -90,3 +90,36 @@ vendored/test/generated, **token-gated** — skipped without a `GITHUB_TOKEN`). 
 detail the profile never quotes. `select_source_files` is the deliberate
 re-introduction of a source fetcher, scoped to grounding only.
 _Avoid_: feeding source code into the ProjectItem extraction — that's the cap.
+
+## Interview loop
+
+**Thread**
+One topic in an interview session — a *root question* plus the interviewer's
+follow-up moves on the same focus and the candidate's answers to them. The
+thread is the unit that gets **evaluated**: one score, feedback, and model
+answer over the whole topic conversation, produced when the thread closes. A
+session runs `n_questions` threads, one per topic.
+_Avoid_: "turn" for a whole topic — a turn was the old single
+question-answer-score row; a thread is a multi-message conversation scored once.
+
+**Message**
+One utterance in a thread, tagged with its **role** (interviewer or candidate)
+and, for the interviewer, its **move**. A thread's ordered messages are its
+transcript.
+
+**Interviewer move**
+What the interviewer does at a step, chosen by reading the thread so far:
+**question** (opens the thread on a fresh focus), **probe** (a deeper follow-up
+targeting an anchor the cumulative answer hasn't covered), **clarify**
+(re-explain the question when the candidate's message was a meta-question about
+it, not an answer), **nudge** (a hint that steers a stuck or off-track candidate
+toward a better answer), **advance** (close the thread — firing its evaluation —
+and open the next topic).
+_Avoid_: scoring a **clarify** or **nudge** as if it were an answer — they are
+interviewer help; a nudge also signals the candidate needed it.
+
+**Wrap**
+The session terminal, reached when the interviewer chooses **advance** and the
+topic budget (`n_questions`) is spent. Not an interviewer move — the budget ends
+the session, the interviewer never does.
+_Avoid_: modeling wrap as a move the interviewer can pick.

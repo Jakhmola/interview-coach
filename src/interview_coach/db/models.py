@@ -182,7 +182,7 @@ class ProfileRow(Base):
 
 
 class SessionRow(Base):
-    """Interview session: user × job × round_type, holds N turns."""
+    """Interview session: user × job × round_type, holds N threads (Phase 34)."""
 
     __tablename__ = "sessions"
 
@@ -214,31 +214,36 @@ class SessionRow(Base):
     )
 
 
-class TurnRow(Base):
-    """One Q&A round inside a session.
+class ThreadRow(Base):
+    """One topic inside a session — the unit that gets evaluated (Phase 34).
 
-    Phase 8 fills `question`, `anchors_json`, `metadata_json`.
-    Phase 9 fills `answer`, `score`, `feedback`, `model_answer`.
+    A thread is a root question plus the interviewer's follow-up moves on the
+    same focus and the candidate's answers. ``anchors_json`` is the thread's
+    fixed agenda (set at thread-open; probes target these, never minting new
+    ones). ``score`` / ``feedback`` / ``model_answer`` are NULL until the thread
+    closes — one evaluation over the whole transcript. The interviewer's and
+    candidate's utterances live in child ``MessageRow``s.
     """
 
-    __tablename__ = "turns"
+    __tablename__ = "threads"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    turn_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    question: Mapped[str] = mapped_column(Text, nullable=False)
+    thread_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    focus_key: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    focus_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    focus_document_ids: Mapped[list[Any] | None] = mapped_column(
+        JSONB().with_variant(JSON(), "sqlite"), nullable=True
+    )
     anchors_json: Mapped[list[Any]] = mapped_column(
         JSONB().with_variant(JSON(), "sqlite"), nullable=False
     )
-    answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
     score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
     model_answer: Mapped[str | None] = mapped_column(Text, nullable=True)
-    metadata_json: Mapped[dict[str, Any] | None] = mapped_column(
-        JSONB().with_variant(JSON(), "sqlite"), nullable=True
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -246,12 +251,47 @@ class TurnRow(Base):
     )
 
     __table_args__ = (
+        CheckConstraint("status in ('open','closed')", name="ck_threads_status"),
         Index(
-            "uq_turns_session_turn",
+            "uq_threads_session_thread",
             "session_id",
-            "turn_index",
+            "thread_index",
             unique=True,
         ),
+    )
+
+
+class MessageRow(Base):
+    """One utterance in a thread — interviewer move or candidate answer (Phase 34).
+
+    ``role`` is ``interviewer`` or ``candidate``. ``kind`` is the interviewer
+    move (``question`` / ``probe`` / ``clarify`` / ``nudge``) and is NULL for
+    candidate messages. ``seq`` orders the transcript within a thread.
+    """
+
+    __tablename__ = "messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    thread_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("threads.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        CheckConstraint("role in ('interviewer','candidate')", name="ck_messages_role"),
+        CheckConstraint(
+            "kind is null or kind in ('question','probe','clarify','nudge')",
+            name="ck_messages_kind",
+        ),
+        Index("uq_messages_thread_seq", "thread_id", "seq", unique=True),
     )
 
 

@@ -11,9 +11,12 @@ notes in `plan/current-phase.md`:
   same ``AsyncSqliteSaver`` used by the interview graph,
   ``thread_id = "prep:{user_id}:{job_id}"`` — a mid-prep api crash
   resumes from the last completed node on the next ``/prepare`` POST.
-* ``interview_graph`` — ``question_generator → (interrupt) → evaluator → loop``.
-  Checkpointed by AsyncSqliteSaver, ``thread_id = "{session_id}:turn_{n}"``.
-  Survives api restarts.
+* ``interview_graph`` (Phase 34) — a real loop owning the whole session:
+  ``interviewer → await_candidate (interrupt) → [probe/clarify/nudge →
+  interviewer | advance → evaluator] → evaluator → [topics remain →
+  interviewer | END]``. Checkpointed by AsyncSqliteSaver,
+  ``thread_id = "interview:{session_id}"`` — one paused run per session,
+  spanning many ``/message`` round-trips. Survives api restarts.
 
 The streaming model: nodes write opaque event dicts via
 ``get_stream_writer()``; the route consumes
@@ -35,14 +38,14 @@ from langgraph.graph import END, START, StateGraph
 
 from interview_coach.agents.graph_nodes import (
     node_apply_or_skip_mapping,
-    node_await_answer,
+    node_await_candidate,
     node_await_mapping_confirm,
     node_company_researcher,
     node_evaluator,
+    node_interviewer,
     node_job_analyzer,
     node_prepare_mapping_suggestion,
     node_profile_builder,
-    node_question_generator,
 )
 from interview_coach.agents.nodes.github_ingest import (
     node_await_repo_selection,
@@ -141,31 +144,49 @@ def build_prep_graph(checkpointer: BaseCheckpointSaver | None) -> Any:
 
 
 def build_interview_graph(checkpointer: BaseCheckpointSaver | None) -> Any:
-    """Compile the interview graph with the given checkpointer.
+    """Compile the interview graph with the given checkpointer (Phase 34).
 
-    Each *turn* of an n-question session is one graph run:
-    ``question_generator → (interrupt: await answer) → evaluator → END``.
+    The graph owns the whole session loop — a single logical run that spans
+    many ``/message`` HTTP round-trips via ``interrupt`` / ``Command(resume=…)``
+    on a session-keyed checkpoint thread (``interview:{session_id}``), exactly
+    as ``prep_graph`` spans ``/prepare`` + ``/prepare/resume`` (ADR 0004).
 
-    The session-level loop ("ask another question") happens at the route
-    layer — a new ``next_question`` request invokes the graph again on
-    the same ``thread_id``. Two reasons this beats a graph-level loop:
+    Topology::
 
-    1. The user controls pacing via the UI ("Next question" button),
-       not the graph. Looping inside the graph would have the next
-       question streaming in immediately after the evaluator finishes.
-    2. Resumability is simpler: a single linear pipeline with one
-       interrupt point. Any session can be in exactly one of three
-       states — fresh, awaiting-answer, or between-turns.
+        START
+          → interviewer ─┐ (next_move)
+              ├── advance → evaluator
+              └── question/probe/clarify/nudge → await_candidate (interrupt)
+                                                        ↓
+                                                   interviewer  (loop)
+          evaluator ─┐ (session_status)
+              ├── active   → interviewer   (open the next topic)
+              └── complete → END           (wrap)
+
+    The ``interviewer`` node decides the move; the budget/edge disposes:
+    ``advance`` routes to the evaluator (close + evaluate the thread); any
+    other move routes to ``await_candidate`` (pause for the candidate). After a
+    thread closes, ``active`` loops back to open the next topic; ``complete``
+    (topic budget spent) ends the run. Checkpointing isn't optional —
+    ``interrupt(...)`` requires it.
     """
     g: StateGraph = StateGraph(InterviewState)
-    g.add_node("question_generator", node_question_generator)
-    g.add_node("await_answer", node_await_answer)
+    g.add_node("interviewer", node_interviewer)
+    g.add_node("await_candidate", node_await_candidate)
     g.add_node("evaluator", node_evaluator)
 
-    g.add_edge(START, "question_generator")
-    g.add_edge("question_generator", "await_answer")
-    g.add_edge("await_answer", "evaluator")
-    g.add_edge("evaluator", END)
+    g.add_edge(START, "interviewer")
+    g.add_conditional_edges(
+        "interviewer",
+        lambda s: "evaluator" if s.get("next_move") == "advance" else "await_candidate",
+        {"evaluator": "evaluator", "await_candidate": "await_candidate"},
+    )
+    g.add_edge("await_candidate", "interviewer")
+    g.add_conditional_edges(
+        "evaluator",
+        lambda s: "end" if s.get("session_status") == "complete" else "interviewer",
+        {"interviewer": "interviewer", "end": END},
+    )
     return g.compile(checkpointer=checkpointer) if checkpointer is not None else g.compile()
 
 

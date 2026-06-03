@@ -22,13 +22,20 @@ typed ``SkipVerdict`` and emits ``node_skipped`` with the verdict's reason.
   ``state["force_refresh"]`` is False, and the snapshot isn't a
   *transiently* degraded placeholder — those re-attempt research.
 
-Streaming rules (used by the interview graph):
+Streaming rules (used by the interview graph, Phase 34):
 
-* ``question_generator`` forwards the underlying ``stream_question``
-  events as ``token`` / ``done`` writer events, then ``interrupt``s on
-  the awaiting-answer signal.
-* ``evaluator`` forwards the streaming-JSON ``score`` /
-  ``feedback_token`` / ``model_answer_token`` / ``done`` events.
+* ``interviewer`` consumes the candidate's ``pending_message`` (persists it as
+  a candidate Message), then either opens a thread (``stream_open_thread``) or
+  conducts one step (``stream_conduct``), forwarding the typed action-envelope
+  events (``move`` / ``token`` / ``move_done``). It sets ``next_move`` so the
+  conditional edge can route ``advance`` → evaluator, else → ``await_candidate``.
+* ``await_candidate`` is a pure ``interrupt`` node — it pauses for the
+  candidate's answer and stashes it in ``pending_message`` (no side effects, so
+  resume replays are free).
+* ``evaluator`` evaluates the closed thread over its whole transcript
+  (``stream_thread_evaluation``), forwarding ``evaluation`` / ``score`` /
+  ``feedback_token`` / ``model_answer_token`` / ``evaluation_done`` / ``wrap``,
+  resets the open-thread state, and routes ``complete`` → END else → interviewer.
 """
 
 from __future__ import annotations
@@ -40,6 +47,17 @@ from typing import Any
 from langgraph.config import get_stream_writer
 from langgraph.types import interrupt
 
+from interview_coach.agents.interview_events import (
+    EvaluationDone,
+    EvaluationStart,
+    InterviewError,
+    Move,
+    MoveDone,
+    Wrap,
+)
+from interview_coach.agents.interview_events import (
+    emit as emit_interview,
+)
 from interview_coach.agents.nodes.company_researcher import (
     CompanyNameMissing,
     JobNotAnalyzed,
@@ -54,12 +72,13 @@ from interview_coach.agents.nodes.doc_intake import (
     build_mapping_suggestion_payload,
     run_intake,
 )
-from interview_coach.agents.nodes.evaluator import stream_evaluation
+from interview_coach.agents.nodes.evaluator import stream_thread_evaluation
 from interview_coach.agents.nodes.job_analyzer import JobNotFoundError, analyze_job
 from interview_coach.agents.nodes.profile_builder import NoDocumentsError, build_profile
 from interview_coach.agents.nodes.question_generator import (
     GenerationPrereqsMissing,
-    stream_question,
+    stream_conduct,
+    stream_open_thread,
 )
 from interview_coach.agents.prep_cache import (
     decide_company_cache,
@@ -73,6 +92,7 @@ from interview_coach.agents.prep_events import (
     emit,
     emit_verdict,
 )
+from interview_coach.agents.rounds import get_round_strategy
 from interview_coach.agents.state import InterviewState
 from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
@@ -417,88 +437,180 @@ async def node_company_researcher(state: InterviewState) -> dict[str, Any]:
 # --- interview graph nodes -------------------------------------------
 
 
-async def node_question_generator(state: InterviewState) -> dict[str, Any]:
-    """Generate and stream one question; persist the Turn row.
+async def _persist_pending_candidate(state: InterviewState) -> bool:
+    """If the candidate just answered, persist it as a candidate Message on the
+    open thread. Returns True when something was appended. Runs in the
+    interviewer node (not the pure ``await_candidate`` node) so an interrupt
+    replay can never double-persist."""
+    pending = state.get("pending_message")
+    thread_id = state.get("thread_id")
+    if pending is None or not thread_id:
+        return False
+    tid = uuid.UUID(thread_id)
+    async with AsyncSessionLocal() as s:
+        seq = await repos.count_messages_for_thread(s, tid)
+        await repos.append_message(s, thread_id=tid, seq=seq, role="candidate", text=pending)
+    return True
 
-    The interrupt for the user's answer lives in a *separate* downstream
-    node (``node_await_answer``). LangGraph 1.x re-executes the
-    interrupted node on resume, so doing the LLM streaming and DB write
-    here would re-stream and double-write the turn. Splitting the
-    interrupt out keeps the side-effecting work behind a clean
-    checkpoint boundary.
+
+async def node_interviewer(state: InterviewState) -> dict[str, Any]:
+    """Open a thread or conduct one step of the open thread.
+
+    Consumes the candidate's ``pending_message`` first (persist as a candidate
+    Message). Then: no open thread → open one (focus + grounding + root
+    question); open thread → run the conductor (probe/clarify/nudge/advance),
+    with a node-side budget guard forcing ``advance`` once ``max_followups`` is
+    spent. Sets ``next_move`` for the conditional edge.
     """
     session_id = uuid.UUID(state["session_id"])
     user_id = uuid.UUID(state["user_id"])
+    round_type = state["round_type"]
     writer = get_stream_writer()
 
-    done_payload: dict[str, Any] | None = None
-    try:
-        async for kind, data in stream_question(
-            session_id=session_id,
-            user_id=user_id,
-            profile=state.get("profile"),
-            job=state.get("job"),
-            company=state.get("company"),
-        ):
-            if kind == "token":
-                writer({"event": "token", "data": data})
-            elif kind == "done":
-                done_payload = data
-                writer({"event": "done", "data": data})
-    except GenerationPrereqsMissing as e:
-        writer({"event": "error", "code": str(e)})
-        raise
+    delta: dict[str, Any] = {}
+    if await _persist_pending_candidate(state):
+        delta["pending_message"] = None
 
-    assert done_payload is not None, "stream_question did not emit a done event"
+    # --- open a fresh thread ---
+    if state.get("thread_id") is None:
+        opened: dict[str, Any] | None = None
+        try:
+            async for kind, data in stream_open_thread(
+                session_id=session_id,
+                user_id=user_id,
+                profile=state.get("profile"),
+                job=state.get("job"),
+                company=state.get("company"),
+            ):
+                if kind == "move":
+                    emit_interview(writer, Move(**data))
+                elif kind == "token":
+                    writer({"event": "token", "data": data})
+                elif kind == "move_done":
+                    emit_interview(writer, MoveDone(anchors=data.get("anchors")))
+                elif kind == "opened":
+                    opened = data
+        except GenerationPrereqsMissing as e:
+            emit_interview(writer, InterviewError(code=str(e)))
+            raise
 
-    return {
-        "current_question": done_payload,
-        "turn_index": done_payload["turn_index"],
-    }
+        assert opened is not None, "stream_open_thread did not emit an opened event"
+        delta.update(
+            {
+                "thread_id": opened["thread_id"],
+                "thread_index": opened["thread_index"],
+                "anchors": opened["anchors"],
+                "focus_key": opened["focus_key"],
+                "focus_label": opened["focus_label"],
+                "focus_document_ids": opened["focus_document_ids"],
+                "grounding": opened["grounding"],
+                "followups_used": 0,
+                "next_move": "question",
+            }
+        )
+        return delta
+
+    # --- conduct the open thread ---
+    followups_used = int(state.get("followups_used", 0) or 0)
+    strategy = get_round_strategy(round_type)
+    # Budget guard: once the per-thread follow-up cap is spent, force advance
+    # without an LLM call — the safety net that guarantees the thread ends.
+    if followups_used >= strategy.max_followups:
+        delta["next_move"] = "advance"
+        return delta
+
+    advanced = False
+    conducted: dict[str, Any] | None = None
+    async for kind, data in stream_conduct(
+        session_id=session_id,
+        user_id=user_id,
+        thread_id=uuid.UUID(state["thread_id"]),
+        thread_index=int(state["thread_index"]),
+        anchors=list(state.get("anchors") or []),
+        focus_label=state.get("focus_label"),
+        grounding=list(state.get("grounding") or []),
+        round_type=round_type,
+        profile=state.get("profile"),
+        job=state.get("job"),
+        company=state.get("company"),
+    ):
+        if kind == "advance":
+            advanced = True
+        elif kind == "move":
+            emit_interview(writer, Move(**data))
+        elif kind == "token":
+            writer({"event": "token", "data": data})
+        elif kind == "move_done":
+            emit_interview(writer, MoveDone())
+        elif kind == "conducted":
+            conducted = data
+
+    if advanced:
+        delta["next_move"] = "advance"
+    else:
+        delta["next_move"] = conducted["action"] if conducted else "probe"
+        delta["followups_used"] = followups_used + 1
+    return delta
 
 
-async def node_await_answer(state: InterviewState) -> dict[str, Any]:
-    """Single-purpose node that holds the interrupt for the user answer.
+async def node_await_candidate(state: InterviewState) -> dict[str, Any]:
+    """Pure interrupt node — pauses until the candidate's next message arrives.
 
-    LangGraph re-executes this node on resume; that's fine — its only
-    side-effect is calling ``interrupt(...)``.
+    Mirror of ``node_await_mapping_confirm``: no side-effects beyond the
+    ``interrupt(...)`` call, so resume replays are free. The candidate's message
+    is stashed in ``pending_message`` for the interviewer node to persist.
     """
-    current_q = state.get("current_question") or {}
-    resume_payload = interrupt({"awaiting": "answer", "turn_id": current_q.get("question_id")})
-    answer = (resume_payload or {}).get("answer", "")
-    return {"current_answer": answer}
+    resume = interrupt({"awaiting": "candidate", "thread_index": state.get("thread_index")})
+    message = (resume or {}).get("message", "") if isinstance(resume, dict) else ""
+    return {"pending_message": message}
 
 
 async def node_evaluator(state: InterviewState) -> dict[str, Any]:
-    """Stream the evaluation for the latest turn and update state."""
+    """Evaluate the open thread over its whole transcript, then reset the
+    open-thread state so the conditional edge opens the next topic (or ENDs)."""
     session_id = uuid.UUID(state["session_id"])
     user_id = uuid.UUID(state["user_id"])
-    current_q = state.get("current_question") or {}
-    turn_id = uuid.UUID(current_q["question_id"])
+    thread_id = uuid.UUID(state["thread_id"])
     writer = get_stream_writer()
 
     done_payload: dict[str, Any] | None = None
-    async for kind, data in stream_evaluation(
+    async for kind, data in stream_thread_evaluation(
         session_id=session_id,
         user_id=user_id,
-        turn_id=turn_id,
+        thread_id=thread_id,
+        thread_index=int(state["thread_index"]),
+        anchors=list(state.get("anchors") or []),
+        grounding=list(state.get("grounding") or []),
+        focus_key=state.get("focus_key"),
+        round_type=state["round_type"],
         profile=state.get("profile"),
     ):
-        if kind == "score":
-            writer({"event": "score", "data": data})
-        elif kind in ("feedback_token", "model_answer_token"):
+        if kind == "evaluation":
+            emit_interview(writer, EvaluationStart(thread_index=data["thread_index"]))
+        elif kind in ("score", "feedback_token", "model_answer_token"):
             writer({"event": kind, "data": data})
         elif kind in ("feedback_done", "model_answer_done"):
-            writer({"event": kind, "data": data})
+            writer({"event": kind, "data": {}})
         elif kind == "model_answer_error":
             writer({"event": kind, "data": data})
-        elif kind == "done":
+        elif kind == "evaluation_done":
             done_payload = data
-            writer({"event": "done", "data": data})
+            emit_interview(writer, EvaluationDone(**data))
+        elif kind == "wrap":
+            emit_interview(writer, Wrap())
 
-    assert done_payload is not None, "stream_evaluation did not emit a done event"
+    assert done_payload is not None, "stream_thread_evaluation did not emit evaluation_done"
 
+    # Reset the open-thread carry so the interviewer node opens the next topic
+    # (thread_id is None ⇒ open) — or the conditional edge routes to END.
     return {
-        "evaluation": done_payload,
         "session_status": done_payload["session_status"],
+        "thread_id": None,
+        "anchors": [],
+        "focus_key": None,
+        "focus_label": None,
+        "focus_document_ids": [],
+        "grounding": [],
+        "followups_used": 0,
+        "next_move": None,
     }

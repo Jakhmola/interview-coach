@@ -1,4 +1,12 @@
-"""QuestionGenerator unit tests with mocked LLM streaming."""
+"""Interviewer/conductor unit tests with mocked LLM streaming (Phase 34).
+
+Two entry points are exercised:
+
+* :func:`stream_open_thread` — opens a thread (focus pick + optional repo
+  grounding + root question), persists the ``Thread`` + its root ``Message``.
+* :func:`stream_conduct` — one conductor step on an open thread, emitting the
+  interviewer's next move (probe/clarify/nudge/advance).
+"""
 
 from __future__ import annotations
 
@@ -13,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from interview_coach.agents.nodes import question_generator
 from interview_coach.db import models, repos
 from interview_coach.db.models import Job, SessionRow, User
+from interview_coach.rag.retrieval import GroundingHit
 
 
 @pytest.fixture
@@ -118,14 +127,14 @@ async def seeded_snapshot(agent_session: AsyncSession, seeded_job: Job) -> None:
 
 
 async def _make_session(
-    agent_session: AsyncSession, alice: User, job: Job, *, round_type: str
+    agent_session: AsyncSession, alice: User, job: Job, *, round_type: str, n_questions: int = 5
 ) -> SessionRow:
     return await repos.create_session(
         agent_session,
         user_id=alice.id,
         job_id=job.id,
         round_type=round_type,
-        n_questions=5,
+        n_questions=n_questions,
     )
 
 
@@ -153,7 +162,59 @@ def _patch_streaming_llm(monkeypatch: pytest.MonkeyPatch, deltas: list[str]) -> 
     return captured_messages
 
 
-async def test_generate_experience_deep_dive_streams_and_persists(
+def _pin_focus(monkeypatch: pytest.MonkeyPatch, predicate: Any) -> None:
+    """Pin the weighted focus sample to the first candidate matching ``predicate``
+    (the picker is randomised in production)."""
+    monkeypatch.setattr(
+        question_generator.random.Random,
+        "choices",
+        lambda self, population, weights=None, k=1: [next(t for t in population if predicate(t))],
+    )
+
+
+async def _collect(agen: AsyncIterator[tuple[str, Any]]) -> list[tuple[str, Any]]:
+    return [ev async for ev in agen]
+
+
+async def _seed_open_thread(
+    agent_session: AsyncSession,
+    sess: SessionRow,
+    *,
+    thread_index: int = 0,
+    anchors: list[str] | None = None,
+    focus_key: str | None = "project:AsyncAPI",
+    focus_label: str | None = "AsyncAPI",
+    question: str = "Walk me through AsyncAPI.",
+    answer: str | None = "I rewrote the sync stack to async.",
+) -> Any:
+    anchors = anchors if anchors is not None else ["specifics", "tradeoffs"]
+    thread = await repos.create_thread(
+        agent_session,
+        session_id=sess.id,
+        thread_index=thread_index,
+        anchors=anchors,
+        focus_key=focus_key,
+        focus_label=focus_label,
+    )
+    await repos.append_message(
+        agent_session,
+        thread_id=thread.id,
+        seq=0,
+        role="interviewer",
+        kind="question",
+        text=question,
+    )
+    if answer is not None:
+        await repos.append_message(
+            agent_session, thread_id=thread.id, seq=1, role="candidate", text=answer
+        )
+    return thread
+
+
+# --- stream_open_thread ----------------------------------------------------
+
+
+async def test_open_thread_experience_streams_and_persists(
     agent_session: AsyncSession,
     alice: User,
     seeded_job: Job,
@@ -162,16 +223,7 @@ async def test_generate_experience_deep_dive_streams_and_persists(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sess = await _make_session(agent_session, alice, seeded_job, round_type="experience_deep_dive")
-    # Pin the weighted focus pick to the AsyncAPI project. The picker is
-    # randomised in production, so without this the slice shipped to the LLM
-    # (and the "AsyncAPI" assertion below) is seed-dependent and flaky.
-    monkeypatch.setattr(
-        question_generator.random.Random,
-        "choices",
-        lambda self, population, weights=None, k=1: [
-            next(t for t in population if "AsyncAPI" in t.label)
-        ],
-    )
+    _pin_focus(monkeypatch, lambda t: "AsyncAPI" in t.label)
     captured = _patch_streaming_llm(
         monkeypatch,
         [
@@ -181,45 +233,62 @@ async def test_generate_experience_deep_dive_streams_and_persists(
         ],
     )
 
-    streamed = ""
-    final: dict[str, Any] | None = None
-    async for kind, data in question_generator.stream_question(
-        session_id=sess.id, user_id=alice.id
-    ):
-        if kind == "token":
-            streamed += data
-        elif kind == "done":
-            final = data
+    events = await _collect(
+        question_generator.stream_open_thread(session_id=sess.id, user_id=alice.id)
+    )
+    kinds = [k for k, _ in events]
+    by_kind = {k: d for k, d in events}
 
+    # Envelope order: move → token(s) → move_done → opened.
+    assert kinds[0] == "move"
+    assert "opened" in kinds
+    move = by_kind["move"]
+    assert move["kind"] == "question"
+    assert move["thread_index"] == 0
+    assert uuid.UUID(move["message_id"])  # parseable
+
+    streamed = "".join(d for k, d in events if k == "token")
     assert streamed == "Walk me through the AsyncAPI rewrite."
-    assert final is not None
-    assert "question_id" in final
-    assert final["turn_index"] == 0
 
-    # Persisted turn matches the streamed text byte-for-byte.
+    move_done = by_kind["move_done"]
+    assert move_done["anchors"] == ["specific tradeoff", "measurable impact", "candidate vs team"]
+
+    opened = by_kind["opened"]
+    assert opened["thread_index"] == 0
+    assert opened["focus_key"] == "project:AsyncAPI"
+    assert "AsyncAPI" in (opened["focus_label"] or "")
+    assert opened["anchors"] == ["specific tradeoff", "measurable impact", "candidate vs team"]
+    assert opened["grounding"] == []  # project_doc focus → not repo-backed
+
+    # Persisted Thread + root Message (seq=0, interviewer/question).
     factory = question_generator.AsyncSessionLocal
     async with factory() as fresh:
-        turns = await repos.list_turns_for_session(fresh, sess.id)
-    assert len(turns) == 1
-    assert turns[0].question == "Walk me through the AsyncAPI rewrite."
-    assert turns[0].anchors_json == [
+        threads = list(await repos.list_threads_for_session(fresh, sess.id))
+        msgs = list(await repos.list_messages_for_thread(fresh, uuid.UUID(opened["thread_id"])))
+    assert len(threads) == 1
+    assert threads[0].status == "open"
+    assert threads[0].anchors_json == [
         "specific tradeoff",
         "measurable impact",
         "candidate vs team",
     ]
+    assert len(msgs) == 1
+    assert msgs[0].seq == 0
+    assert msgs[0].role == "interviewer"
+    assert msgs[0].kind == "question"
+    assert msgs[0].text == "Walk me through the AsyncAPI rewrite."
+    assert str(msgs[0].id) == move["message_id"]
 
-    # User message includes profile context (the project name), the framing
-    # role/company, and the picker's chosen focus_target.
+    # Framing fields + chosen focus_target ride in the user message.
     [system_msg, user_msg] = captured[0]
     assert "AsyncAPI" in user_msg.content
     assert '"company": "Acme"' in user_msg.content
     assert '"role": "Senior Backend Engineer"' in user_msg.content
     assert '"focus_target":' in user_msg.content
-    # System prompt is templated with the company name.
     assert "Acme" in system_msg.content
 
 
-async def test_generate_behavioral_threads_focus_target(
+async def test_open_thread_behavioral_threads_focus_target(
     agent_session: AsyncSession,
     alice: User,
     seeded_job: Job,
@@ -228,12 +297,7 @@ async def test_generate_behavioral_threads_focus_target(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     sess = await _make_session(agent_session, alice, seeded_job, round_type="behavioral_star")
-    # Force the weighted-sample to pick the first candidate ("ownership").
-    monkeypatch.setattr(
-        question_generator.random.Random,
-        "choices",
-        lambda self, population, weights=None, k=1: [population[0]],
-    )
+    _pin_focus(monkeypatch, lambda t: t.label == "ownership")
     captured = _patch_streaming_llm(
         monkeypatch,
         [
@@ -242,33 +306,30 @@ async def test_generate_behavioral_threads_focus_target(
         ],
     )
 
-    streamed = ""
-    async for kind, data in question_generator.stream_question(
-        session_id=sess.id, user_id=alice.id
-    ):
-        if kind == "token":
-            streamed += data
-
+    events = await _collect(
+        question_generator.stream_open_thread(session_id=sess.id, user_id=alice.id)
+    )
+    streamed = "".join(d for k, d in events if k == "token")
     assert streamed == "Tell me about a time you took ownership."
+
     [_sys, user_msg] = captured[0]
     assert '"focus_target": "ownership"' in user_msg.content
 
-    # Metadata records the chosen focus key.
+    # Thread records the chosen focus key + label.
     factory = question_generator.AsyncSessionLocal
     async with factory() as fresh:
-        turns = await repos.list_turns_for_session(fresh, sess.id)
-    assert turns[0].metadata_json == {"focus_key": "ownership", "focus_label": "ownership"}
+        threads = list(await repos.list_threads_for_session(fresh, sess.id))
+    assert threads[0].focus_key == "ownership"
+    assert threads[0].focus_label == "ownership"
 
 
-async def test_behavioral_falls_back_to_company_signals(
+async def test_open_thread_behavioral_falls_back_to_company_signals(
     agent_session: AsyncSession,
     alice: User,
     seeded_job: Job,
     seeded_profile: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When job.parsed_json.behavioral_signals is empty, use the company snapshot's."""
-    # Replace the JD analysis to remove behavioral signals.
     await repos.update_job_parsed_json(
         agent_session,
         seeded_job.id,
@@ -297,41 +358,31 @@ async def test_behavioral_falls_back_to_company_signals(
         model_name="qwen3-8b",
     )
     sess = await _make_session(agent_session, alice, seeded_job, round_type="behavioral_star")
-    monkeypatch.setattr(
-        question_generator.random.Random,
-        "choices",
-        lambda self, population, weights=None, k=1: [population[0]],
-    )
-    captured = _patch_streaming_llm(
-        monkeypatch,
-        ['{"question": "X", "anchors": ["a", "b", "c"]}'],
-    )
+    _pin_focus(monkeypatch, lambda t: True)
+    captured = _patch_streaming_llm(monkeypatch, ['{"question": "X", "anchors": ["a", "b", "c"]}'])
 
-    async for _ in question_generator.stream_question(session_id=sess.id, user_id=alice.id):
-        pass
+    await _collect(question_generator.stream_open_thread(session_id=sess.id, user_id=alice.id))
 
     [_sys, user_msg] = captured[0]
     assert '"focus_target": "written-doc culture"' in user_msg.content
 
 
-async def test_prereqs_missing_profile(
+async def test_open_thread_prereqs_missing_profile(
     agent_session: AsyncSession,
     alice: User,
     seeded_job: Job,
     seeded_snapshot: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Profile not built yet → typed error."""
     sess = await _make_session(agent_session, alice, seeded_job, round_type="experience_deep_dive")
     _patch_streaming_llm(monkeypatch, ['{"question": "X", "anchors": ["a"]}'])
 
     with pytest.raises(question_generator.GenerationPrereqsMissing) as exc:
-        async for _ in question_generator.stream_question(session_id=sess.id, user_id=alice.id):
-            pass
+        await _collect(question_generator.stream_open_thread(session_id=sess.id, user_id=alice.id))
     assert "profile_missing" in str(exc.value)
 
 
-async def test_session_complete_rejected(
+async def test_open_thread_session_complete_rejected(
     agent_session: AsyncSession,
     alice: User,
     seeded_job: Job,
@@ -339,43 +390,33 @@ async def test_session_complete_rejected(
     seeded_snapshot: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Asking for a question past n_questions raises."""
-    sess = await repos.create_session(
-        agent_session,
-        user_id=alice.id,
-        job_id=seeded_job.id,
-        round_type="experience_deep_dive",
-        n_questions=1,
+    """All topics already closed (count_closed_threads >= n_questions) → reject."""
+    sess = await _make_session(
+        agent_session, alice, seeded_job, round_type="experience_deep_dive", n_questions=1
     )
-    # Insert one already-answered turn.
-    await repos.create_turn(
-        agent_session,
-        session_id=sess.id,
-        turn_index=0,
-        question="Q",
-        anchors=["a"],
+    closed = await repos.create_thread(
+        agent_session, session_id=sess.id, thread_index=0, anchors=["a"], focus_key="x"
     )
+    await repos.close_thread(agent_session, closed.id, score=5, feedback="ok", model_answer="ok")
     _patch_streaming_llm(monkeypatch, ['{"question": "X", "anchors": ["a"]}'])
 
     with pytest.raises(ValueError, match="session_complete"):
-        async for _ in question_generator.stream_question(session_id=sess.id, user_id=alice.id):
-            pass
+        await _collect(question_generator.stream_open_thread(session_id=sess.id, user_id=alice.id))
 
 
-async def test_session_not_found(
+async def test_open_thread_session_not_found(
     agent_session: AsyncSession,
     alice: User,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_streaming_llm(monkeypatch, ['{"question": "x", "anchors": ["a"]}'])
     with pytest.raises(ValueError, match="session_not_found"):
-        async for _ in question_generator.stream_question(
-            session_id=uuid.uuid4(), user_id=alice.id
-        ):
-            pass
+        await _collect(
+            question_generator.stream_open_thread(session_id=uuid.uuid4(), user_id=alice.id)
+        )
 
 
-async def test_picker_sees_prior_focus_keys_across_calls(
+async def test_open_thread_prior_topics_threaded_into_prompt(
     agent_session: AsyncSession,
     alice: User,
     seeded_job: Job,
@@ -383,111 +424,255 @@ async def test_picker_sees_prior_focus_keys_across_calls(
     seeded_snapshot: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Two consecutive stream_question calls in the same session: the second
-    call's picker must see the first call's focus_key in prior_focus_counts."""
-    # Add a second behavioral signal so the picker has somewhere to rotate to.
-    await repos.update_job_parsed_json(
-        agent_session,
-        seeded_job.id,
-        alice.id,
-        {
-            "title": "Senior Backend Engineer",
-            "seniority": "senior",
-            "must_have_skills": ["python"],
-            "nice_to_have_skills": [],
-            "responsibilities": [],
-            "behavioral_signals": ["ownership", "mentorship"],
-            "company_name": "Acme",
-        },
-    )
-    sess = await _make_session(agent_session, alice, seeded_job, round_type="behavioral_star")
-
-    observed_counts: list[dict[str, int]] = []
-    real_pick = question_generator._pick_focus_target
-
-    def capturing_pick(**kwargs: Any) -> Any:
-        observed_counts.append(dict(kwargs["prior_focus_counts"]))
-        return real_pick(**kwargs)
-
-    monkeypatch.setattr(question_generator, "_pick_focus_target", capturing_pick)
-
-    # Always pick the top-ranked candidate. The picker now sorts eligible
-    # candidates by weight (desc), so call 1 picks "ownership" (tie, built
-    # first); call 2 sees ownership down-weighted by inv_freq and thus sorted
-    # last, so the top-ranked rotates to "mentorship".
-    def fake_choices(
-        self: Any, population: list[Any], weights: Any = None, k: int = 1
-    ) -> list[Any]:
-        return [population[0]]
-
-    monkeypatch.setattr(question_generator.random.Random, "choices", fake_choices)
-    _patch_streaming_llm(
-        monkeypatch,
-        ['{"question": "Q1", "anchors": ["a", "b", "c"]}'],
-    )
-
-    async for _ in question_generator.stream_question(session_id=sess.id, user_id=alice.id):
-        pass
-
-    # Second call: re-patch the LLM stream (the previous _FakeBound is exhausted)
-    # but keep the same fake_choices counter so we exercise the rotation.
-    _patch_streaming_llm(
-        monkeypatch,
-        ['{"question": "Q2", "anchors": ["a", "b", "c"]}'],
-    )
-    async for _ in question_generator.stream_question(session_id=sess.id, user_id=alice.id):
-        pass
-
-    assert observed_counts[0] == {}
-    assert observed_counts[1] == {"ownership": 1}
-
-    factory = question_generator.AsyncSessionLocal
-    async with factory() as fresh:
-        turns = await repos.list_turns_for_session(fresh, sess.id)
-    keys = [t.metadata_json["focus_key"] for t in turns]
-    assert keys == ["ownership", "mentorship"]
-
-
-async def test_prior_turns_threaded_into_prompt(
-    agent_session: AsyncSession,
-    alice: User,
-    seeded_job: Job,
-    seeded_profile: None,
-    seeded_snapshot: None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    """A prior (closed) thread's focus_label is fed forward as a prior_topic so
+    the next question avoids re-asking the same topic."""
     sess = await _make_session(agent_session, alice, seeded_job, round_type="experience_deep_dive")
-    await repos.create_turn(
+    prior = await repos.create_thread(
         agent_session,
         session_id=sess.id,
-        turn_index=0,
-        question="Walk me through AsyncAPI.",
-        anchors=["scope"],
+        thread_index=0,
+        anchors=["a"],
+        focus_key="highlight:0:0",
+        focus_label="Old Topic Label",
     )
-    # Manually fill in answer so the next-question generator doesn't see an
-    # unanswered prior turn (the API layer enforces that; node trusts caller).
-    factory = question_generator.AsyncSessionLocal
-    async with factory() as s:
-        from sqlalchemy import update
+    await repos.append_message(
+        agent_session, thread_id=prior.id, seq=0, role="interviewer", kind="question", text="Q"
+    )
+    await repos.close_thread(agent_session, prior.id, score=5, feedback="ok", model_answer="ok")
 
-        from interview_coach.db.models import TurnRow
-
-        await s.execute(
-            update(TurnRow)
-            .where(TurnRow.session_id == sess.id, TurnRow.turn_index == 0)
-            .values(answer="I rewrote the sync stack to asyncio.")
-        )
-        await s.commit()
-
+    _pin_focus(monkeypatch, lambda t: "AsyncAPI" in t.label)
     captured = _patch_streaming_llm(
         monkeypatch, ['{"question": "Followup", "anchors": ["a", "b", "c"]}']
     )
 
-    async for _ in question_generator.stream_question(session_id=sess.id, user_id=alice.id):
-        pass
+    events = await _collect(
+        question_generator.stream_open_thread(session_id=sess.id, user_id=alice.id)
+    )
+    by_kind = {k: d for k, d in events}
+    # New thread takes the next index after the closed one.
+    assert by_kind["opened"]["thread_index"] == 1
 
     [_sys, user_msg] = captured[0]
-    # Prior turns include the question; answers are stripped from the prompt
-    # to keep context tight (Phase 14.1).
-    assert "Walk me through AsyncAPI." in user_msg.content
-    assert "rewrote the sync stack" not in user_msg.content
+    assert "Old Topic Label" in user_msg.content
+
+
+async def test_open_thread_repo_backed_focus_retrieves_grounding(
+    agent_session: AsyncSession,
+    alice: User,
+    seeded_job: Job,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repo-backed (github) experience focus triggers ONE code retrieval at
+    thread-open; the hits ride into the question prompt and the carried
+    grounding (reused later by the conductor + thread-close model answer)."""
+    sess = await _make_session(agent_session, alice, seeded_job, round_type="experience_deep_dive")
+    doc_id = str(uuid.uuid4())
+    profile = {
+        "summary": "Eng.",
+        "skills": [],
+        "experiences": [],
+        "projects": [
+            {
+                "name": "RepoProj",
+                "description": "My open-source gateway.",
+                "tech": ["python", "fastapi"],
+                "role": None,
+                "urls": [],
+                "source": "github",
+                "source_document_ids": [doc_id],
+            }
+        ],
+        "education": [],
+    }
+    job = {"title": "Senior Backend Engineer", "must_have_skills": ["python", "fastapi"]}
+    company = {"mission": "x", "values_and_signals": []}
+
+    captured_retrieval: dict[str, Any] = {}
+
+    async def fake_retrieve(**kwargs: Any) -> list[GroundingHit]:
+        captured_retrieval.update(kwargs)
+        return [
+            GroundingHit(
+                text="def handler(): return 200",
+                document_id=uuid.UUID(doc_id),
+                source_doc_kind="github_repo",
+                chunk_index=0,
+                score=0.9,
+                filename="app.py",
+            )
+        ]
+
+    monkeypatch.setattr(question_generator, "retrieve_grounding", fake_retrieve)
+    _pin_focus(monkeypatch, lambda t: t.repo_backed)
+    captured = _patch_streaming_llm(
+        monkeypatch, ['{"question": "How does app.py route?", "anchors": ["a", "b", "c"]}']
+    )
+
+    events = await _collect(
+        question_generator.stream_open_thread(
+            session_id=sess.id, user_id=alice.id, profile=profile, job=job, company=company
+        )
+    )
+    by_kind = {k: d for k, d in events}
+
+    assert captured_retrieval.get("retries") == 1
+    assert captured_retrieval.get("source_kinds") == ("github_repo",)
+    assert by_kind["opened"]["grounding"] == [
+        {"source": "app.py", "text": "def handler(): return 200"}
+    ]
+    [_sys, user_msg] = captured[0]
+    assert "def handler(): return 200" in user_msg.content
+
+
+# --- stream_conduct --------------------------------------------------------
+
+
+async def _conduct(
+    sess: SessionRow,
+    thread: Any,
+    alice: User,
+    *,
+    round_type: str = "experience_deep_dive",
+    anchors: list[str] | None = None,
+    focus_label: str | None = "AsyncAPI",
+    grounding: list[dict[str, Any]] | None = None,
+    job: dict[str, Any] | None = None,
+) -> list[tuple[str, Any]]:
+    return await _collect(
+        question_generator.stream_conduct(
+            session_id=sess.id,
+            user_id=alice.id,
+            thread_id=thread.id,
+            thread_index=thread.thread_index,
+            anchors=anchors if anchors is not None else ["specifics", "tradeoffs"],
+            focus_label=focus_label,
+            grounding=grounding or [],
+            round_type=round_type,
+            job=job if job is not None else {"company_name": "Acme", "title": "Senior Backend Eng"},
+        )
+    )
+
+
+async def test_conduct_probe_streams_and_persists(
+    agent_session: AsyncSession,
+    alice: User,
+    seeded_job: Job,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sess = await _make_session(agent_session, alice, seeded_job, round_type="experience_deep_dive")
+    thread = await _seed_open_thread(agent_session, sess)
+    _patch_streaming_llm(
+        monkeypatch,
+        ['{"action": "probe", "message": "What was the hardest tradeoff?"}'],
+    )
+
+    events = await _conduct(sess, thread, alice)
+    kinds = [k for k, _ in events]
+    by_kind = {k: d for k, d in events}
+
+    assert "advance" not in kinds
+    assert by_kind["move"]["kind"] == "probe"
+    assert by_kind["move"]["thread_index"] == 0
+    streamed = "".join(d for k, d in events if k == "token")
+    assert streamed == "What was the hardest tradeoff?"
+    assert by_kind["conducted"]["action"] == "probe"
+    assert by_kind["conducted"]["message_id"] == by_kind["move"]["message_id"]
+
+    # Persisted as an interviewer message at seq=2 with kind=probe.
+    factory = question_generator.AsyncSessionLocal
+    async with factory() as fresh:
+        msgs = list(await repos.list_messages_for_thread(fresh, thread.id))
+    assert len(msgs) == 3
+    assert msgs[2].seq == 2
+    assert msgs[2].role == "interviewer"
+    assert msgs[2].kind == "probe"
+    assert msgs[2].text == "What was the hardest tradeoff?"
+
+
+async def test_conduct_advance_emits_advance_only(
+    agent_session: AsyncSession,
+    alice: User,
+    seeded_job: Job,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sess = await _make_session(agent_session, alice, seeded_job, round_type="experience_deep_dive")
+    thread = await _seed_open_thread(agent_session, sess)
+    _patch_streaming_llm(monkeypatch, ['{"action": "advance", "message": ""}'])
+
+    events = await _conduct(sess, thread, alice)
+    kinds = [k for k, _ in events]
+
+    assert kinds == ["advance"]
+    # No follow-up message persisted (the thread just closes).
+    factory = question_generator.AsyncSessionLocal
+    async with factory() as fresh:
+        n = await repos.count_messages_for_thread(fresh, thread.id)
+    assert n == 2
+
+
+async def test_conduct_coerces_disallowed_nudge_to_probe(
+    agent_session: AsyncSession,
+    alice: User,
+    seeded_job: Job,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """behavioral_star disallows nudge → a model-returned nudge is coerced to probe."""
+    sess = await _make_session(agent_session, alice, seeded_job, round_type="behavioral_star")
+    thread = await _seed_open_thread(agent_session, sess)
+    _patch_streaming_llm(monkeypatch, ['{"action": "nudge", "message": "Take your time."}'])
+
+    events = await _conduct(sess, thread, alice, round_type="behavioral_star")
+    by_kind = {k: d for k, d in events}
+
+    assert by_kind["move"]["kind"] == "probe"
+    assert by_kind["conducted"]["action"] == "probe"
+    factory = question_generator.AsyncSessionLocal
+    async with factory() as fresh:
+        msgs = list(await repos.list_messages_for_thread(fresh, thread.id))
+    assert msgs[2].kind == "probe"
+
+
+async def test_conduct_empty_message_uses_fallback(
+    agent_session: AsyncSession,
+    alice: User,
+    seeded_job: Job,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sess = await _make_session(agent_session, alice, seeded_job, round_type="experience_deep_dive")
+    thread = await _seed_open_thread(agent_session, sess)
+    _patch_streaming_llm(monkeypatch, ['{"action": "probe", "message": ""}'])
+
+    await _conduct(sess, thread, alice)
+
+    factory = question_generator.AsyncSessionLocal
+    async with factory() as fresh:
+        msgs = list(await repos.list_messages_for_thread(fresh, thread.id))
+    assert msgs[2].text == "Can you walk me through that in a bit more detail?"
+
+
+async def test_conduct_payload_includes_transcript_and_allowed_actions(
+    agent_session: AsyncSession,
+    alice: User,
+    seeded_job: Job,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sess = await _make_session(agent_session, alice, seeded_job, round_type="experience_deep_dive")
+    thread = await _seed_open_thread(agent_session, sess)
+    captured = _patch_streaming_llm(
+        monkeypatch, ['{"action": "clarify", "message": "Do you mean the gateway?"}']
+    )
+
+    await _conduct(
+        sess,
+        thread,
+        alice,
+        grounding=[{"source": "x.py", "text": "GROUNDMARK"}],
+    )
+
+    [_sys, user_msg] = captured[0]
+    content = user_msg.content
+    assert "Walk me through AsyncAPI." in content  # transcript root question
+    assert "I rewrote the sync stack to async." in content  # transcript answer
+    assert "allowed_actions" in content
+    assert "GROUNDMARK" in content  # carried grounding reused
+    assert '"focus_target": "AsyncAPI"' in content
