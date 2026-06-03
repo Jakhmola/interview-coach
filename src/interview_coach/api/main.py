@@ -36,8 +36,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     async with open_checkpointer(settings.graph_db_path) as checkpointer:
         # Phase 21: both graphs share the same AsyncSqliteSaver instance.
         # prep_graph uses thread_id "prep:{user_id}:{job_id}";
-        # interview_graph uses "{session_id}:turn_{n}". Distinct prefixes
-        # mean the two namespaces never collide.
+        # interview_graph uses "interview:{session_id}" (Phase 34 — one paused
+        # run per session, not per turn). Distinct prefixes mean the two
+        # namespaces never collide.
         # Phase 22: also expose the bare saver so ``DELETE /jobs/{id}``
         # can drop its prep thread via ``adelete_thread``.
         app.state.checkpointer = checkpointer

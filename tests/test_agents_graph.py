@@ -402,67 +402,165 @@ async def test_profile_node_reruns_when_doc_ids_differ(
     assert "profile_builder" not in skipped
 
 
-# --- interview graph: question → interrupt → resume → evaluator -
+# --- interview graph: open → interrupt → conduct(advance) → evaluator (Phase 34)
 
 
-async def test_interview_graph_interrupts_then_resumes(
-    monkeypatch: pytest.MonkeyPatch, memory_saver: MemorySaver
-) -> None:
-    """First astream stops at the interrupt; resume runs evaluator to END.
-
-    `stream_question` and `stream_evaluation` are mocked so this is a
-    pure graph-shape test: did the wiring honor the interrupt boundary?
-    """
+def _interview_initial_state(round_type: str = "experience_deep_dive") -> dict[str, Any]:
     import uuid
 
+    return {
+        "user_id": str(uuid.uuid4()),
+        "session_id": str(uuid.uuid4()),
+        "round_type": round_type,
+        "n_questions": 1,
+        "thread_id": None,
+        "thread_index": 0,
+        "anchors": [],
+        "focus_key": None,
+        "focus_label": None,
+        "focus_document_ids": [],
+        "grounding": [],
+        "followups_used": 0,
+        "pending_message": None,
+        "next_move": None,
+    }
+
+
+async def _fake_open_thread(**_kw: Any) -> AsyncIterator[tuple[str, Any]]:
+    """Stand-in for stream_open_thread: emit the open envelope + an ``opened``
+    carry the node folds into state."""
+    yield ("move", {"kind": "question", "thread_index": 0, "message_id": "m0"})
+    yield ("token", "Q")
+    yield ("move_done", {"anchors": ["a", "b"]})
+    yield (
+        "opened",
+        {
+            "thread_id": "33333333-3333-3333-3333-333333333333",
+            "thread_index": 0,
+            "focus_key": "k",
+            "focus_label": "L",
+            "focus_document_ids": [],
+            "anchors": ["a", "b"],
+            "grounding": [],
+        },
+    )
+
+
+async def _fake_eval_complete(**_kw: Any) -> AsyncIterator[tuple[str, Any]]:
+    yield ("evaluation", {"thread_index": 0})
+    yield ("score", 8)
+    yield ("feedback_token", "good")
+    yield ("feedback_done", None)
+    yield ("model_answer_token", "ideal")
+    yield ("model_answer_done", None)
+    yield ("evaluation_done", {"thread_index": 0, "session_status": "complete", "n_remaining": 0})
+    yield ("wrap", {"session_status": "complete"})
+
+
+async def _noop_persist(_state: Any) -> bool:
+    """Skip the candidate-message DB write — these are pure graph-shape tests."""
+    return False
+
+
+async def test_interview_graph_opens_interrupts_then_advances_to_evaluator(
+    monkeypatch: pytest.MonkeyPatch, memory_saver: MemorySaver
+) -> None:
+    """Fresh start opens a thread and stops at the candidate interrupt; the
+    resume conducts an ``advance`` which routes to the evaluator → END.
+
+    The agent functions are mocked so this is a pure graph-shape test: did the
+    wiring honor the interrupt boundary and the advance→evaluator edge?
+    """
     from interview_coach.agents import graph_nodes
     from interview_coach.agents.graph import build_interview_graph
 
-    async def fake_stream_question(**_kw: Any) -> AsyncIterator[tuple[str, Any]]:
-        yield ("token", "Q")
-        yield ("done", {"question_id": "11111111-1111-1111-1111-111111111111", "turn_index": 0})
+    async def fake_conduct(**_kw: Any) -> AsyncIterator[tuple[str, Any]]:
+        yield ("advance", {})
 
-    async def fake_stream_evaluation(**_kw: Any) -> AsyncIterator[tuple[str, Any]]:
-        yield ("score", 8)
-        yield ("feedback_token", "good")
-        yield ("feedback_done", None)
-        yield ("model_answer_token", "ideal")
-        yield ("model_answer_done", None)
-        yield ("done", {"turn_index": 0, "session_status": "active", "n_remaining": 0})
-
-    monkeypatch.setattr(graph_nodes, "stream_question", fake_stream_question)
-    monkeypatch.setattr(graph_nodes, "stream_evaluation", fake_stream_evaluation)
+    monkeypatch.setattr(graph_nodes, "stream_open_thread", _fake_open_thread)
+    monkeypatch.setattr(graph_nodes, "stream_conduct", fake_conduct)
+    monkeypatch.setattr(graph_nodes, "stream_thread_evaluation", _fake_eval_complete)
+    monkeypatch.setattr(graph_nodes, "_persist_pending_candidate", _noop_persist)
 
     graph = build_interview_graph(memory_saver)
-    cfg = {"configurable": {"thread_id": "t1"}}
+    cfg = {"configurable": {"thread_id": "interview:t1"}}
 
     first_chunks: list[dict[str, Any]] = []
-    async for chunk in graph.astream(
-        {
-            "user_id": str(uuid.uuid4()),
-            "session_id": str(uuid.uuid4()),
-            "round_type": "experience_deep_dive",
-            "n_questions": 1,
-            "turn_index": 0,
-        },
-        config=cfg,
-        stream_mode="custom",
-    ):
+    async for chunk in graph.astream(_interview_initial_state(), config=cfg, stream_mode="custom"):
         first_chunks.append(chunk)
 
-    # Question_generator emitted token + done; evaluator did NOT run yet.
+    # The thread opened (move + token); the evaluator did NOT run yet.
+    assert any(c.get("event") == "move" for c in first_chunks)
     assert any(c.get("event") == "token" for c in first_chunks)
     assert not any(c.get("event") == "score" for c in first_chunks)
 
-    # Resume — graph re-executes the question_generator (LangGraph 1.x
-    # behavior), but our `await_answer` node is a separate single-purpose
-    # node so the route only sees the evaluator side-effects this time.
+    # Resume with the candidate's answer → conduct returns advance → evaluator.
     resume_chunks: list[dict[str, Any]] = []
     async for chunk in graph.astream(
-        Command(resume={"answer": "my answer"}), config=cfg, stream_mode="custom"
+        Command(resume={"message": "my answer"}), config=cfg, stream_mode="custom"
     ):
         resume_chunks.append(chunk)
 
+    assert any(c.get("event") == "evaluation" for c in resume_chunks)
     assert any(c.get("event") == "score" for c in resume_chunks)
+    assert any(c.get("event") == "wrap" for c in resume_chunks)
     feedback_tokens = [c["data"] for c in resume_chunks if c.get("event") == "feedback_token"]
     assert "".join(feedback_tokens) == "good"
+
+
+async def test_interview_graph_budget_guard_forces_advance(
+    monkeypatch: pytest.MonkeyPatch, memory_saver: MemorySaver
+) -> None:
+    """The per-thread follow-up cap is a node-side guard: once spent, the
+    interviewer forces ``advance`` WITHOUT another conductor call.
+
+    behavioral_star caps at max_followups=1. So: open → answer → probe
+    (followups_used 0→1) → answer → guard fires (1 >= 1) → advance → evaluate
+    → complete. The conductor is mocked to *always* probe, so the only way the
+    session can terminate is the guard — and we assert conduct ran exactly
+    once.
+    """
+    from interview_coach.agents import graph_nodes
+    from interview_coach.agents.graph import build_interview_graph
+
+    conduct_calls: list[int] = []
+
+    async def fake_conduct_always_probe(**_kw: Any) -> AsyncIterator[tuple[str, Any]]:
+        conduct_calls.append(1)
+        yield ("move", {"kind": "probe", "thread_index": 0, "message_id": "p0"})
+        yield ("token", "probe?")
+        yield ("move_done", {})
+        yield ("conducted", {"action": "probe", "message_id": "p0"})
+
+    monkeypatch.setattr(graph_nodes, "stream_open_thread", _fake_open_thread)
+    monkeypatch.setattr(graph_nodes, "stream_conduct", fake_conduct_always_probe)
+    monkeypatch.setattr(graph_nodes, "stream_thread_evaluation", _fake_eval_complete)
+    monkeypatch.setattr(graph_nodes, "_persist_pending_candidate", _noop_persist)
+
+    graph = build_interview_graph(memory_saver)
+    cfg = {"configurable": {"thread_id": "interview:t2"}}
+
+    # Fresh start: opens the thread, pauses for the answer.
+    async for _ in graph.astream(
+        _interview_initial_state(round_type="behavioral_star"), config=cfg, stream_mode="custom"
+    ):
+        pass
+
+    # Answer #1: conductor probes (consumes the one allowed follow-up), pauses.
+    probe_chunks: list[dict[str, Any]] = []
+    async for chunk in graph.astream(
+        Command(resume={"message": "a1"}), config=cfg, stream_mode="custom"
+    ):
+        probe_chunks.append(chunk)
+    assert any(c.get("event") == "move" and c.get("kind") == "probe" for c in probe_chunks)
+    assert not any(c.get("event") == "score" for c in probe_chunks)
+
+    # Answer #2: budget exhausted → forced advance → evaluator → complete.
+    final_chunks: list[dict[str, Any]] = []
+    async for chunk in graph.astream(
+        Command(resume={"message": "a2"}), config=cfg, stream_mode="custom"
+    ):
+        final_chunks.append(chunk)
+    assert any(c.get("event") == "wrap" for c in final_chunks)
+    # Conduct ran exactly once (answer #1); answer #2 used the guard, not the LLM.
+    assert sum(conduct_calls) == 1

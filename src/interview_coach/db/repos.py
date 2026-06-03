@@ -12,9 +12,10 @@ from interview_coach.db.models import (
     DocumentMapping,
     GroundingChunk,
     Job,
+    MessageRow,
     ProfileRow,
     SessionRow,
-    TurnRow,
+    ThreadRow,
     User,
 )
 
@@ -663,14 +664,138 @@ async def update_session_status(
     return True
 
 
-async def list_turns_for_session(session: AsyncSession, session_id: uuid.UUID) -> Sequence[TurnRow]:
+# --- threads & messages (Phase 34) ---
+
+
+async def create_thread(
+    session: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    thread_index: int,
+    anchors: list[str],
+    focus_key: str | None = None,
+    focus_label: str | None = None,
+    focus_document_ids: list[str] | None = None,
+    thread_id: uuid.UUID | None = None,
+) -> ThreadRow:
+    """Open a thread (status='open'). ``thread_id`` may be supplied so the
+    interviewer node can stream a ``move`` event that references the id before
+    the row is committed (it pre-generates one)."""
+    row = ThreadRow(
+        id=thread_id or uuid.uuid4(),
+        session_id=session_id,
+        thread_index=thread_index,
+        anchors_json=anchors,
+        focus_key=focus_key,
+        focus_label=focus_label,
+        focus_document_ids=focus_document_ids,
+        status="open",
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
+async def get_thread(session: AsyncSession, thread_id: uuid.UUID) -> ThreadRow | None:
+    return await session.get(ThreadRow, thread_id)
+
+
+async def get_open_thread(session: AsyncSession, session_id: uuid.UUID) -> ThreadRow | None:
+    """The session's single open thread, if any (newest first as a tiebreak)."""
     result = await session.execute(
-        select(TurnRow).where(TurnRow.session_id == session_id).order_by(TurnRow.turn_index.asc())
+        select(ThreadRow)
+        .where(ThreadRow.session_id == session_id, ThreadRow.status == "open")
+        .order_by(ThreadRow.thread_index.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def list_threads_for_session(
+    session: AsyncSession, session_id: uuid.UUID
+) -> Sequence[ThreadRow]:
+    result = await session.execute(
+        select(ThreadRow)
+        .where(ThreadRow.session_id == session_id)
+        .order_by(ThreadRow.thread_index.asc())
     )
     return result.scalars().all()
 
 
-async def list_prior_focus_keys_for_user_job(
+async def count_closed_threads(session: AsyncSession, session_id: uuid.UUID) -> int:
+    result = await session.execute(
+        select(func.count(ThreadRow.id)).where(
+            ThreadRow.session_id == session_id, ThreadRow.status == "closed"
+        )
+    )
+    return int(result.scalar_one() or 0)
+
+
+async def close_thread(
+    session: AsyncSession,
+    thread_id: uuid.UUID,
+    *,
+    score: int,
+    feedback: str,
+    model_answer: str | None = None,
+) -> bool:
+    """Persist the thread-close evaluation and flip status to 'closed'.
+    ``model_answer`` is None when the model-answer call failed (score +
+    feedback still persist — the partial-eval path)."""
+    row = await get_thread(session, thread_id)
+    if row is None:
+        return False
+    row.score = score
+    row.feedback = feedback
+    if model_answer is not None:
+        row.model_answer = model_answer
+    row.status = "closed"
+    await session.commit()
+    return True
+
+
+async def append_message(
+    session: AsyncSession,
+    *,
+    thread_id: uuid.UUID,
+    seq: int,
+    role: str,
+    text: str,
+    kind: str | None = None,
+    message_id: uuid.UUID | None = None,
+) -> MessageRow:
+    row = MessageRow(
+        id=message_id or uuid.uuid4(),
+        thread_id=thread_id,
+        seq=seq,
+        role=role,
+        kind=kind,
+        text=text,
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
+async def list_messages_for_thread(
+    session: AsyncSession, thread_id: uuid.UUID
+) -> Sequence[MessageRow]:
+    result = await session.execute(
+        select(MessageRow).where(MessageRow.thread_id == thread_id).order_by(MessageRow.seq.asc())
+    )
+    return result.scalars().all()
+
+
+async def count_messages_for_thread(session: AsyncSession, thread_id: uuid.UUID) -> int:
+    result = await session.execute(
+        select(func.count(MessageRow.id)).where(MessageRow.thread_id == thread_id)
+    )
+    return int(result.scalar_one() or 0)
+
+
+async def list_prior_focus_keys(
     session: AsyncSession,
     *,
     user_id: uuid.UUID,
@@ -678,33 +803,28 @@ async def list_prior_focus_keys_for_user_job(
     round_type: str,
     limit: int = 50,
 ) -> list[str]:
-    """Return focus_keys from this user's prior turns for this job+round, newest first.
+    """Return focus_keys from this user's prior threads for this job+round,
+    newest first.
 
-    Joins turns → sessions to scope by (user_id, job_id, round_type). Drops rows
-    whose metadata_json is NULL or missing a `focus_key`. The picker uses this
-    to compute inverse-frequency weights across sessions, so a single user
-    grinding the same JD over and over rotates through their experiences and
-    competencies rather than re-drilling the most prominent one each time.
+    Joins threads → sessions to scope by (user_id, job_id, round_type). Drops
+    rows with a NULL ``focus_key``. The picker uses this to compute
+    inverse-frequency weights across sessions, so a single user grinding the
+    same JD over and over rotates through their experiences and competencies
+    rather than re-drilling the most prominent one each time.
     """
     result = await session.execute(
-        select(TurnRow.metadata_json)
-        .join(SessionRow, TurnRow.session_id == SessionRow.id)
+        select(ThreadRow.focus_key)
+        .join(SessionRow, ThreadRow.session_id == SessionRow.id)
         .where(
             SessionRow.user_id == user_id,
             SessionRow.job_id == job_id,
             SessionRow.round_type == round_type,
-            TurnRow.metadata_json.is_not(None),
+            ThreadRow.focus_key.is_not(None),
         )
-        .order_by(TurnRow.created_at.desc())
+        .order_by(ThreadRow.created_at.desc())
         .limit(limit)
     )
-    keys: list[str] = []
-    for (metadata,) in result.all():
-        if isinstance(metadata, dict):
-            key = metadata.get("focus_key")
-            if isinstance(key, str) and key:
-                keys.append(key)
-    return keys
+    return [k for (k,) in result.all() if isinstance(k, str) and k]
 
 
 def count_focus_keys(focus_keys: list[str]) -> dict[str, int]:
@@ -713,87 +833,6 @@ def count_focus_keys(focus_keys: list[str]) -> dict[str, int]:
     for key in focus_keys:
         counts[key] = counts.get(key, 0) + 1
     return counts
-
-
-async def latest_turn(session: AsyncSession, session_id: uuid.UUID) -> TurnRow | None:
-    result = await session.execute(
-        select(TurnRow)
-        .where(TurnRow.session_id == session_id)
-        .order_by(TurnRow.turn_index.desc())
-        .limit(1)
-    )
-    return result.scalar_one_or_none()
-
-
-async def get_turn(session: AsyncSession, turn_id: uuid.UUID) -> TurnRow | None:
-    result = await session.execute(select(TurnRow).where(TurnRow.id == turn_id))
-    return result.scalar_one_or_none()
-
-
-async def update_turn_answer(session: AsyncSession, turn_id: uuid.UUID, answer: str) -> bool:
-    row = await get_turn(session, turn_id)
-    if row is None:
-        return False
-    row.answer = answer
-    await session.commit()
-    return True
-
-
-async def update_turn_evaluation(
-    session: AsyncSession,
-    turn_id: uuid.UUID,
-    *,
-    score: int,
-    feedback: str,
-    model_answer: str,
-) -> bool:
-    row = await get_turn(session, turn_id)
-    if row is None:
-        return False
-    row.score = score
-    row.feedback = feedback
-    row.model_answer = model_answer
-    await session.commit()
-    return True
-
-
-async def update_turn_evaluation_partial(
-    session: AsyncSession,
-    turn_id: uuid.UUID,
-    *,
-    score: int,
-    feedback: str,
-) -> bool:
-    """Persist score + feedback only — used when the model-answer call fails."""
-    row = await get_turn(session, turn_id)
-    if row is None:
-        return False
-    row.score = score
-    row.feedback = feedback
-    await session.commit()
-    return True
-
-
-async def create_turn(
-    session: AsyncSession,
-    *,
-    session_id: uuid.UUID,
-    turn_index: int,
-    question: str,
-    anchors: list[str],
-    metadata: dict[str, Any] | None = None,
-) -> TurnRow:
-    row = TurnRow(
-        session_id=session_id,
-        turn_index=turn_index,
-        question=question,
-        anchors_json=anchors,
-        metadata_json=metadata,
-    )
-    session.add(row)
-    await session.commit()
-    await session.refresh(row)
-    return row
 
 
 # --- company snapshots ---

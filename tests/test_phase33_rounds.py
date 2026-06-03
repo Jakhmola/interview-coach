@@ -307,7 +307,7 @@ async def test_qgen_grounding_injects_repo_code_for_github_focus(
         ['{"question": "Why async engine?", "anchors": ["a", "b", "c"]}'],
     )
 
-    async for _ in question_generator.stream_question(session_id=sess.id, user_id=alice.id):
+    async for _ in question_generator.stream_open_thread(session_id=sess.id, user_id=alice.id):
         pass
 
     # Retrieval was scoped to the repo corpus, single-attempt, k=3, pinned doc.
@@ -346,7 +346,7 @@ async def test_qgen_grounding_degrades_to_narrative_on_embedder_failure(
     )
 
     streamed = ""
-    async for kind, data in question_generator.stream_question(
+    async for kind, data in question_generator.stream_open_thread(
         session_id=sess.id, user_id=alice.id
     ):
         if kind == "token":
@@ -371,22 +371,24 @@ def _patch_eval_llm_capturing(monkeypatch: pytest.MonkeyPatch) -> list[list[Any]
     )
 
 
-async def _seed_answered_turn(
+async def _seed_answered_thread(
     db: AsyncSession, alice: User, job: Job, *, round_type: str, focus_key: str
 ) -> tuple[uuid.UUID, uuid.UUID]:
     sess = await repos.create_session(
         db, user_id=alice.id, job_id=job.id, round_type=round_type, n_questions=1
     )
-    turn = await repos.create_turn(
+    thread = await repos.create_thread(
         db,
         session_id=sess.id,
-        turn_index=0,
-        question="A question.",
+        thread_index=0,
         anchors=["a", "b", "c"],
-        metadata={"focus_key": focus_key},
+        focus_key=focus_key,
     )
-    await repos.update_turn_answer(db, turn.id, "My answer.")
-    return sess.id, turn.id
+    await repos.append_message(
+        db, thread_id=thread.id, seq=0, role="interviewer", kind="question", text="A question."
+    )
+    await repos.append_message(db, thread_id=thread.id, seq=1, role="candidate", text="My answer.")
+    return sess.id, thread.id
 
 
 @pytest.fixture
@@ -423,29 +425,29 @@ async def test_evaluator_skips_retrieval_and_picks_prompt_for_ungrounded_rounds(
     focus_key: str,
     expected_prompt: str,
 ) -> None:
-    session_id, turn_id = await _seed_answered_turn(
+    session_id, thread_id = await _seed_answered_thread(
         db, alice, seeded_job, round_type=round_type, focus_key=focus_key
     )
 
-    retrieval_called = False
-
-    async def spy_retrieve(**_: Any) -> list[GroundingHit]:
-        nonlocal retrieval_called
-        retrieval_called = True
-        return []
-
-    monkeypatch.setattr(evaluator, "retrieve_grounding", spy_retrieve)
     captured = _patch_eval_llm_capturing(monkeypatch)
 
-    async for _ in evaluator.stream_evaluation(
-        session_id=session_id, user_id=alice.id, turn_id=turn_id
+    async for _ in evaluator.stream_thread_evaluation(
+        session_id=session_id,
+        user_id=alice.id,
+        thread_id=thread_id,
+        thread_index=0,
+        anchors=["a", "b", "c"],
+        grounding=[],
+        focus_key=focus_key,
+        round_type=round_type,
     ):
         pass
 
-    # Ungrounded rounds never touch retrieval...
-    assert retrieval_called is False
-    # ...and the model-answer call uses the round's own prompt. captured[0] is
-    # the judge call, captured[1] is the model-answer call.
+    # Phase 34: the evaluator does NO retrieval at all (grounding is retrieved
+    # once at thread-open and carried in). The module no longer even imports it.
+    assert not hasattr(evaluator, "retrieve_grounding")
+    # The model-answer call uses the round's own prompt. captured[0] is the
+    # judge call, captured[1] is the model-answer call.
     assert len(captured) == 2
     assert captured[1][0].content == expected_prompt
 

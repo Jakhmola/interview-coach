@@ -1,28 +1,29 @@
-"""Evaluator agent node — Phase 14 split.
+"""Thread-close evaluator agent node — Phase 14 split, Phase 34 thread grain.
 
-The evaluation is now split across two sequential LLM calls (single-GPU,
-qwen3:8b VRAM-bound; parallelism would queue or spill to CPU):
+A thread (one topic) is evaluated **once at close**, over its whole transcript
+(the root question, the interviewer's follow-up moves, and the candidate's
+answers). The evaluation is two sequential LLM calls (single-GPU, qwen3:8b
+VRAM-bound; parallelism would queue or spill to CPU):
 
-  1. **Judge call** — emits ``{score, feedback}``. No grounding injected,
-     so the rubric stays untouched by retrieval noise.
-  2. **Model-answer call** — emits ``{model_answer}``, with retrieval over
-     the candidate's own ``project_doc`` chunks injected so the reference
-     answer can speak with project-specific detail in the candidate's
-     first-person voice.
+  1. **Judge call** — emits ``{score, feedback}`` over the transcript. No
+     grounding injected, so the rubric stays untouched by retrieval noise.
+  2. **Model-answer call** — emits ``{model_answer}``, reusing the grounding
+     retrieved ONCE at thread-open (carried in graph state; ``[]`` for
+     non-experience rounds), so the reference answer can speak with
+     project-specific detail in the candidate's first-person voice.
 
-Wire format to the SSE consumer is unchanged from Phase 9:
-    score → feedback_token* → feedback_done → model_answer_token* →
-    model_answer_done → done
+Wire format to the SSE consumer (framed by the action envelope upstream):
+    evaluation → score → feedback_token* → feedback_done →
+    model_answer_token* → model_answer_done → evaluation_done [→ wrap]
 
-If the model-answer call fails, the orchestrator persists score+feedback
-only and emits ``("model_answer_error", {"reason": str})``. The session
-status flip on the last turn happens after both calls succeed (or after
-the partial-persist path on failure).
+If the model-answer call fails, the orchestrator persists score+feedback only
+(``close_thread`` with ``model_answer=None``) and emits ``model_answer_error``.
+The session status flip to ``complete`` on the last thread happens after both
+calls, on the persist path.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import uuid
@@ -33,7 +34,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from interview_coach.agents.profile_view import profile_slice_for_focus
 from interview_coach.agents.prompts import EVALUATOR_JUDGE_SYSTEM
-from interview_coach.agents.rounds import AnswerGrounding, get_round_strategy
+from interview_coach.agents.rounds import get_round_strategy
 from interview_coach.agents.schemas import Judgment, ModelAnswerOnly
 from interview_coach.agents.streaming_json import (
     StreamingJsonError,
@@ -43,56 +44,22 @@ from interview_coach.db import repos
 from interview_coach.db.session import AsyncSessionLocal
 from interview_coach.llm.client import astream_with_telemetry, chat_model
 from interview_coach.llm.telemetry import set_node_context
-from interview_coach.rag.retrieval import GroundingHit, retrieve_grounding
 
 logger = logging.getLogger(__name__)
 
 
-class TurnNotFound(Exception):
-    """Raised when the turn doesn't exist or doesn't belong to the user."""
+class ThreadNotFound(Exception):
+    """Raised when the thread doesn't exist, isn't in the session, or has
+    already been closed (evaluated)."""
 
 
-class TurnNotAnswered(Exception):
-    """Caller invoked the evaluator before the answer was saved on the turn."""
-
-
-async def _load_eval_inputs(
-    session_id: uuid.UUID,
-    user_id: uuid.UUID,
-    turn_id: uuid.UUID,
-    *,
-    profile: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Load session, turn, and (when not state-hydrated) profile.
-
-    Phase 20: ``profile`` may be forwarded from interview_graph state and
-    skips its DB round-trip when provided.
-    """
-    async with AsyncSessionLocal() as s:
-        sess = await repos.get_session(s, session_id, user_id)
-        if sess is None:
-            raise TurnNotFound(f"session {session_id} not found for user {user_id}")
-        turn = await repos.get_turn(s, turn_id)
-        if turn is None or turn.session_id != session_id:
-            raise TurnNotFound(f"turn {turn_id} not in session {session_id}")
-        if not turn.answer:
-            raise TurnNotAnswered(f"turn {turn_id} has no answer yet")
-        if profile is None:
-            profile_row = await repos.get_profile(s, user_id)
-            profile = profile_row.profile_json if profile_row is not None else {}
-
-    return {
-        "session": sess,
-        "turn": turn,
-        "profile": profile,
-    }
-
-
-def _build_judge_message(*, turn: Any, profile: dict[str, Any]) -> str:
+def _build_judge_message(
+    *, root_question: str, transcript: list[dict[str, Any]], anchors: list[str], profile: dict
+) -> str:
     payload = {
-        "question": turn.question,
-        "evaluation_anchors": list(turn.anchors_json or []),
-        "candidate_answer": turn.answer or "",
+        "question": root_question,
+        "transcript": transcript,
+        "evaluation_anchors": list(anchors or []),
         "candidate_profile": profile,
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
@@ -100,16 +67,18 @@ def _build_judge_message(*, turn: Any, profile: dict[str, Any]) -> str:
 
 def _build_model_answer_message(
     *,
-    turn: Any,
-    profile: dict[str, Any],
-    hits: list[GroundingHit],
+    root_question: str,
+    transcript: list[dict[str, Any]],
+    anchors: list[str],
+    profile: dict,
+    grounding: list[dict[str, Any]],
 ) -> str:
     payload = {
-        "question": turn.question,
-        "evaluation_anchors": list(turn.anchors_json or []),
-        "candidate_answer": turn.answer or "",
+        "question": root_question,
+        "transcript": transcript,
+        "evaluation_anchors": list(anchors or []),
         "candidate_profile": profile,
-        "grounding": [{"source": h.filename, "text": h.text} for h in hits],
+        "grounding": grounding,
     }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
@@ -130,17 +99,9 @@ async def _model_deltas(llm, messages):  # noqa: ANN001
                         yield text
 
 
-async def _run_judge_call(
-    *,
-    turn: Any,
-    profile: dict[str, Any],
-    temperature: float,
-) -> AsyncIterator[tuple[str, Any]]:
+async def _run_judge_call(*, user_msg: str, temperature: float) -> AsyncIterator[tuple[str, Any]]:
     """Yields SSE events for the judge call AND finally yields
-    ``("__parsed__", Judgment)`` so the orchestrator can persist it.
-    Caller is expected to drop ``__parsed__`` before forwarding.
-    """
-    user_msg = _build_judge_message(turn=turn, profile=profile)
+    ``("__parsed__", Judgment)`` so the orchestrator can persist it."""
     llm = chat_model(temperature=temperature).bind(response_format={"type": "json_object"})
     messages = [
         SystemMessage(content=EVALUATOR_JUDGE_SYSTEM),
@@ -171,14 +132,8 @@ async def _run_judge_call(
 
 
 async def _run_model_answer_call(
-    *,
-    turn: Any,
-    profile: dict[str, Any],
-    hits: list[GroundingHit],
-    temperature: float,
-    model_answer_system: str,
+    *, user_msg: str, temperature: float, model_answer_system: str
 ) -> AsyncIterator[tuple[str, Any]]:
-    user_msg = _build_model_answer_message(turn=turn, profile=profile, hits=hits)
     llm = chat_model(temperature=temperature).bind(response_format={"type": "json_object"})
     messages = [
         SystemMessage(content=model_answer_system),
@@ -207,141 +162,83 @@ async def _run_model_answer_call(
     yield ("__parsed__", ma)
 
 
-async def _retrieve_for_turn(*, user_id: uuid.UUID, turn: Any) -> list[GroundingHit]:
-    metadata = turn.metadata_json or {}
-    focus_label = metadata.get("focus_label")
-    raw_doc_ids = metadata.get("focus_document_ids") or []
-    doc_ids: tuple[uuid.UUID, ...] = ()
-    if raw_doc_ids:
-        parsed: list[uuid.UUID] = []
-        for d in raw_doc_ids:
-            try:
-                parsed.append(uuid.UUID(str(d)))
-            except (ValueError, TypeError):
-                logger.warning("skipping invalid focus_document_id %r on turn %s", d, turn.id)
-        doc_ids = tuple(parsed)
-    query = f"{turn.question} {focus_label or ''}".strip()
-    try:
-        # Phase 21 follow-up: single-attempt on the in-turn hot path so a
-        # transiently slow embedder fails fast and the model-answer call
-        # falls back to no-grounding (already a graceful path). The full
-        # retry policy still applies to ingest-side callers (CV /
-        # project_doc embed) where wall-clock doesn't matter.
-        return await retrieve_grounding(
-            user_id=user_id,
-            query=query,
-            k=4,
-            document_ids=doc_ids,
-            retries=1,
-        )
-    except Exception:  # noqa: BLE001
-        # Retrieval failure should not derail the evaluation — fall back
-        # to profile-only model answer.
-        logger.exception("grounding retrieval failed; falling back to []")
-        return []
-
-
-async def stream_evaluation(
+async def stream_thread_evaluation(
     *,
     session_id: uuid.UUID,
     user_id: uuid.UUID,
-    turn_id: uuid.UUID,
+    thread_id: uuid.UUID,
+    thread_index: int,
+    anchors: list[str],
+    grounding: list[dict[str, Any]],
+    focus_key: str | None,
+    round_type: str,
     temperature: float = 0.0,
     profile: dict[str, Any] | None = None,
 ) -> AsyncIterator[tuple[str, Any]]:
-    """Run judge call (streaming) with retrieval kicked off in parallel,
-    then the model-answer call. See module docstring.
+    """Evaluate one thread over its whole transcript, persist on the Thread,
+    close it, and flip the session ``complete`` on the last thread.
 
-    Phase 20:
-
-    * ``profile`` may be forwarded from interview_graph state to skip the
-      per-turn profile DB read.
-    * Prompts ship only the focus-anchored slice of the profile (via
-      ``profile_slice_for_focus``), not the full 6-12 KB JSON.
-    * Retrieval is started concurrently with the judge stream — embedder
-      + pgvector and llama.cpp use different resources, so the wall-clock
-      cost overlaps with judge token streaming instead of stacking.
+    Yields the framed evaluation events (see module docstring), then
+    ``("evaluation_done", {...})`` and, if this was the last thread,
+    ``("wrap", {"session_status": "complete"})``.
     """
-    inputs = await _load_eval_inputs(session_id, user_id, turn_id, profile=profile)
-    sess = inputs["session"]
-    turn = inputs["turn"]
-    full_profile = inputs["profile"]
+    async with AsyncSessionLocal() as s:
+        sess = await repos.get_session(s, session_id, user_id)
+        if sess is None:
+            raise ThreadNotFound(f"session {session_id} not found for user {user_id}")
+        thread = await repos.get_thread(s, thread_id)
+        if thread is None or thread.session_id != session_id:
+            raise ThreadNotFound(f"thread {thread_id} not in session {session_id}")
+        if thread.status != "open":
+            raise ThreadNotFound(f"thread {thread_id} already closed")
+        messages = list(await repos.list_messages_for_thread(s, thread_id))
+        if profile is None:
+            profile_row = await repos.get_profile(s, user_id)
+            profile = profile_row.profile_json if profile_row is not None else {}
 
-    if turn.score is not None:
-        raise TurnNotFound(f"turn {turn_id} already evaluated")
-
-    metadata = turn.metadata_json or {}
-    focus_key = metadata.get("focus_key")
-    slim_profile = profile_slice_for_focus(full_profile, focus_key)
-    strategy = get_round_strategy(sess.round_type)
+    transcript = [{"role": m.role, "kind": m.kind, "text": m.text} for m in messages]
+    root_question = next((m.text for m in messages if m.role == "interviewer"), "")
+    slim_profile = profile_slice_for_focus(profile, focus_key)
+    strategy = get_round_strategy(round_type)
 
     logger.info(
-        "Evaluator: session=%s turn=%s (turn_index=%d)",
+        "Evaluator(thread-close): session=%s thread=%s (thread_index=%d) round=%s grounding=%d",
         session_id,
-        turn_id,
-        turn.turn_index,
+        thread_id,
+        thread_index,
+        round_type,
+        len(grounding or []),
     )
 
-    # Phase 33: only the experience round's model answer is RAG-grounded
-    # (``rag_docs``). The technical round's answer is authoritative and the
-    # behavioral round's is an illustrative hypothetical — both skip retrieval
-    # entirely. Skipping also fixes the behavioral bug where the focus carried
-    # no doc-ids and retrieval ran unscoped over every corpus.
-    retrieve_task: asyncio.Task[list[GroundingHit]] | None = None
-    if strategy.answer_grounding == AnswerGrounding.rag_docs:
-        # Kick off retrieval BEFORE starting the judge stream. Judge runs on
-        # the llama.cpp service (GPU + small CPU footprint), retrieval hits the
-        # embedder sidecar + pgvector (CPU + DB) — different resources, fully
-        # overlappable. If the judge fails we cancel the task to avoid a
-        # dangling coroutine.
-        retrieve_task = asyncio.create_task(_retrieve_for_turn(user_id=user_id, turn=turn))
+    yield ("evaluation", {"thread_index": thread_index})
 
     # --- Call 1: judge ---
+    judge_msg = _build_judge_message(
+        root_question=root_question,
+        transcript=transcript,
+        anchors=anchors,
+        profile=slim_profile,
+    )
     judgment: Judgment | None = None
-    try:
-        async for event, data in _run_judge_call(
-            turn=turn, profile=slim_profile, temperature=temperature
-        ):
-            if event == "__parsed__":
-                judgment = data
-            else:
-                yield (event, data)
-    except BaseException:
-        if retrieve_task is not None:
-            retrieve_task.cancel()
-        raise
+    async for event, data in _run_judge_call(user_msg=judge_msg, temperature=temperature):
+        if event == "__parsed__":
+            judgment = data
+        else:
+            yield (event, data)
     assert judgment is not None  # _run_judge_call raises otherwise
 
-    # --- Wait on the (most likely already-finished) retrieval task ---
-    hits: list[GroundingHit] = []
-    if retrieve_task is not None:
-        try:
-            hits = await retrieve_task
-        except Exception:  # noqa: BLE001
-            # _retrieve_for_turn already swallows exceptions to []; this is a
-            # belt-and-braces guard in case asyncio plumbing surfaces one.
-            logger.exception("retrieve task raised unexpectedly; degrading to []")
-            hits = []
-    logger.info(
-        "Evaluator grounding: turn=%s round=%s grounding=%s hits=%d (kinds=%s)",
-        turn_id,
-        sess.round_type,
-        strategy.answer_grounding,
-        len(hits),
-        [h.source_doc_kind for h in hits],
+    # --- Call 2: model answer (reuses carried thread-open grounding) ---
+    model_answer_msg = _build_model_answer_message(
+        root_question=root_question,
+        transcript=transcript,
+        anchors=anchors,
+        profile=slim_profile,
+        grounding=list(grounding or []),
     )
-
-    is_last = turn.turn_index + 1 >= sess.n_questions
-    new_status = "complete" if is_last else "active"
-    n_remaining = max(0, sess.n_questions - (turn.turn_index + 1))
-
     model_answer: str | None = None
-    model_answer_failed_reason: str | None = None
     try:
         async for event, data in _run_model_answer_call(
-            turn=turn,
-            profile=slim_profile,
-            hits=hits,
+            user_msg=model_answer_msg,
             temperature=temperature,
             model_answer_system=strategy.model_answer_system,
         ):
@@ -350,35 +247,32 @@ async def stream_evaluation(
             else:
                 yield (event, data)
     except Exception as e:  # noqa: BLE001
-        logger.exception("model-answer call failed for turn %s", turn_id)
-        model_answer_failed_reason = str(e) or e.__class__.__name__
-        yield ("model_answer_error", {"reason": model_answer_failed_reason})
+        logger.exception("model-answer call failed for thread %s", thread_id)
+        yield ("model_answer_error", {"reason": str(e) or e.__class__.__name__})
 
-    # --- Persist ---
+    # --- Persist: close the thread, flip the session on the last one ---
     async with AsyncSessionLocal() as s:
-        if model_answer is not None:
-            await repos.update_turn_evaluation(
-                s,
-                turn_id,
-                score=judgment.score,
-                feedback=judgment.feedback,
-                model_answer=model_answer,
-            )
-        else:
-            await repos.update_turn_evaluation_partial(
-                s,
-                turn_id,
-                score=judgment.score,
-                feedback=judgment.feedback,
-            )
+        await repos.close_thread(
+            s,
+            thread_id,
+            score=judgment.score,
+            feedback=judgment.feedback,
+            model_answer=model_answer,
+        )
+        n_closed = await repos.count_closed_threads(s, session_id)
+        is_last = n_closed >= sess.n_questions
         if is_last:
             await repos.update_session_status(s, session_id, user_id, "complete")
 
+    new_status = "complete" if is_last else "active"
+    n_remaining = max(0, sess.n_questions - n_closed)
     yield (
-        "done",
+        "evaluation_done",
         {
-            "turn_index": turn.turn_index,
+            "thread_index": thread_index,
             "session_status": new_status,
             "n_remaining": n_remaining,
         },
     )
+    if is_last:
+        yield ("wrap", {"session_status": "complete"})

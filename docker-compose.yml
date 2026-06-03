@@ -65,6 +65,12 @@ services:
     # embedder/main.py). Keep EMBED_THREADS <= EMBED_CPUS so the OS scheduler
     # never has to over-subscribe the quota.
     cpus: ${EMBED_CPUS:-4}
+    # Memory ceiling so a large encode batch can't push a 14GB-class host into
+    # swap/OOM and let the kernel kill *other* containers (the whole stack went
+    # down this way). With the cap, the embedder alone gets OOM-killed and
+    # `restart: unless-stopped` brings it back — a transient connect error the
+    # client already retries. ~1.5GB resident + encode headroom fits in 4g.
+    mem_limit: ${EMBED_MEM:-4g}
     environment:
       EMBED_THREADS: ${EMBED_THREADS:-4}
       TOKENIZERS_PARALLELISM: "false"

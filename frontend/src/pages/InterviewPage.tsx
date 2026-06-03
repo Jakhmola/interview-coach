@@ -1,18 +1,18 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, Loader2, Play, RotateCcw } from "lucide-react";
 import { Link } from "react-router-dom";
 import Confetti from "react-confetti";
 
 import {
   JobItem,
+  MoveKind,
   RoundType,
   Session,
   SessionDetail,
   SseFrame,
-  Turn,
-  answerStream,
+  Thread,
   api,
-  nextQuestionStream,
+  messageStream,
 } from "../api";
 import { ArmedDeleteButton } from "../components/ArmedDeleteButton";
 import { LoadingStatus } from "../components/LoadingStatus";
@@ -37,11 +37,60 @@ const roundDescriptions: Record<RoundType, string> = {
     "STAR-format questions on how you work with people — conflict, ownership, ambiguity — grounded in the role's signals and the company's values.",
 };
 
+// Phase 34: the interviewer no longer asks one fixed question per turn — it
+// works a topic (a Thread) one move at a time, deciding at runtime whether to
+// probe, clarify, nudge, or advance. So the page is a chat transcript, and
+// each `/message` round-trip streams the interviewer's next move(s) (and, when
+// a topic closes, its single evaluation + possibly the next topic's question).
+
+type LiveMove = {
+  type: "move";
+  key: string;
+  kind: MoveKind;
+  threadIndex: number;
+  text: string;
+};
+
+type EvalPhase = "evaluating" | "feedback" | "model_answer" | "done";
+
+type LiveEval = {
+  type: "eval";
+  key: string;
+  threadIndex: number;
+  score: number | null;
+  feedback: string;
+  modelAnswer: string;
+  phase: EvalPhase;
+};
+
+type LiveItem = LiveMove | LiveEval;
+
+function updateLast<T extends LiveItem["type"]>(
+  items: LiveItem[],
+  type: T,
+  patch: (item: Extract<LiveItem, { type: T }>) => Extract<LiveItem, { type: T }>,
+): LiveItem[] {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (items[i].type === type) {
+      const next = items.slice();
+      next[i] = patch(items[i] as Extract<LiveItem, { type: T }>);
+      return next;
+    }
+  }
+  return items;
+}
+
+const moveLabels: Record<MoveKind, string> = {
+  question: "Question",
+  probe: "Follow-up",
+  clarify: "Clarify",
+  nudge: "Nudge",
+};
+
 export function InterviewPage() {
   const { token } = useAuth();
   const { activeJobId, activeJob } = useActiveJob();
-  const questionAbort = useStreamAbort();
-  const answerAbort = useStreamAbort();
+  const messageAbort = useStreamAbort();
   const windowSize = useWindowSize();
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -50,13 +99,7 @@ export function InterviewPage() {
   const [roundType, setRoundType] = useState<RoundType>("experience_deep_dive");
   const [nQuestions, setNQuestions] = useState(5);
   const [answer, setAnswer] = useState("");
-  const [streamQuestion, setStreamQuestion] = useState("");
-  const [streamFeedback, setStreamFeedback] = useState("");
-  const [streamModelAnswer, setStreamModelAnswer] = useState("");
-  const [streamScore, setStreamScore] = useState<number | null>(null);
-  const [streamPhase, setStreamPhase] = useState<
-    "idle" | "evaluating" | "feedback" | "model_answer" | "done"
-  >("idle");
+  const [liveItems, setLiveItems] = useState<LiveItem[]>([]);
   const [pendingAnswer, setPendingAnswer] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,12 +115,7 @@ export function InterviewPage() {
     [sessions, activeJobId],
   );
 
-  const overallScore = useMemo(() => {
-    const scored =
-      detail?.turns.filter((t) => t.score !== null && t.score !== undefined) ?? [];
-    if (!scored.length) return null;
-    return scored.reduce((t, x) => t + (x.score ?? 0), 0) / scored.length;
-  }, [detail?.turns]);
+  const overallScore = useMemo(() => scoreThreads(detail?.threads), [detail?.threads]);
 
   const refresh = async () => {
     if (!token) return;
@@ -99,7 +137,7 @@ export function InterviewPage() {
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [detail?.turns, streamQuestion, streamFeedback, streamModelAnswer, pendingAnswer]);
+  }, [detail?.threads, liveItems, pendingAnswer]);
 
   useEffect(() => {
     if (!detail || detail.status !== "complete" || overallScore === null) return;
@@ -108,29 +146,118 @@ export function InterviewPage() {
     setCelebrationPieces(scoreToConfettiPieces(overallScore));
   }, [detail, overallScore]);
 
-  const askNext = async (sessionId: string, sessionToken: string) => {
+  // The single conversational round-trip. `message === null` opens the session
+  // (first thread); otherwise it's the candidate's answer. The response streams
+  // the interviewer's next move(s) as an action envelope; we overlay them as
+  // `liveItems`, then refetch the authoritative session detail and drop the
+  // overlay (the persisted threads now carry everything).
+  const sendMessage = async (sessionId: string, message: string | null) => {
+    if (!token) return;
     setIsBusy(true);
-    setStreamQuestion("");
     setError(null);
-    const signal = questionAbort.fresh();
+    setLiveItems([]);
+    const signal = messageAbort.fresh();
     try {
-      await nextQuestionStream(
-        sessionToken,
-        sessionId,
-        (frame: SseFrame) => {
-          if (frame.event === "token" && typeof frame.data === "string") {
-            setStreamQuestion((c) => c + frame.data);
-          }
-          if (frame.event === "error") setError(codeFrom(frame.data));
-        },
-        signal,
-      );
-      setStreamQuestion("");
-      setDetail(await api.getSession(sessionToken, sessionId));
+      await messageStream(token, sessionId, message, handleFrame, signal);
+      setDetail(await api.getSession(token, sessionId));
     } catch (err) {
       setError(codeFrom(err));
     } finally {
+      setLiveItems([]);
+      setPendingAnswer(null);
       setIsBusy(false);
+    }
+  };
+
+  const handleFrame = (frame: SseFrame) => {
+    switch (frame.event) {
+      case "move": {
+        const d = frame.data as { kind: MoveKind; thread_index: number };
+        setLiveItems((items) => [
+          ...items,
+          {
+            type: "move",
+            key: `m${items.length}`,
+            kind: d.kind,
+            threadIndex: d.thread_index,
+            text: "",
+          },
+        ]);
+        break;
+      }
+      case "token": {
+        if (typeof frame.data !== "string") break;
+        const t = frame.data;
+        setLiveItems((items) => updateLast(items, "move", (m) => ({ ...m, text: m.text + t })));
+        break;
+      }
+      case "evaluation": {
+        const d = frame.data as { thread_index: number };
+        setLiveItems((items) => [
+          ...items,
+          {
+            type: "eval",
+            key: `e${items.length}`,
+            threadIndex: d.thread_index,
+            score: null,
+            feedback: "",
+            modelAnswer: "",
+            phase: "evaluating",
+          },
+        ]);
+        break;
+      }
+      case "score": {
+        // Phase 34: the score rides the wire as a bare integer.
+        const s = Number(frame.data);
+        setLiveItems((items) =>
+          updateLast(items, "eval", (e) => ({
+            ...e,
+            score: s,
+            phase: e.phase === "evaluating" ? "feedback" : e.phase,
+          })),
+        );
+        break;
+      }
+      case "feedback_token": {
+        if (typeof frame.data !== "string") break;
+        const t = frame.data;
+        setLiveItems((items) =>
+          updateLast(items, "eval", (e) => ({ ...e, feedback: e.feedback + t, phase: "feedback" })),
+        );
+        break;
+      }
+      case "model_answer_token": {
+        if (typeof frame.data !== "string") break;
+        const t = frame.data;
+        setLiveItems((items) =>
+          updateLast(items, "eval", (e) => ({
+            ...e,
+            modelAnswer: e.modelAnswer + t,
+            phase: "model_answer",
+          })),
+        );
+        break;
+      }
+      case "model_answer_error": {
+        setLiveItems((items) =>
+          updateLast(items, "eval", (e) => ({
+            ...e,
+            modelAnswer: "Model answer unavailable for this topic.",
+          })),
+        );
+        break;
+      }
+      case "evaluation_done": {
+        setLiveItems((items) => updateLast(items, "eval", (e) => ({ ...e, phase: "done" })));
+        break;
+      }
+      case "error":
+        setError(codeFrom(frame.data));
+        break;
+      // "move_done" / "wrap" need no transcript change — the refetch reflects them.
+      default:
+        break;
     }
   };
 
@@ -143,7 +270,8 @@ export function InterviewPage() {
       setActiveId(session.id);
       setDetail(await api.getSession(token, session.id));
       await refresh();
-      await askNext(session.id, token);
+      // Empty body opens the first thread + streams the opening question.
+      await sendMessage(session.id, null);
     } catch (err) {
       setError(codeFrom(err));
     }
@@ -161,99 +289,29 @@ export function InterviewPage() {
     await refresh();
   };
 
-  const latest = detail?.turns.at(-1);
-  // While streamPhase === "done" we're parked on the just-answered turn so
-  // the user can read the feedback. All "next-state" affordances are gated
-  // off until they click the advance CTA, which flips phase back to idle.
-  const showingFeedback = streamPhase === "done";
-  const needsQuestion =
-    !showingFeedback &&
-    detail?.status === "active" &&
-    detail.turns.length < detail.n_questions &&
-    (!latest || (latest.answer && latest.score !== null && latest.score !== undefined));
-  const needsAnswer =
-    !showingFeedback && detail?.status === "active" && latest && !latest.answer;
-  const needsRetry =
-    !showingFeedback &&
-    detail?.status === "active" &&
-    latest &&
-    latest.answer &&
-    latest.score === null;
-  const isLastTurn =
-    detail !== null && detail.turns.length >= detail.n_questions;
+  const openThread = useMemo(
+    () => detail?.threads.find((t) => t.status === "open") ?? null,
+    [detail?.threads],
+  );
+  const lastMessage = openThread?.messages.at(-1) ?? null;
+  const awaitingAnswer =
+    detail?.status === "active" && !!openThread && lastMessage?.role === "interviewer";
+  const needsBegin =
+    detail?.status === "active" && (detail?.threads.length ?? 0) === 0;
+  const composerOpen =
+    awaitingAnswer && !isBusy && liveItems.length === 0 && pendingAnswer === null;
 
   const submitAnswer = async (event?: FormEvent) => {
     event?.preventDefault();
-    if (!token || !detail || !latest) return;
-    const text = needsRetry ? latest.answer || "" : answer.trim();
+    if (!token || !detail) return;
+    const text = answer.trim();
     if (!text) {
-      setError("Type an answer before submitting.");
+      setError("empty_message");
       return;
     }
-    setPendingAnswer(text);
     setAnswer("");
-    setIsBusy(true);
-    setStreamFeedback("");
-    setStreamModelAnswer("");
-    setStreamScore(null);
-    setStreamPhase("evaluating");
-    setError(null);
-    const signal = answerAbort.fresh();
-    try {
-      await answerStream(
-        token,
-        detail.id,
-        text,
-        (frame: SseFrame) => {
-          if (frame.event === "score" && typeof frame.data === "object" && frame.data !== null) {
-            setStreamScore(Number((frame.data as { score?: number }).score));
-            setStreamPhase("feedback");
-          }
-          if (frame.event === "feedback_token" && typeof frame.data === "string") {
-            setStreamPhase("feedback");
-            setStreamFeedback((c) => c + frame.data);
-          }
-          if (frame.event === "model_answer_token" && typeof frame.data === "string") {
-            setStreamPhase("model_answer");
-            setStreamModelAnswer((c) => c + frame.data);
-          }
-          if (frame.event === "model_answer_error") {
-            setStreamModelAnswer("Model answer unavailable for this turn.");
-          }
-          if (frame.event === "error") setError(codeFrom(frame.data));
-        },
-        signal,
-      );
-      setDetail(await api.getSession(token, detail.id));
-      // Keep the streamed feedback/score/model-answer visible — the user
-      // hasn't had time to read them yet. Phase flips to "done" so the
-      // page renders an explicit "Next question" / "Finish round" CTA.
-      // The next user click is what flushes this state.
-      setStreamPhase("done");
-    } catch (err) {
-      setError(codeFrom(err));
-      setPendingAnswer(null);
-      setStreamPhase("idle");
-    } finally {
-      setIsBusy(false);
-    }
-  };
-
-  // Called when the user explicitly advances past the feedback they just
-  // read. Flushes the local stream state, then either fetches the next
-  // question or simply lets the page render the done-state for the last
-  // turn (which the n_questions-reached invariant already guarantees).
-  const advance = async () => {
-    if (!token || !detail) return;
-    setPendingAnswer(null);
-    setStreamFeedback("");
-    setStreamModelAnswer("");
-    setStreamScore(null);
-    setStreamPhase("idle");
-    // If more turns remain, fetch the next question immediately.
-    if (detail.turns.length < detail.n_questions) {
-      await askNext(detail.id, token);
-    }
+    setPendingAnswer(text);
+    await sendMessage(detail.id, text);
   };
 
   // ───── Empty / setup states ─────
@@ -264,10 +322,7 @@ export function InterviewPage() {
     | undefined;
   const role = parsed?.title;
   const company = parsed?.company_name;
-  const jobLabel =
-    role && company
-      ? `${role} @ ${company}`
-      : role || company || "Active job";
+  const jobLabel = role && company ? `${role} @ ${company}` : role || company || "Active job";
 
   if (!activeJobId) {
     return (
@@ -327,7 +382,7 @@ export function InterviewPage() {
 
           <label className="practice-questions-row">
             <span>
-              Questions <strong>{nQuestions}</strong>
+              Topics <strong>{nQuestions}</strong>
             </span>
             <input
               type="range"
@@ -340,7 +395,7 @@ export function InterviewPage() {
 
           <button className="btn-primary practice-start-cta" type="submit" disabled={isBusy}>
             {isBusy ? <Loader2 size={16} className="spin" /> : <Play size={16} />}
-            {isBusy ? "Preparing first question…" : "Start round"}
+            {isBusy ? "Opening the conversation…" : "Start round"}
           </button>
         </form>
 
@@ -361,7 +416,7 @@ export function InterviewPage() {
                       month: "short",
                       day: "numeric",
                     })}{" "}
-                    · {s.n_questions} questions
+                    · {s.n_questions} topics
                   </span>
                 </button>
               ))}
@@ -372,40 +427,28 @@ export function InterviewPage() {
     );
   }
 
-  // ───── Live round ─────
+  // ───── Completed / abandoned ─────
 
-  const nextQuestionIndex = detail.turns.length + 1;
-  const turnQuestion =
-    needsAnswer || needsRetry || showingFeedback ? latest?.question : null;
+  if (detail.status !== "active") {
+    return (
+      <div className="practice-live">
+        {celebrationPieces !== null ? (
+          <Confetti
+            width={windowSize.width}
+            height={windowSize.height}
+            numberOfPieces={celebrationPieces}
+            recycle={false}
+            run
+            gravity={0.18}
+            tweenDuration={6500}
+            colors={["#C56B62", "#DEA785", "#6C739C", "#BFB9B5", "#f0ebe6"]}
+            className="completion-confetti"
+            onConfettiComplete={() => setCelebrationPieces(null)}
+          />
+        ) : null}
 
-  return (
-    <div className="practice-live">
-      {celebrationPieces !== null ? (
-        <Confetti
-          width={windowSize.width}
-          height={windowSize.height}
-          numberOfPieces={celebrationPieces}
-          recycle={false}
-          run
-          gravity={0.18}
-          tweenDuration={6500}
-          colors={["#C56B62", "#DEA785", "#6C739C", "#BFB9B5", "#f0ebe6"]}
-          className="completion-confetti"
-          onConfettiComplete={() => setCelebrationPieces(null)}
-        />
-      ) : null}
+        <ErrorBanner code={error} />
 
-      <header className="practice-live-header">
-        <span className="practice-live-meta">
-          {roundLabels[detail.round_type]} · question{" "}
-          {Math.min(detail.turns.length || 1, detail.n_questions)}/{detail.n_questions}
-        </span>
-        <span className="practice-live-meta">{jobLabel}</span>
-      </header>
-
-      <ErrorBanner code={error} />
-
-      {detail.status !== "active" ? (
         <div className="practice-done">
           <h1 className="practice-done-title">Round {detail.status}</h1>
           {overallScore !== null ? (
@@ -430,205 +473,327 @@ export function InterviewPage() {
           <details className="practice-done-review">
             <summary>Show this round</summary>
             <div className="practice-transcript">
-              {detail.turns.map((t) => (
-                <TurnView key={t.id} turn={t} />
+              {detail.threads.map((t) => (
+                <ThreadReview key={t.id} thread={t} />
               ))}
             </div>
           </details>
         </div>
-      ) : (
-        <>
-          {/* Current question — display type, dominant focus */}
-          {streamQuestion ? (
-            <article
-              className="practice-question stream-in"
-              aria-live="polite"
-              aria-atomic="false"
-            >
-              <span className="practice-question-num">Q{nextQuestionIndex}</span>
-              <p>
-                {streamQuestion}
-                <span className="cursor-blink" />
-              </p>
-            </article>
-          ) : turnQuestion ? (
-            <article className="practice-question">
-              <span className="practice-question-num">Q{latest!.turn_index + 1}</span>
-              <p>{turnQuestion}</p>
-            </article>
-          ) : null}
+      </div>
+    );
+  }
 
-          {/* Question loading */}
-          {isBusy && !streamQuestion && streamPhase === "idle" && needsQuestion ? (
+  // ───── Live round (chat) ─────
+
+  const closedThreads = detail.threads.filter((t) => t.status === "closed");
+  const topicNum = Math.min(Math.max(detail.threads.length, 1), detail.n_questions);
+  const activeNodes = buildActiveTopic(openThread, pendingAnswer, liveItems);
+  // Busy with nothing rendered yet → the interviewer is composing its move.
+  const showThinking = isBusy && liveItems.length === 0;
+
+  return (
+    <div className="practice-live">
+      <header className="practice-live-header">
+        <span className="practice-live-meta">
+          {roundLabels[detail.round_type]} · topic {topicNum}/{detail.n_questions}
+        </span>
+        <span className="practice-live-meta">{jobLabel}</span>
+      </header>
+
+      <ErrorBanner code={error} />
+
+      {/* The active topic lives in its own card; closed topics fall to the
+          collapsed history below (new topic = fresh card at the top). */}
+      {activeNodes.length > 0 || showThinking ? (
+        <div className="practice-chat">
+          {activeNodes}
+
+          {showThinking ? (
             <div className="practice-loading">
               <Loader2 size={16} className="spin" />
               <LoadingStatus
                 active
                 messages={[
-                  `Preparing question ${nextQuestionIndex}`,
-                  "Choosing the sharpest follow-up",
+                  "Reading your answer",
+                  "Deciding the sharpest next move",
                   "Grounding it in your profile",
                 ]}
-                fallback={`Preparing question ${nextQuestionIndex}`}
+                fallback="Thinking"
               />
             </div>
           ) : null}
-
-          {needsQuestion && !isBusy && detail.turns.length === 0 ? (
-            <button className="btn-primary" onClick={() => askNext(detail.id, token!)}>
-              <Play size={14} /> Begin
-            </button>
-          ) : null}
-
-          {/* Answer composer */}
-          {needsAnswer && !isBusy ? (
-            <form className="practice-composer" onSubmit={submitAnswer}>
-              <textarea
-                rows={8}
-                value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
-                placeholder="Answer as you would in the interview…"
-                autoFocus
-              />
-              <div className="practice-composer-actions">
-                <button className="btn-primary" type="submit">
-                  Submit <ArrowRight size={14} />
-                </button>
-              </div>
-            </form>
-          ) : null}
-
-          {/* Pending answer bubble + evaluation */}
-          {pendingAnswer ? (
-            <article className="practice-your-answer">
-              <span className="practice-your-answer-label">Your answer</span>
-              <p>{pendingAnswer}</p>
-            </article>
-          ) : null}
-
-          {streamPhase === "evaluating" && !streamFeedback ? (
-            <div className="practice-loading">
-              <Loader2 size={16} className="spin" />
-              <LoadingStatus
-                active
-                messages={[
-                  "Scoring your structure",
-                  "Checking evidence and specificity",
-                  "Drafting feedback",
-                ]}
-                fallback="Evaluating your answer"
-              />
-            </div>
-          ) : null}
-
-          {streamFeedback || streamScore !== null ? (
-            <article
-              className="practice-feedback stream-in"
-              aria-live="polite"
-              aria-atomic="false"
-            >
-              <header>
-                {streamScore !== null ? (
-                  <span className="practice-feedback-score">
-                    <strong>{streamScore}</strong>
-                    <span>/ 10</span>
-                  </span>
-                ) : (
-                  <span className="practice-feedback-score loading">
-                    <Loader2 size={14} className="spin" /> Scoring…
-                  </span>
-                )}
-              </header>
-              <p>
-                {streamFeedback}
-                {streamPhase === "feedback" ? <span className="cursor-blink" /> : null}
-              </p>
-
-              {streamPhase === "model_answer" || streamModelAnswer ? (
-                <details open className="stream-in">
-                  <summary>Model answer</summary>
-                  <p>
-                    {streamModelAnswer}
-                    {streamPhase === "model_answer" ? <span className="cursor-blink" /> : null}
-                  </p>
-                </details>
-              ) : streamPhase === "feedback" ? (
-                <div className="practice-loading subtle">
-                  <Loader2 size={14} className="spin" />
-                  <LoadingStatus
-                    active
-                    messages={[
-                      "Preparing model answer",
-                      "Tuning it to the role",
-                      "Making the example sharper",
-                    ]}
-                    fallback="Preparing model answer"
-                  />
-                </div>
-              ) : null}
-            </article>
-          ) : null}
-
-          {showingFeedback ? (
-            <div className="practice-advance">
-              <button className="btn-primary" onClick={advance} disabled={isBusy}>
-                {isLastTurn ? (
-                  <>
-                    Finish round <ArrowRight size={14} />
-                  </>
-                ) : (
-                  <>
-                    Next question <ArrowRight size={14} />
-                  </>
-                )}
-              </button>
-              <small className="practice-advance-hint">
-                {isLastTurn
-                  ? "Wraps the round and shows your overall score."
-                  : "Take your time — the next question waits until you click."}
-              </small>
-            </div>
-          ) : null}
-
-          {needsRetry && !isBusy ? (
-            <button className="btn-primary" onClick={() => submitAnswer()}>
-              <RotateCcw size={14} /> Retry evaluation
-            </button>
-          ) : null}
-
-          {/* Past turns transcript — folded, quiet. Excludes the
-              current turn whenever it's being displayed in full above
-              (answering, retrying, or reading feedback). */}
-          {(() => {
-            const hideLatest = needsAnswer || needsRetry || showingFeedback;
-            const past = hideLatest ? detail.turns.slice(0, -1) : detail.turns;
-            if (past.length <= 0) return null;
-            return (
-              <details className="practice-transcript-fold">
-                <summary>Earlier in this round ({past.length})</summary>
-                <div className="practice-transcript">
-                  {past.map((t) => (
-                    <TurnView key={t.id} turn={t} />
-                  ))}
-                </div>
-              </details>
-            );
-          })()}
 
           <div ref={chatBottomRef} />
+        </div>
+      ) : null}
 
-          <footer className="practice-live-footer">
-            <ArmedDeleteButton
-              label="End session"
-              onConfirm={() => abandon(detail.id)}
-              className="btn-quiet"
-            />
-            <small className="practice-end-hint">You can still review it in History.</small>
-          </footer>
-        </>
-      )}
+      {needsBegin && !isBusy ? (
+        <button className="btn-primary" onClick={() => sendMessage(detail.id, null)}>
+          <Play size={14} /> Begin
+        </button>
+      ) : null}
+
+      {composerOpen ? (
+        <form className="practice-composer" onSubmit={submitAnswer}>
+          <textarea
+            rows={6}
+            value={answer}
+            onChange={(e) => setAnswer(e.target.value)}
+            placeholder="Answer as you would in the interview…"
+            autoFocus
+          />
+          <div className="practice-composer-actions">
+            <button className="btn-primary" type="submit">
+              Send <ArrowRight size={14} />
+            </button>
+          </div>
+        </form>
+      ) : null}
+
+      {closedThreads.length > 0 ? (
+        <section className="practice-history">
+          <h2 className="practice-history-title">Previous topics</h2>
+          {closedThreads.map((t) => (
+            <ClosedTopicRow key={t.id} thread={t} />
+          ))}
+        </section>
+      ) : null}
+
+      <footer className="practice-live-footer">
+        <ArmedDeleteButton
+          label="End session"
+          onConfirm={() => abandon(detail.id)}
+          className="btn-quiet"
+        />
+        <small className="practice-end-hint">You can still review it in History.</small>
+      </footer>
     </div>
   );
+}
+
+// --- transcript rendering ---------------------------------------------------
+
+// Only the CURRENT topic renders in the active card: the open thread's
+// persisted messages, the candidate's just-sent answer (not yet persisted),
+// and the live stream overlay. Closed topics render in the history below.
+function buildActiveTopic(
+  openThread: Thread | null,
+  pendingAnswer: string | null,
+  liveItems: LiveItem[],
+): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  if (openThread) {
+    for (const m of openThread.messages) {
+      if (m.role === "candidate") {
+        nodes.push(<AnswerBubble key={m.id} text={m.text} />);
+      } else {
+        nodes.push(
+          <MoveBubble
+            key={m.id}
+            kind={m.kind ?? "question"}
+            num={openThread.thread_index + 1}
+            text={m.text}
+          />,
+        );
+      }
+    }
+  }
+  if (pendingAnswer !== null) {
+    nodes.push(<AnswerBubble key="pending" text={pendingAnswer} />);
+  }
+  for (const item of liveItems) {
+    if (item.type === "move") {
+      nodes.push(
+        <MoveBubble key={item.key} kind={item.kind} num={item.threadIndex + 1} text={item.text} typing />,
+      );
+    } else {
+      nodes.push(
+        <EvalCard
+          key={item.key}
+          score={item.score}
+          feedback={item.feedback}
+          modelAnswer={item.modelAnswer}
+          phase={item.phase}
+        />,
+      );
+    }
+  }
+  return nodes;
+}
+
+// A closed topic, collapsed into one row in the bottom "Previous topics" list.
+function ClosedTopicRow({ thread }: { thread: Thread }) {
+  const num = thread.thread_index + 1;
+  return (
+    <details className="practice-history-item">
+      <summary className="practice-history-summary">
+        <span className="practice-history-topic">Topic {num}</span>
+        {thread.focus_label ? (
+          <span className="practice-history-focus">{thread.focus_label}</span>
+        ) : null}
+        {thread.score !== null && thread.score !== undefined ? (
+          <span className="practice-history-score">{thread.score}/10</span>
+        ) : null}
+      </summary>
+      <div className="practice-history-body">
+        {thread.messages.map((m) => (
+          <div key={m.id} className="practice-history-msg">
+            <span className="practice-history-role">
+              {m.role === "candidate"
+                ? "You"
+                : m.kind === "question"
+                  ? `Q${num}`
+                  : moveLabels[m.kind ?? "question"]}
+            </span>
+            <p>{m.text}</p>
+          </div>
+        ))}
+        {thread.feedback ? (
+          <div className="practice-history-eval">
+            <p>{thread.feedback}</p>
+            {thread.model_answer ? (
+              <details className="practice-history-model">
+                <summary>Model answer</summary>
+                <p>{thread.model_answer}</p>
+              </details>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function MoveBubble({
+  kind,
+  num,
+  text,
+  typing,
+}: {
+  kind: MoveKind;
+  num: number;
+  text: string;
+  typing?: boolean;
+}) {
+  const label = kind === "question" ? `Q${num}` : moveLabels[kind];
+  return (
+    <article className={`practice-question${typing ? " stream-in" : ""}`} aria-live="polite">
+      <span className="practice-question-num">{label}</span>
+      <p>
+        {text}
+        {typing ? <span className="cursor-blink" /> : null}
+      </p>
+    </article>
+  );
+}
+
+function AnswerBubble({ text }: { text: string }) {
+  return (
+    <article className="practice-your-answer">
+      <span className="practice-your-answer-label">Your answer</span>
+      <p>{text}</p>
+    </article>
+  );
+}
+
+function EvalCard({
+  score,
+  feedback,
+  modelAnswer,
+  phase,
+}: {
+  score: number | null;
+  feedback: string;
+  modelAnswer: string;
+  phase: EvalPhase;
+}) {
+  if (phase === "evaluating" && !feedback && score === null) {
+    return (
+      <div className="practice-loading">
+        <Loader2 size={16} className="spin" />
+        <LoadingStatus
+          active
+          messages={["Scoring your structure", "Checking evidence and specificity", "Drafting feedback"]}
+          fallback="Evaluating this topic"
+        />
+      </div>
+    );
+  }
+  return (
+    <article className="practice-feedback stream-in" aria-live="polite">
+      <header>
+        {score !== null ? (
+          <span className="practice-feedback-score">
+            <strong>{score}</strong>
+            <span>/ 10</span>
+          </span>
+        ) : (
+          <span className="practice-feedback-score loading">
+            <Loader2 size={14} className="spin" /> Scoring…
+          </span>
+        )}
+      </header>
+      <p>
+        {feedback}
+        {phase === "feedback" ? <span className="cursor-blink" /> : null}
+      </p>
+      {phase === "model_answer" || modelAnswer ? (
+        <details open className="stream-in">
+          <summary>Model answer</summary>
+          <p>
+            {modelAnswer}
+            {phase === "model_answer" ? <span className="cursor-blink" /> : null}
+          </p>
+        </details>
+      ) : phase === "feedback" ? (
+        <div className="practice-loading subtle">
+          <Loader2 size={14} className="spin" />
+          <LoadingStatus
+            active
+            messages={["Preparing model answer", "Tuning it to the role", "Making the example sharper"]}
+            fallback="Preparing model answer"
+          />
+        </div>
+      ) : null}
+    </article>
+  );
+}
+
+function ThreadReview({ thread }: { thread: Thread }) {
+  return (
+    <div className="practice-past-turn">
+      <strong>Topic {thread.thread_index + 1}</strong>
+      {thread.focus_label ? <p className="practice-past-focus">{thread.focus_label}</p> : null}
+      {thread.messages.map((m) => (
+        <div key={m.id}>
+          <span className="practice-past-label">
+            {m.role === "candidate" ? "You" : m.kind === "question" ? "Interviewer" : moveLabels[m.kind ?? "question"]}
+          </span>
+          <p className={m.role === "candidate" ? "" : "practice-past-q"}>{m.text}</p>
+        </div>
+      ))}
+      {thread.status === "closed" && thread.score !== null && thread.score !== undefined ? (
+        <>
+          <span className="practice-past-label">{thread.score}/10</span>
+          {thread.feedback ? <p>{thread.feedback}</p> : null}
+          {thread.model_answer ? (
+            <details>
+              <summary>Model answer</summary>
+              <p>{thread.model_answer}</p>
+            </details>
+          ) : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+// --- helpers ----------------------------------------------------------------
+
+function scoreThreads(threads: Thread[] | undefined): number | null {
+  const scored = threads?.filter((t) => t.score !== null && t.score !== undefined) ?? [];
+  if (!scored.length) return null;
+  return scored.reduce((total, t) => total + (t.score ?? 0), 0) / scored.length;
 }
 
 function scoreToConfettiPieces(score: number) {
@@ -648,33 +813,4 @@ function useWindowSize() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
   return size;
-}
-
-function TurnView({ turn }: { turn: Turn }) {
-  return (
-    <div className="practice-past-turn">
-      <strong>Q{turn.turn_index + 1}</strong>
-      <p className="practice-past-q">{turn.question}</p>
-      {turn.answer ? (
-        <>
-          <span className="practice-past-label">You</span>
-          <p>{turn.answer}</p>
-        </>
-      ) : null}
-      {turn.score !== null && turn.score !== undefined ? (
-        <>
-          <span className="practice-past-label">
-            {turn.score}/10
-          </span>
-          {turn.feedback ? <p>{turn.feedback}</p> : null}
-          {turn.model_answer ? (
-            <details>
-              <summary>Model answer</summary>
-              <p>{turn.model_answer}</p>
-            </details>
-          ) : null}
-        </>
-      ) : null}
-    </div>
-  );
 }

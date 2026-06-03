@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
-import { JobItem, Session, SessionDetail, SessionStatus, api } from "../api";
+import { JobItem, Session, SessionDetail, SessionStatus, Thread, api } from "../api";
 import { ErrorBanner } from "../components/ui";
 import { codeFrom } from "../errors";
 import { useAuth } from "../state/auth";
@@ -169,7 +169,7 @@ function HistorySession({ session, token }: { session: Session; token: string })
       .catch((err: unknown) => setError(codeFrom(err)));
   }, [isOpen, detail, session.id, token]);
 
-  const scored = detail?.turns.filter((t) => t.score !== null && t.score !== undefined) ?? [];
+  const scored = detail?.threads.filter((t) => t.score !== null && t.score !== undefined) ?? [];
   const average = scored.length
     ? scored.reduce((total, t) => total + (t.score ?? 0), 0) / scored.length
     : null;
@@ -206,39 +206,53 @@ function HistorySession({ session, token }: { session: Session; token: string })
         <div className="history-card-body">
           <ErrorBanner code={error} />
           {!detail ? <p className="history-card-loading">Loading…</p> : null}
-          {detail?.turns.length === 0 ? <p>No turns recorded.</p> : null}
-          {detail?.turns.map((turn) => (
-            <div className="history-turn" key={turn.id}>
-              <strong className="history-turn-q">
-                Q{turn.turn_index + 1}. {turn.question}
-              </strong>
-              {turn.answer ? (
-                <p>
-                  <span className="history-turn-label">You</span> {turn.answer}
-                </p>
-              ) : (
-                <p className="history-turn-empty">No answer recorded.</p>
-              )}
-              {turn.score !== null && turn.score !== undefined ? (
-                <>
-                  <p>
-                    <span className="history-turn-label">{turn.score}/10</span>{" "}
-                    {turn.feedback}
-                  </p>
-                  {turn.model_answer ? (
-                    <details>
-                      <summary>Model answer</summary>
-                      <p>{turn.model_answer}</p>
-                    </details>
-                  ) : null}
-                </>
-              ) : (
-                <p className="history-turn-empty">No evaluation yet.</p>
-              )}
-            </div>
+          {detail?.threads.length === 0 ? <p>No topics recorded.</p> : null}
+          {detail?.threads.map((thread) => (
+            <HistoryThread key={thread.id} thread={thread} />
           ))}
         </div>
       ) : null}
     </article>
+  );
+}
+
+const moveLabels: Record<string, string> = {
+  question: "Interviewer",
+  probe: "Follow-up",
+  clarify: "Clarify",
+  nudge: "Nudge",
+};
+
+function HistoryThread({ thread }: { thread: Thread }) {
+  return (
+    <div className="history-turn">
+      <strong className="history-turn-q">
+        Topic {thread.thread_index + 1}
+        {thread.focus_label ? <span className="history-turn-focus"> · {thread.focus_label}</span> : null}
+      </strong>
+      {thread.messages.map((m) => (
+        <p key={m.id} className={m.role === "candidate" ? "" : "history-turn-interviewer"}>
+          <span className="history-turn-label">
+            {m.role === "candidate" ? "You" : moveLabels[m.kind ?? "question"] ?? "Interviewer"}
+          </span>{" "}
+          {m.text}
+        </p>
+      ))}
+      {thread.status === "closed" && thread.score !== null && thread.score !== undefined ? (
+        <>
+          <p>
+            <span className="history-turn-label">{thread.score}/10</span> {thread.feedback}
+          </p>
+          {thread.model_answer ? (
+            <details>
+              <summary>Model answer</summary>
+              <p>{thread.model_answer}</p>
+            </details>
+          ) : null}
+        </>
+      ) : (
+        <p className="history-turn-empty">No evaluation yet.</p>
+      )}
+    </div>
   );
 }

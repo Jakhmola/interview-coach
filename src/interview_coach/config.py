@@ -51,7 +51,13 @@ class Settings(BaseSettings):
     # Phase 32 follow-up 3: cap how many passages go in a single /embed POST.
     # One giant POST per repo (all its chunks at once) was timing out under
     # back-to-back github ingests; batching keeps each request small.
-    embedder_max_batch: int = 32
+    #
+    # Sized for the CPU-only embedder (4 threads): a 32-chunk batch of ~500-token
+    # code slices encodes in ~67s in isolation — already over `embedder_timeout_s`
+    # (60s) before any host contention, so github ingest's first full batch hit
+    # ReadTimeout on all retries → EmbedderUnavailable. 8 chunks encode in ~17s,
+    # leaving headroom under load. Bump only if the embedder moves to GPU.
+    embedder_max_batch: int = 8
 
     # Phase 24: hybrid retrieval (BM25 + vector with RRF). `retrieval_mode`
     # is the kill-switch — set to `"vector"` to fall back to pure pgvector

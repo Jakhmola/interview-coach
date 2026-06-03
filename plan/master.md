@@ -6,7 +6,7 @@
 
 ## Context
 
-A webapp that helps a candidate prepare for a specific job (started greenfield). Flow: candidate uploads CV/project docs, supplies a job description (raw or URL), the system researches the company, then runs a per-round interview where it asks personalized questions, scores answers, gives feedback, and shows a model answer. v1 targets two round types — **Resume / Project Deep-Dive** and **Behavioral / STAR**.
+A webapp that helps a candidate prepare for a specific job (started greenfield). Flow: candidate uploads CV/project docs, supplies a job description (raw or URL), the system researches the company, then runs a per-round interview where it asks personalized questions, scores answers, gives feedback, and shows a model answer. Round types are dispatched through a strategy registry (`agents/rounds.py`, Phase 33): **experience deep-dive** (repo-grounded, retrieval at question-gen), **technical challenge** (forward-looking domain problems, no RAG), and **behavioral / STAR** (no grounding).
 
 The stack: FastAPI + React/TypeScript (Vite, replaced the original Streamlit
 UI in Phase 18) + Postgres (pgvector) + a separate FastAPI embedder sidecar
@@ -163,10 +163,10 @@ Each phase ends with a smoke test the user can run before moving on. The detaile
 | 30    | Arch deepening — prep-node glue (A/E) + readiness owner (B) + vector-SQL dedup (C) + ingestion.web shim deletion (D); ADR 0002 routing stays edge-defined | ✅ |
 | 31    | CI pipeline — GitHub Actions gating test/lint/fmt on PRs | ✅ |
 | 32    | GitHub ingestion — gather repos from CV/user URL, scrape public repos into grounding | ✅ |
-| 33    | Round-type system + grounded rounds — strategy registry; merge resume+github → experience deep-dive (repo-grounded, retrieval at question-gen); add technical-challenge round; fix behavioral model-answer; rename | ⏳ |
-| 34    | Probing follow-ups — interview loop digs deeper on the same answer thread (all rounds) | ⏳ |
+| 33    | Round-type system + grounded rounds — strategy registry; merge resume+github → experience deep-dive (repo-grounded, retrieval at question-gen); add technical-challenge round; fix behavioral model-answer; rename | ✅ |
+| 34    | Conversational interviewer — thread-based loop: the interviewer probes/clarifies/nudges within a topic and evaluates once per thread; graph-owned loop + typed `/message` action envelope (ADR 0004); schema turns→threads+messages | 🚧 |
 | 35    | System-design / web grounding — revive `providers/tavily`; web-ground the technical-challenge round | ⏳ |
-| 36    | Full mock interview — sequenced multi-segment session (intro → motivation → deep-dive → technical case study → wrap) | ⏳ |
+| 36    | Full mock interview — session-level choreography *over the Phase-34 thread engine*: sequenced segments (intro → motivation → deep-dive → technical case study → wrap) with cross-segment transitions | ⏳ |
 | 37    | Speech-to-text — voice answers in the interview loop | ⏳ |
 | 38    | Deployability + CD — one-command setup, docs, LLM-provider switch (local GPU or cloud endpoint by config) | ⏳ |
 
@@ -194,7 +194,7 @@ After phase 9 is green (the earliest "real" demo):
 2. Browse to `http://localhost:8501` (the React app), register a user, log in.
 3. Upload a real CV PDF + one project doc (DOCX).
 4. Paste a JD URL; system fetches and parses it.
-5. Pick round type **Resume Walkthrough**; click **Start interview**.
+5. Pick round type **Experience Deep-Dive**; click **Start interview**.
 6. Watch the first question stream in; type an answer.
 7. Submit → score (1–10), feedback, and model answer stream in.
 8. Click **Next question**; repeat 5x.

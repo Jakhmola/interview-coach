@@ -1,18 +1,22 @@
-"""QuestionGenerator agent node.
+"""Interviewer / conductor agent node (Phase 8/14.1, reworked Phase 34).
 
-Streams one interview question. Phase 14.1: focus candidates are now rich
-`Highlight` objects (each with provenance back to the project_doc that
-enriched it) plus standalone `ProjectItem`s. The picked focus's
-`document_ids` flow through to `turn.metadata_json.focus_document_ids` so
-the evaluator's RAG retrieval can scope to the right project.
+This module drives the interviewer side of a **thread** (one topic). Two entry
+points:
 
-The model emits a single JSON object ``{"question": "...", "anchors": [...]}``;
-we forward the question text to the SSE client as it arrives, then capture
-anchors at end-of-stream and persist a `Turn` row.
+* :func:`stream_open_thread` — opens a thread: deterministically picks a focus
+  (the same Phase 14.1 picker), retrieves repo grounding once (experience
+  round, repo-backed focus), generates the root **question** + anchors, and
+  persists a ``Thread`` + its root ``Message``. The anchors are the thread's
+  fixed agenda; the grounding is carried in graph state for reuse by every
+  conductor step and the thread-close model answer.
+* :func:`stream_conduct` — one conductor step on an open thread: reads the
+  transcript so far and emits ``{action, message}`` — the interviewer's next
+  **move** (``probe`` / ``clarify`` / ``nudge`` / ``advance``). ``action`` is
+  emitted first (the graph routes on it); ``message`` streams to the candidate.
+  ``advance`` carries no utterance — it closes the thread.
 
-Shape: an async generator that yields token strings (visible to the user)
-and finally yields a sentinel
-``("done", {"question_id": ..., "turn_index": ...})``.
+Both are async generators yielding ``(kind, data)`` tuples the graph node
+translates into the typed action-envelope on the wire (``agents/interview_events``).
 """
 
 from __future__ import annotations
@@ -29,7 +33,13 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from interview_coach.agents.profile_view import profile_slice_for_focus
-from interview_coach.agents.rounds import FocusMode, RoundStrategy, get_round_strategy
+from interview_coach.agents.prompts import CONDUCTOR_SYSTEM
+from interview_coach.agents.rounds import (
+    FocusMode,
+    RoundStrategy,
+    conductor_allowed_actions,
+    get_round_strategy,
+)
 from interview_coach.agents.schemas import Question
 from interview_coach.agents.state import RoundType
 from interview_coach.agents.streaming_json import (
@@ -57,7 +67,7 @@ async def _load_context(
     job_analysis: dict[str, Any] | None = None,
     company_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Pull profile, job analysis, company snapshot, prior turns from Postgres.
+    """Pull profile, job analysis, company snapshot from Postgres.
 
     Phase 20: any of ``profile`` / ``job_analysis`` / ``company_snapshot``
     pre-loaded by the route layer is accepted and skips its DB round-trip.
@@ -86,13 +96,10 @@ async def _load_context(
                 raise GenerationPrereqsMissing("company_snapshot_missing")
             company_snapshot = snapshot_row.snapshot_json
 
-        turns = await repos.list_turns_for_session(s, session_row.id)
-
     return {
         "profile": profile,
         "job_analysis": job_analysis,
         "company_snapshot": company_snapshot,
-        "prior_turns": [{"question": t.question, "answer": t.answer or ""} for t in turns],
     }
 
 
@@ -154,10 +161,10 @@ def _project_candidate_corpus(proj: dict[str, Any]) -> set[str]:
 
 @dataclass(frozen=True)
 class FocusPick:
-    """The highlight / project / skill / signal the question must drill into.
+    """The highlight / project / skill / signal the thread drills into.
 
     ``repo_backed`` is True only for an ``experience_projects`` focus whose
-    profile entry is a github project — it gates the question-gen-time code
+    profile entry is a github project — it gates the thread-open code
     retrieval. ``document_ids`` are the grounding-doc ids the focus points at
     (a project_doc or github_repo), empty for skills / behavioral signals.
     """
@@ -177,7 +184,7 @@ def _pick_focus_target(
     prior_focus_counts: dict[str, int],
     rng: random.Random,
 ) -> FocusPick | None:
-    """Pre-pick which highlight / project / skill / signal the question drills into.
+    """Pre-pick which highlight / project / skill / signal the thread drills into.
 
     Returns a :class:`FocusPick` or None (no candidates).
 
@@ -279,38 +286,39 @@ def _first_sentence(text: str, max_chars: int = 160) -> str:
     return sentence
 
 
-def _build_user_message(
+def _build_question_message(
     *,
     role_title: str,
     company_name: str,
     focus_label: str | None,
     profile: dict[str, Any],
-    prior_turns: list[dict[str, Any]],
-    turn_index: int,
+    prior_topics: list[str],
+    thread_index: int,
     code_grounding: list[GroundingHit] | None = None,
 ) -> str:
-    """JSON payload of the structured context we hand to the LLM.
+    """JSON payload of the structured context we hand to the LLM at thread-open.
 
     Phase 14.1: framing fields go first (`role`, `company`, `focus_target`)
-    so the LLM sees them before the bulky profile. ``prior_turns`` is
-    questions only — answers are stripped to keep the context tight.
+    so the LLM sees them before the bulky profile. ``prior_topics`` are the
+    focus labels of already-covered threads, so the new question avoids
+    re-asking the same topic.
 
     Phase 33: ``code_grounding`` (experience round, repo-backed focus only)
-    carries repo passages retrieved at question-gen time. Included only when
+    carries repo passages retrieved at thread-open. Included only when
     non-empty, so the prompt's adaptive clause stays at the narrative altitude
     for every other focus.
     """
     payload: dict[str, Any] = {
         "role": role_title,
         "company": company_name,
-        "turn_index": turn_index,
+        "thread_index": thread_index,
     }
     if focus_label is not None:
         payload["focus_target"] = focus_label
     if code_grounding:
         payload["code_grounding"] = [{"source": h.filename, "text": h.text} for h in code_grounding]
     payload["profile"] = profile
-    payload["prior_turns"] = [{"question": t["question"]} for t in prior_turns]
+    payload["prior_topics"] = list(prior_topics)
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
@@ -348,15 +356,15 @@ async def _retrieve_code_for_focus(
     focus's ``github_repo`` docs.
 
     Single-attempt, fail-fast → ``[]`` on any failure, so a slow or dead
-    embedder degrades the question to the narrative altitude instead of stalling
-    question generation. Mirrors the evaluator's in-turn retrieval policy.
+    embedder degrades the thread to the narrative altitude instead of stalling
+    thread-open. Mirrors the evaluator's retrieval policy.
     """
     doc_ids: list[uuid.UUID] = []
     for d in document_ids:
         try:
             doc_ids.append(uuid.UUID(str(d)))
         except (ValueError, TypeError):
-            logger.warning("skipping invalid focus_document_id %r in qgen grounding", d)
+            logger.warning("skipping invalid focus_document_id %r in thread-open grounding", d)
     try:
         return await retrieve_grounding(
             user_id=user_id,
@@ -367,11 +375,27 @@ async def _retrieve_code_for_focus(
             retries=1,
         )
     except Exception:  # noqa: BLE001
-        logger.exception("qgen code grounding failed; degrading to narrative ([])")
+        logger.exception("thread-open code grounding failed; degrading to narrative ([])")
         return []
 
 
-async def stream_question(
+async def _model_deltas(llm: Any, messages: list[Any]) -> AsyncIterator[str]:
+    async for chunk in astream_with_telemetry(llm, messages):
+        content = chunk.content
+        if isinstance(content, str):
+            if content:
+                yield content
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, str) and part:
+                    yield part
+                elif isinstance(part, dict) and "text" in part:
+                    text = str(part["text"])
+                    if text:
+                        yield text
+
+
+async def stream_open_thread(
     *,
     session_id: uuid.UUID,
     user_id: uuid.UUID,
@@ -380,20 +404,17 @@ async def stream_question(
     job: dict[str, Any] | None = None,
     company: dict[str, Any] | None = None,
 ) -> AsyncIterator[tuple[str, Any]]:
-    """Generate, stream, and persist one question for `session_id`.
+    """Open the next thread: pick a focus, ground it, generate + persist the
+    root question, and stash the thread's agenda.
 
     Yields:
-        ("token", str) — a chunk of the user-visible question text.
-        ("done", {"question_id": str, "turn_index": int}) — once at end.
-
-    Phase 20: ``profile`` / ``job`` / ``company`` may be pre-loaded by the
-    route layer and forwarded here via state. When provided, DB reads for
-    them are skipped.
+        ("move", {"kind": "question", "thread_index": int, "message_id": str})
+        ("token", str) — chunks of the question text
+        ("move_done", {"anchors": [...]})
+        ("opened", {thread_id, thread_index, focus_*, anchors, grounding})
 
     Raises:
-        GenerationPrereqsMissing: profile/job-analysis/snapshot not ready.
-        ValueError: session not found / wrong user / session already complete.
-        StreamingJsonError: model emitted invalid JSON.
+        GenerationPrereqsMissing, ValueError (session state), StreamingJsonError.
     """
     async with AsyncSessionLocal() as s:
         session_row = await repos.get_session(s, session_id, user_id)
@@ -401,10 +422,10 @@ async def stream_question(
             raise ValueError("session_not_found")
         if session_row.status != "active":
             raise ValueError(f"session_status_{session_row.status}")
-        existing_turns = await repos.list_turns_for_session(s, session_id)
+        thread_index = await repos.count_closed_threads(s, session_id)
+        prior_threads = list(await repos.list_threads_for_session(s, session_id))
 
-    turn_index = len(existing_turns)
-    if turn_index >= session_row.n_questions:
+    if thread_index >= session_row.n_questions:
         raise ValueError("session_complete")
 
     context = await _load_context(
@@ -418,7 +439,7 @@ async def stream_question(
     strategy = get_round_strategy(round_type)
 
     async with AsyncSessionLocal() as s:
-        prior_keys = await repos.list_prior_focus_keys_for_user_job(
+        prior_keys = await repos.list_prior_focus_keys(
             s,
             user_id=session_row.user_id,
             job_id=session_row.job_id,
@@ -444,9 +465,9 @@ async def stream_question(
     role_title = (context["job_analysis"].get("title") or "").strip() or "this role"
 
     # Phase 33: for a repo-backed experience focus, retrieve the project's real
-    # repo code/manifests at question-gen time so the prompt can ask an
-    # implementation-level question. Only fires for the experience round's
-    # github projects; everything else stays at the narrative altitude.
+    # repo code/manifests once at thread-open so the question can ask an
+    # implementation-level question and the grounding can be reused by the
+    # conductor and the thread-close model answer.
     code_grounding: list[GroundingHit] = []
     if strategy.qgen_grounding and picked is not None and picked.repo_backed:
         code_grounding = await _retrieve_code_for_focus(
@@ -455,18 +476,15 @@ async def stream_question(
             document_ids=picked.document_ids,
         )
 
-    # Phase 20: ship only the focus-anchored slice of the profile to the
-    # LLM, not the full 6-12 KB JSON. The picker's focus_key (or None)
-    # selects the right anchor; behavioral signals fall through to a
-    # name+headline+top-bullets stub.
+    prior_topics = [t.focus_label for t in prior_threads if t.focus_label]
     profile_for_prompt = profile_slice_for_focus(context["profile"], focus_key)
-    user_msg = _build_user_message(
+    user_msg = _build_question_message(
         role_title=role_title,
         company_name=company_name,
         focus_label=focus_label,
         profile=profile_for_prompt,
-        prior_turns=context["prior_turns"],
-        turn_index=turn_index,
+        prior_topics=prior_topics,
+        thread_index=thread_index,
         code_grounding=code_grounding,
     )
     system_msg = _render_system_prompt(
@@ -476,41 +494,27 @@ async def stream_question(
     )
 
     logger.info(
-        "QuestionGenerator: session=%s turn=%d round=%s focus_key=%r doc_ids=%s",
+        "Interviewer(open): session=%s thread=%d round=%s focus_key=%r doc_ids=%s",
         session_id,
-        turn_index,
+        thread_index,
         round_type,
         focus_key,
         focus_document_ids,
     )
 
+    thread_id = uuid.uuid4()
+    message_id = uuid.uuid4()
+    yield (
+        "move",
+        {"kind": "question", "thread_index": thread_index, "message_id": str(message_id)},
+    )
+
     llm = chat_model(temperature=temperature).bind(response_format={"type": "json_object"})
-
-    async def _model_deltas() -> AsyncIterator[str]:
-        async for chunk in astream_with_telemetry(
-            llm,
-            [
-                SystemMessage(content=system_msg),
-                HumanMessage(content=user_msg),
-            ],
-        ):
-            content = chunk.content
-            if isinstance(content, str):
-                if content:
-                    yield content
-            elif isinstance(content, list):
-                for part in content:
-                    if isinstance(part, str) and part:
-                        yield part
-                    elif isinstance(part, dict) and "text" in part:
-                        text = str(part["text"])
-                        if text:
-                            yield text
-
     parsed: dict[str, Any] | None = None
-    with set_node_context("question_generator"):
+    with set_node_context("interviewer_open"):
         async for event, data in stream_json_object(
-            _model_deltas(), stream_string_fields=("question",)
+            _model_deltas(llm, [SystemMessage(content=system_msg), HumanMessage(content=user_msg)]),
+            stream_string_fields=("question",),
         ):
             if event == "question_chunk":
                 yield ("token", data)
@@ -519,19 +523,10 @@ async def stream_question(
 
     if parsed is None:
         raise StreamingJsonError("stream ended without producing a parsed object")
-
     try:
         question_obj = Question.model_validate(parsed)
     except Exception as e:
         raise StreamingJsonError(f"final JSON failed schema validation: {e}") from e
-
-    metadata: dict[str, Any] = {}
-    if focus_key is not None:
-        metadata["focus_key"] = focus_key
-    if focus_label is not None:
-        metadata["focus_label"] = focus_label
-    if focus_document_ids:
-        metadata["focus_document_ids"] = focus_document_ids
 
     if focus_label is not None:
         label_tokens = _tokens(focus_label)
@@ -543,14 +538,182 @@ async def stream_question(
                 question_obj.question,
             )
 
+    grounding_payload = [{"source": h.filename, "text": h.text} for h in code_grounding]
     async with AsyncSessionLocal() as s:
-        turn = await repos.create_turn(
+        await repos.create_thread(
             s,
             session_id=session_id,
-            turn_index=turn_index,
-            question=question_obj.question,
-            anchors=question_obj.anchors,
-            metadata=metadata or None,
+            thread_index=thread_index,
+            anchors=list(question_obj.anchors),
+            focus_key=focus_key,
+            focus_label=focus_label,
+            focus_document_ids=focus_document_ids or None,
+            thread_id=thread_id,
+        )
+        await repos.append_message(
+            s,
+            thread_id=thread_id,
+            seq=0,
+            role="interviewer",
+            kind="question",
+            text=question_obj.question,
+            message_id=message_id,
         )
 
-    yield ("done", {"question_id": str(turn.id), "turn_index": turn_index})
+    yield ("move_done", {"anchors": list(question_obj.anchors)})
+    yield (
+        "opened",
+        {
+            "thread_id": str(thread_id),
+            "thread_index": thread_index,
+            "focus_key": focus_key,
+            "focus_label": focus_label,
+            "focus_document_ids": focus_document_ids,
+            "anchors": list(question_obj.anchors),
+            "grounding": grounding_payload,
+        },
+    )
+
+
+def _coerce_action(raw: Any, allowed_actions: list[str]) -> str:
+    """Map a model-returned action onto the allowed set; default to ``probe``
+    (always offered + always safe) when the model picks something disallowed."""
+    a = str(raw or "").strip().lower()
+    return a if a in allowed_actions else "probe"
+
+
+async def stream_conduct(
+    *,
+    session_id: uuid.UUID,
+    user_id: uuid.UUID,
+    thread_id: uuid.UUID,
+    thread_index: int,
+    anchors: list[str],
+    focus_label: str | None,
+    grounding: list[dict[str, Any]],
+    round_type: str,
+    temperature: float = 0.4,
+    profile: dict[str, Any] | None = None,
+    job: dict[str, Any] | None = None,
+    company: dict[str, Any] | None = None,
+) -> AsyncIterator[tuple[str, Any]]:
+    """Run one conductor step on the open thread.
+
+    Reads the transcript, asks the conductor LLM for ``{action, message}``, and
+    yields either:
+        ("advance", {}) — close the thread; no utterance.
+    or, for a real move (probe/clarify/nudge):
+        ("move", {"kind", "thread_index", "message_id"})
+        ("token", str)*
+        ("move_done", {})
+        ("conducted", {"action", "message_id"})
+
+    ``action`` is coerced onto the round's allowed set; a follow-up Message is
+    persisted for real moves only.
+    """
+    strategy = get_round_strategy(round_type)
+    allowed_actions = conductor_allowed_actions(strategy)
+
+    async with AsyncSessionLocal() as s:
+        messages = list(await repos.list_messages_for_thread(s, thread_id))
+
+    company_name = ((job or {}).get("company_name") or "").strip() or "the hiring company"
+    role_title = ((job or {}).get("title") or "").strip() or "this role"
+    transcript = [{"role": m.role, "kind": m.kind, "text": m.text} for m in messages]
+    payload: dict[str, Any] = {
+        "role": role_title,
+        "company": company_name,
+        "focus_target": focus_label,
+        "anchors": list(anchors or []),
+        "allowed_actions": allowed_actions,
+        "transcript": transcript,
+    }
+    if grounding:
+        payload["grounding"] = grounding
+    user_msg = json.dumps(payload, ensure_ascii=False, indent=2)
+
+    logger.info(
+        "Interviewer(conduct): session=%s thread=%d round=%s allowed=%s n_msgs=%d",
+        session_id,
+        thread_index,
+        round_type,
+        allowed_actions,
+        len(messages),
+    )
+
+    llm = chat_model(temperature=temperature).bind(response_format={"type": "json_object"})
+    message_id = uuid.uuid4()
+    action: str | None = None
+    emitted_move = False
+    buffered: list[str] = []
+    full_message: list[str] = []
+    parsed: dict[str, Any] | None = None
+
+    with set_node_context("interviewer_conductor"):
+        async for event, data in stream_json_object(
+            _model_deltas(
+                llm, [SystemMessage(content=CONDUCTOR_SYSTEM), HumanMessage(content=user_msg)]
+            ),
+            scalar_fields=("action",),
+            stream_string_fields=("message",),
+        ):
+            if event == "action":
+                action = _coerce_action(data, allowed_actions)
+                if action != "advance":
+                    yield (
+                        "move",
+                        {
+                            "kind": action,
+                            "thread_index": thread_index,
+                            "message_id": str(message_id),
+                        },
+                    )
+                    emitted_move = True
+                    for ch in buffered:
+                        yield ("token", ch)
+                    buffered = []
+            elif event == "message_chunk":
+                full_message.append(data)
+                if action is None:
+                    buffered.append(data)
+                elif action != "advance":
+                    yield ("token", data)
+            elif event == "done":
+                parsed = data
+
+    if action is None:
+        action = _coerce_action((parsed or {}).get("action"), allowed_actions)
+
+    if action == "advance":
+        yield ("advance", {})
+        return
+
+    message_text = ((parsed or {}).get("message") or "".join(full_message) or "").strip()
+    if not message_text:
+        # Degenerate model output (real action, empty utterance). Persist a safe
+        # generic follow-up so the bubble isn't empty.
+        message_text = "Can you walk me through that in a bit more detail?"
+
+    if not emitted_move:
+        yield (
+            "move",
+            {"kind": action, "thread_index": thread_index, "message_id": str(message_id)},
+        )
+        for ch in buffered:
+            yield ("token", ch)
+
+    yield ("move_done", {})
+
+    async with AsyncSessionLocal() as s:
+        seq = await repos.count_messages_for_thread(s, thread_id)
+        await repos.append_message(
+            s,
+            thread_id=thread_id,
+            seq=seq,
+            role="interviewer",
+            kind=action,
+            text=message_text,
+            message_id=message_id,
+        )
+
+    yield ("conducted", {"action": action, "message_id": str(message_id)})

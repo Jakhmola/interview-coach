@@ -4,10 +4,10 @@ user remains logged in with an empty account ready to re-onboard.
 
 Scope of the cascade:
   * documents, jobs, profile, sessions deleted directly
-  * grounding_chunks, document_mappings, company_snapshots, turns
-    cascade via ``users.id`` FK
+  * grounding_chunks, document_mappings, company_snapshots, threads,
+    messages cascade via ``users.id`` FK
   * langgraph checkpoint threads for ``prep:{user}:{job}`` and
-    ``{session_id}:turn_*`` are best-effort cleaned
+    ``interview:{session_id}`` are best-effort cleaned (Phase 34)
 
 Failure modes covered:
   * typed-email guard: empty / wrong / wrong-case-still-matches
@@ -26,42 +26,12 @@ def _auth(token: str) -> dict[str, str]:
 
 
 class _FakeSaver:
-    """Records adelete_thread calls + offers a ``conn.execute`` shim that
-    returns a fake checkpoint enumeration for ``{sid}:turn_%`` queries."""
+    """Records ``adelete_thread`` calls. Phase 34: the reset path deletes one
+    ``interview:{session_id}`` thread per session directly (no per-turn
+    enumeration), so this fake just needs to capture the ids it's handed."""
 
-    def __init__(self, turn_threads_by_session: dict[uuid.UUID, list[str]] | None = None) -> None:
+    def __init__(self) -> None:
         self.deleted: list[str] = []
-        self._turns = turn_threads_by_session or {}
-
-        class _Conn:
-            def __init__(inner_self) -> None:
-                inner_self.calls: list[tuple[str, tuple]] = []
-
-            def execute(inner_self, sql: str, params: tuple):  # noqa: ANN001
-                inner_self.calls.append((sql, params))
-                like = params[0]
-                # Decode "{sid}:turn_%" → sid
-                sid = like.split(":turn_")[0]
-                try:
-                    sid_uuid = uuid.UUID(sid)
-                except ValueError:
-                    rows = []
-                else:
-                    rows = [(t,) for t in self._turns.get(sid_uuid, [])]
-
-                class _Cur:
-                    async def __aenter__(cur_self):
-                        return cur_self
-
-                    async def __aexit__(cur_self, *_):  # noqa: ANN002
-                        return None
-
-                    async def fetchall(cur_self):
-                        return rows
-
-                return _Cur()
-
-        self.conn = _Conn()
 
     async def adelete_thread(self, thread_id: str) -> None:
         self.deleted.append(thread_id)
@@ -99,7 +69,7 @@ async def test_reset_wipes_data_keeps_user_and_token(
         n_questions=1,
     )
 
-    fake = _FakeSaver(turn_threads_by_session={sess.id: [f"{sess.id}:turn_1", f"{sess.id}:turn_2"]})
+    fake = _FakeSaver()
     prior = app.state.checkpointer
     app.state.checkpointer = fake
     try:
@@ -129,10 +99,9 @@ async def test_reset_wipes_data_keeps_user_and_token(
     assert me2.json()["id"] == str(user_id)
     assert me2.json()["email"] == email
 
-    # Checkpoint threads cleaned: prep + per-turn.
+    # Checkpoint threads cleaned: prep + per-session interview thread.
     assert f"prep:{user_id}:{job_id}" in fake.deleted
-    assert f"{sess.id}:turn_1" in fake.deleted
-    assert f"{sess.id}:turn_2" in fake.deleted
+    assert f"interview:{sess.id}" in fake.deleted
 
 
 async def test_reset_rejects_wrong_email(

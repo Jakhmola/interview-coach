@@ -68,11 +68,21 @@ export const ERRORS: Record<string, ErrorEntry> = {
   session_status_complete: {
     message: "This session is already complete.",
   },
-  no_active_turn: { message: "Generate a question first." },
+  session_complete: {
+    message: "You've covered every topic in this round.",
+  },
+  empty_message: { message: "Type something before sending." },
+  // SetupPage reuses this for its own form validation (not interview-related).
   empty_answer: { message: "Type something before submitting." },
-  max_turns_reached: { message: "You've answered all the questions in this session." },
-  previous_turn_unanswered: {
-    message: "Finish the current question before asking another.",
+  // Phase 34: the interviewer's open thread couldn't be found mid-stream
+  // (e.g. it was already evaluated). Refreshing reloads the live state.
+  ThreadNotFound: {
+    message: "We lost track of the current topic.",
+    hint: "Refresh to reload this round — your progress is saved.",
+  },
+  streaming_json_error: {
+    message: "The interviewer's response came back malformed.",
+    hint: "Send your message again — your progress is saved.",
   },
 
   // Documents / jobs

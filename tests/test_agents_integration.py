@@ -23,10 +23,10 @@ import pytest
 from reportlab.pdfgen import canvas
 
 from interview_coach.agents.nodes.company_researcher import research_company
-from interview_coach.agents.nodes.evaluator import stream_evaluation
+from interview_coach.agents.nodes.evaluator import stream_thread_evaluation
 from interview_coach.agents.nodes.job_analyzer import analyze_job
 from interview_coach.agents.nodes.profile_builder import build_profile
-from interview_coach.agents.nodes.question_generator import stream_question
+from interview_coach.agents.nodes.question_generator import stream_open_thread
 
 API_URL = os.environ.get("API_BASE_URL", "http://localhost:8000")
 
@@ -149,10 +149,10 @@ async def test_company_researcher_real() -> None:
     assert row.source_urls, "expected at least one source URL on the persisted snapshot"
 
 
-async def test_question_generator_real() -> None:
+async def test_open_thread_real() -> None:
     """End-to-end: real ProfileBuilder + JobAnalyzer + CompanyResearcher → real
-    streaming question. Asserts the streamed text matches what was persisted
-    and that anchors are non-empty."""
+    streaming thread-open. Asserts the streamed question matches what was
+    persisted as the thread's root message and that anchors are non-empty."""
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from interview_coach.config import settings
@@ -177,30 +177,33 @@ async def test_question_generator_real() -> None:
     session_id = sess.id
 
     streamed = ""
-    final: dict[str, Any] | None = None
-    async for kind, data in stream_question(session_id=session_id, user_id=user_id):
+    opened: dict[str, Any] | None = None
+    async for kind, data in stream_open_thread(session_id=session_id, user_id=user_id):
         if kind == "token":
             streamed += data
-        elif kind == "done":
-            final = data
+        elif kind == "opened":
+            opened = data
 
     assert streamed.strip(), "expected non-empty streamed question"
-    assert final is not None
-    assert final["turn_index"] == 0
+    assert opened is not None
+    assert opened["thread_index"] == 0
 
     async with factory() as s:
-        turns = await repos.list_turns_for_session(s, session_id)
+        threads = list(await repos.list_threads_for_session(s, session_id))
+        msgs = list(await repos.list_messages_for_thread(s, uuid.UUID(opened["thread_id"])))
     await engine.dispose()
 
-    assert len(turns) == 1
-    assert turns[0].question == streamed, "streamed text and persisted text must match"
-    assert turns[0].anchors_json, "expected non-empty anchors"
+    assert len(threads) == 1
+    assert threads[0].status == "open"
+    assert threads[0].anchors_json, "expected non-empty anchors"
+    assert msgs[0].text == streamed, "streamed text and persisted root message must match"
 
 
-async def test_full_loop_real() -> None:
-    """End-to-end Phase 6→9: profile → analyze → research → 1 question →
-    submit answer → evaluator stream → assert persisted score/feedback/model_answer
-    and the session flips to 'complete' (since n_questions=1)."""
+async def test_thread_close_eval_real() -> None:
+    """End-to-end Phase 34: profile → analyze → research → open thread →
+    candidate answer → thread-close evaluation → assert persisted
+    score/feedback/model_answer and the session flips to 'complete'
+    (n_questions=1)."""
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
     from interview_coach.config import settings
@@ -224,15 +227,12 @@ async def test_full_loop_real() -> None:
         )
     session_id = sess.id
 
-    streamed_question = ""
-    question_done: dict[str, Any] | None = None
-    async for kind, data in stream_question(session_id=session_id, user_id=user_id):
-        if kind == "token":
-            streamed_question += data
-        elif kind == "done":
-            question_done = data
-    assert question_done is not None
-    turn_id = uuid.UUID(question_done["question_id"])
+    opened: dict[str, Any] | None = None
+    async for kind, data in stream_open_thread(session_id=session_id, user_id=user_id):
+        if kind == "opened":
+            opened = data
+    assert opened is not None
+    thread_id = uuid.UUID(opened["thread_id"])
 
     canned_answer = (
         "I'd start by clarifying the requirements with stakeholders, then "
@@ -242,14 +242,24 @@ async def test_full_loop_real() -> None:
         "I've done this on async refactors before and it kept us on time."
     )
     async with factory() as s:
-        await repos.update_turn_answer(s, turn_id, canned_answer)
+        seq = await repos.count_messages_for_thread(s, thread_id)
+        await repos.append_message(
+            s, thread_id=thread_id, seq=seq, role="candidate", text=canned_answer
+        )
 
     score: int | None = None
     feedback = ""
     model_answer = ""
     final: dict[str, Any] | None = None
-    async for kind, data in stream_evaluation(
-        session_id=session_id, user_id=user_id, turn_id=turn_id
+    async for kind, data in stream_thread_evaluation(
+        session_id=session_id,
+        user_id=user_id,
+        thread_id=thread_id,
+        thread_index=opened["thread_index"],
+        anchors=opened["anchors"],
+        grounding=opened["grounding"],
+        focus_key=opened["focus_key"],
+        round_type="experience_deep_dive",
     ):
         if kind == "score":
             score = data
@@ -257,7 +267,7 @@ async def test_full_loop_real() -> None:
             feedback += data
         elif kind == "model_answer_token":
             model_answer += data
-        elif kind == "done":
+        elif kind == "evaluation_done":
             final = data
 
     assert score is not None and 1 <= score <= 10
@@ -267,23 +277,26 @@ async def test_full_loop_real() -> None:
     assert final["session_status"] == "complete"
 
     async with factory() as s:
-        turn = await repos.get_turn(s, turn_id)
+        thread = await repos.get_thread(s, thread_id)
         sess_fresh = await repos.get_session(s, session_id, user_id)
     await engine.dispose()
 
-    assert turn is not None
-    assert turn.score == score
-    assert turn.feedback == feedback
-    assert turn.model_answer == model_answer
+    assert thread is not None
+    assert thread.status == "closed"
+    assert thread.score == score
+    assert thread.feedback == feedback
+    assert thread.model_answer == model_answer
     assert sess_fresh is not None
     assert sess_fresh.status == "complete"
 
 
 async def test_resumability_real(tmp_path: Any) -> None:
-    """Phase 10: drive interview_graph against an AsyncSqliteSaver backed
-    by a real SQLite file, interrupt at the answer gate, **close + reopen
-    the saver** (simulating an api restart), then resume with an answer
-    and assert evaluation completes against the persisted checkpoint.
+    """Phase 34: drive interview_graph against an AsyncSqliteSaver backed by a
+    real SQLite file. The graph owns the whole session loop on one
+    ``interview:{session_id}`` thread. We open the thread (interrupt at the
+    candidate gate), then **close + reopen the saver** between every resume
+    (simulating an api restart), feeding a canned answer until the session
+    wraps — proving the loop survives restarts off the persisted checkpoint.
     """
     from langgraph.types import Command
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -311,16 +324,25 @@ async def test_resumability_real(tmp_path: Any) -> None:
     session_id = sess.id
 
     db_path = str(tmp_path / "graph.sqlite")
-    thread_cfg = {"configurable": {"thread_id": f"{session_id}:turn_0"}}
+    thread_cfg = {"configurable": {"thread_id": f"interview:{session_id}"}}
     initial_state = {
         "user_id": str(user_id),
         "session_id": str(session_id),
         "round_type": "experience_deep_dive",
         "n_questions": 1,
-        "turn_index": 0,
+        "thread_id": None,
+        "thread_index": 0,
+        "anchors": [],
+        "focus_key": None,
+        "focus_label": None,
+        "focus_document_ids": [],
+        "grounding": [],
+        "followups_used": 0,
+        "pending_message": None,
+        "next_move": None,
     }
 
-    # First "process": run question_generator → interrupt at await_answer.
+    # First "process": open the thread → stream question → interrupt at the gate.
     streamed_question = ""
     async with open_checkpointer(db_path) as saver:
         graph = build_interview_graph(saver)
@@ -329,47 +351,51 @@ async def test_resumability_real(tmp_path: Any) -> None:
                 streamed_question += chunk["data"]
     assert streamed_question.strip(), "question must stream out before we 'restart'"
 
-    # The Turn row was persisted by the question_generator.
+    # The Thread + root question were persisted by stream_open_thread.
     async with factory() as s:
-        turns = await repos.list_turns_for_session(s, session_id)
-    assert len(turns) == 1
-    turn_id = turns[0].id
+        threads = list(await repos.list_threads_for_session(s, session_id))
+    assert len(threads) == 1
 
     canned_answer = (
         "I'd clarify scope, prototype the riskiest path, measure against an "
         "explicit budget, then iterate. I've done this on async refactors "
         "before — kept us on time and surfaced an issue early."
     )
-    # Simulate the route persisting the answer (the route does this in
-    # production before resuming the graph).
-    async with factory() as s:
-        await repos.update_turn_answer(s, turn_id, canned_answer)
 
-    # Second "process": fresh saver from the same file, resume to evaluator.
+    # Subsequent "processes": fresh saver from the same file each time, resume
+    # with the candidate's answer until the session wraps. The conductor may
+    # probe a few times before advancing; the per-thread follow-up budget bounds
+    # the loop so this terminates.
+    saw_wrap = False
     score: int | None = None
-    final: dict[str, Any] | None = None
-    async with open_checkpointer(db_path) as saver:
-        graph = build_interview_graph(saver)
-        async for chunk in graph.astream(
-            Command(resume={"answer": canned_answer}),
-            config=thread_cfg,
-            stream_mode="custom",
-        ):
-            event = chunk.get("event")
-            if event == "score":
-                score = chunk["data"]
-            elif event == "done":
-                final = chunk["data"]
+    for _ in range(6):
+        async with open_checkpointer(db_path) as saver:
+            graph = build_interview_graph(saver)
+            state = await graph.aget_state(thread_cfg)
+            if not state.next:  # reached END on a prior resume
+                break
+            async for chunk in graph.astream(
+                Command(resume={"message": canned_answer}),
+                config=thread_cfg,
+                stream_mode="custom",
+            ):
+                event = chunk.get("event")
+                if event == "score":
+                    score = chunk["data"]
+                elif event == "wrap":
+                    saw_wrap = True
+        if saw_wrap:
+            break
+
+    assert saw_wrap, "session never wrapped within the follow-up budget"
+    assert score is not None and 1 <= score <= 10
 
     async with factory() as s:
-        turn = await repos.get_turn(s, turn_id)
+        threads = list(await repos.list_threads_for_session(s, session_id))
         sess_fresh = await repos.get_session(s, session_id, user_id)
     await engine.dispose()
 
-    assert score is not None and 1 <= score <= 10
-    assert final is not None
-    assert final["session_status"] == "complete"
-    assert turn is not None
-    assert turn.score == score
+    assert threads[0].status == "closed"
+    assert threads[0].score == score
     assert sess_fresh is not None
     assert sess_fresh.status == "complete"

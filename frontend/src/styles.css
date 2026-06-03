@@ -3160,10 +3160,23 @@ select:focus {
   text-overflow: ellipsis;
 }
 
+/* The active topic is a self-contained card (Phase 34 UX): the question,
+   the candidate's answers, and any follow-ups for the CURRENT topic live
+   here; closed topics drop into the collapsed history below. */
+.practice-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 28px 30px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-2);
+}
+
 .practice-question {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   padding: 0;
 }
 .practice-question-num {
@@ -3174,9 +3187,9 @@ select:focus {
   font-weight: 600;
 }
 .practice-question p {
-  font-size: 26px;
+  font-size: 20px;
   font-weight: 500;
-  line-height: 1.4;
+  line-height: 1.45;
   letter-spacing: -0.2px;
   color: var(--text-0);
   margin: 0;
@@ -3240,7 +3253,7 @@ select:focus {
   margin: 0;
   color: var(--text-1);
   line-height: 1.6;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .practice-feedback {
@@ -3249,7 +3262,8 @@ select:focus {
   gap: 12px;
   padding: 20px 22px;
   border-radius: 12px;
-  background: var(--bg-2);
+  /* Recedes against the bg-2 active-topic card it nests inside. */
+  background: var(--bg-1);
   border: 1px solid var(--border);
 }
 .practice-feedback header {
@@ -3301,6 +3315,111 @@ select:focus {
 .practice-feedback details p {
   margin-top: 10px;
   font-size: 13px;
+  color: var(--text-1);
+}
+
+/* ── Previous topics — closed threads, collapsed at the bottom (Phase 34) ── */
+
+.practice-history {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+.practice-history-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--text-2);
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+.practice-history-item {
+  border-bottom: 1px solid var(--border);
+}
+.practice-history-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 13px 2px;
+  cursor: pointer;
+  list-style: none;
+}
+.practice-history-summary::-webkit-details-marker {
+  display: none;
+}
+.practice-history-topic {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.practice-history-focus {
+  font-size: 13px;
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.practice-history-score {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-0);
+  margin-left: auto;
+  white-space: nowrap;
+}
+.practice-history-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 2px 2px 16px;
+}
+.practice-history-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.practice-history-role {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-2);
+  font-weight: 600;
+}
+.practice-history-msg p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-1);
+}
+.practice-history-eval {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.practice-history-eval > p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-0);
+}
+.practice-history-model > summary {
+  cursor: pointer;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-2);
+  font-weight: 600;
+}
+.practice-history-model p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
   color: var(--text-1);
 }
 
@@ -3812,7 +3931,7 @@ select:focus {
 
 @media (max-width: 720px) {
   .practice-question p {
-    font-size: 22px;
+    font-size: 18px;
   }
   .practice-done-score strong {
     font-size: 44px;

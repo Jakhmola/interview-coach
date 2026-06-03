@@ -213,28 +213,61 @@ export type Session = {
   created_at: string;
 };
 
-export type Turn = {
+// Phase 34: an interview is a sequence of Threads (one topic each). A thread
+// holds its whole transcript (Messages) and, once closed, its single
+// evaluation (score / feedback / model_answer). Mirrors api/sessions/schemas.py.
+export type MessageRole = "interviewer" | "candidate";
+/** The interviewer move that produced a message. ``null`` for candidate
+ * messages. ``question`` is the thread-opening root; the rest are follow-ups. */
+export type MoveKind = "question" | "probe" | "clarify" | "nudge";
+
+export type Message = {
   id: string;
-  session_id: string;
-  turn_index: number;
-  question: string;
-  anchors_json: string[];
-  answer?: string | null;
-  score?: number | null;
-  feedback?: string | null;
-  model_answer?: string | null;
-  metadata_json?: Record<string, unknown> | null;
+  thread_id: string;
+  seq: number;
+  role: MessageRole;
+  kind: MoveKind | null;
+  text: string;
   created_at: string;
 };
 
+export type Thread = {
+  id: string;
+  session_id: string;
+  thread_index: number;
+  focus_key?: string | null;
+  focus_label?: string | null;
+  focus_document_ids?: string[] | null;
+  anchors_json: string[];
+  status: "open" | "closed";
+  score?: number | null;
+  feedback?: string | null;
+  model_answer?: string | null;
+  created_at: string;
+  messages: Message[];
+};
+
 export type SessionDetail = Session & {
-  turns: Turn[];
+  threads: Thread[];
 };
 
 export type SseFrame = {
   event: string;
   data: unknown;
 };
+
+// Phase 34: the typed action-envelope streamed by POST /sessions/{id}/message,
+// mirroring agents/interview_events.py. The framing events (move / move_done /
+// evaluation / evaluation_done / wrap / error) carry their fields at the top
+// level; the inner Phase-9 sub-protocol (token / score / feedback_token / …)
+// rides under SseFrame.data. Kept as a union so the page can switch on `event`.
+export type InterviewEnvelopeEvent =
+  | { event: "move"; kind: MoveKind; thread_index: number; message_id: string }
+  | { event: "move_done"; anchors?: string[] | null }
+  | { event: "evaluation"; thread_index: number }
+  | { event: "evaluation_done"; thread_index: number; session_status: SessionStatus; n_remaining: number }
+  | { event: "wrap"; session_status: "complete" }
+  | { event: "error"; code: string; detail?: string | null };
 
 // Prep-graph node-lifecycle protocol — mirrors agents/prep_events.py (Phase 27).
 // Run reason rides node_started; skip reason rides node_skipped; outcome rides
@@ -575,21 +608,20 @@ export function prepareSessionResumeReposStream(
   return streamPost("/sessions/prepare/resume_repos", token, body, onFrame, signal);
 }
 
-export function nextQuestionStream(
+/** Phase 34: the single conversational endpoint. An empty/omitted ``message``
+ * opens the session (the first thread); otherwise it's the candidate's answer
+ * to the interviewer's last move. The SSE stream carries the typed action
+ * envelope (see {@link InterviewEnvelopeEvent}) framing the Phase-9 token
+ * streams. The graph pauses on an ``interrupt`` after each move that awaits an
+ * answer, so a resume that closes a thread can also stream the next thread's
+ * opening question before the stream ends. */
+export function messageStream(
   token: string,
   sessionId: string,
+  message: string | null,
   onFrame: (frame: SseFrame) => void,
   signal?: AbortSignal,
 ) {
-  return streamPost(`/sessions/${sessionId}/next_question`, token, {}, onFrame, signal);
-}
-
-export function answerStream(
-  token: string,
-  sessionId: string,
-  answer: string,
-  onFrame: (frame: SseFrame) => void,
-  signal?: AbortSignal,
-) {
-  return streamPost(`/sessions/${sessionId}/answer`, token, { answer }, onFrame, signal);
+  const body = message === null ? {} : { message };
+  return streamPost(`/sessions/${sessionId}/message`, token, body, onFrame, signal);
 }
