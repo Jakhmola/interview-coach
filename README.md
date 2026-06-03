@@ -10,10 +10,7 @@ and Postgres. No data leaves the box (except optional web search).
 
 ## Demo
 
-<!-- Drop a screen capture at docs/demo.gif and uncomment the line below. -->
-<!-- ![Interview Coach demo](docs/demo.gif) -->
-
-> 🎥 _Demo GIF coming soon — see [Recording a demo](#recording-a-demo)._
+![Interview Coach demo](demo.gif)
 
 ## How it works
 
@@ -118,21 +115,6 @@ make logs    # tail logs
 make ps      # service status
 make db-ui   # print Adminer login for the local DB
 ```
-
-## Recording a demo
-
-A short GIF at the top of the README does a lot of work. To make one:
-
-1. Run the app (`make up`) and walk through setup → interview → feedback.
-2. Capture with a screen recorder (e.g. [`peek`](https://github.com/phw/peek),
-   `wf-recorder`, or macOS `⇧⌘5`).
-3. Convert/trim to a small GIF (keep it under ~5 MB so GitHub renders it inline),
-   e.g. `ffmpeg -i demo.mp4 -vf "fps=12,scale=900:-1" docs/demo.gif`.
-4. Save it as `docs/demo.gif` and uncomment the image line in the [Demo](#demo)
-   section.
-
-For longer walkthroughs, upload an `.mp4` to a GitHub issue/release and paste the
-asset URL instead — GitHub renders uploaded videos with a player.
 
 ## Docs
 
