@@ -10,7 +10,7 @@ and Postgres. No data leaves the box (except optional web search).
 
 ## Demo
 
-![Interview Coach demo](demo.gif)
+![Interview Coach demo](docs/demo.gif)
 
 ## How it works
 
