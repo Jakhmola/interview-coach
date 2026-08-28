@@ -12,6 +12,11 @@ and Postgres. No data leaves the box (except optional web search).
 
 ![Interview Coach demo](docs/demo.gif)
 
+A real round against the local model, recorded end to end: it asks, you answer,
+it follows up on what you said, then scores the topic and shows a model answer.
+Only the model's thinking time between turns is cut - everything else runs at
+its own speed. [How it was recorded](scripts/demo/README.md).
+
 ## How it works
 
 ```mermaid
