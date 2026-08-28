@@ -71,11 +71,18 @@ await send("Log.enable");
 await send("Network.enable");
 await send("Emulation.setDeviceMetricsOverride", { width: opt.w, height: opt.h, deviceScaleFactor: 1, mobile: opt.w < 600 });
 await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-color-scheme", opt_scheme: opt.scheme, value: opt.scheme }] });
-// Seed localStorage on the origin before the app boots.
-const origin = new URL(opt.url).origin;
-await send("Page.navigate", { url: origin + "/__blank__" });
-await sleep(400);
-for (const kv of opt.local) { const eq = kv.indexOf("="); const k = kv.slice(0, eq), v = kv.slice(eq + 1); await evaluate(`localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)}); 1`); }
+// Seed localStorage ahead of any page script. Setting it from a first
+// throwaway navigation does not work: a dev server answers every path with
+// index.html, so the app boots there unauthenticated and clears the keys back
+// out from under the seed.
+// An empty value is a lookup that came back with nothing (no job on the
+// account, say); seeding it writes a key the app then has to reason about.
+const seed = opt.local.map((kv) => { const eq = kv.indexOf("="); return [kv.slice(0, eq), kv.slice(eq + 1)]; }).filter(([, v]) => v !== "");
+if (seed.length) {
+  await send("Page.addScriptToEvaluateOnNewDocument", {
+    source: seed.map(([k, v]) => `localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)});`).join(""),
+  });
+}
 await send("Page.navigate", { url: opt.url });
 await sleep(opt.wait);
 for (const sel of opt.click) { await evaluate(`document.querySelector(${JSON.stringify(sel)})?.click(); 1`); await sleep(400); }
