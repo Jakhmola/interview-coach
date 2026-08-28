@@ -1554,10 +1554,6 @@ mark.warn,
   font-family: var(--font-typed);
   font-size: 13.5px;
 }
-.manage-header .btn-quiet {
-  justify-self: start;
-  padding-left: 0;
-}
 .task-pending {
   color: var(--ink-3);
 }
@@ -1670,94 +1666,182 @@ mark.warn,
   margin-left: 2px;
 }
 
-/* ═══════════════ manage: file inventory ═══════════════ */
+/* ═══════════════ manage: the file cabinet ═══════════════
+   An index of what is on file (each entry named by what it is, never by its
+   filename) beside a reading pane: the selected file's provenance, what prep
+   read out of it, and its actions. The selected entry is highlighter-filled
+   like every other selected row on the form. */
 .manage-page {
   display: grid;
   gap: 22px;
 }
-.manage-header {
+.manage-page .back {
+  justify-self: start;
+  height: 24px;
+  padding: 0;
+  margin-top: -8px;
+}
+.cabinet {
   display: grid;
-  gap: 6px;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: 0 36px;
+  align-items: start;
 }
-.manage-header h1 {
-  font-size: 20px;
-  font-weight: 500;
-}
-.manage-header p {
-  color: var(--ink-2);
-}
-.manage-section {
+.index {
   display: grid;
-  gap: 10px;
+  gap: 16px;
+}
+.index section,
+.danger-zone {
+  display: grid;
+  gap: 4px;
   border-top: 1px solid var(--ink);
   padding-top: 10px;
 }
-.manage-section h2 {
+.index h2,
+.danger-zone h2 {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink-2);
 }
-.manage-section-head {
+.index .head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
+  min-height: 22px;
 }
-.manage-warning {
-  color: var(--pen);
-  font-size: 13.5px;
-  font-weight: 500;
-  max-width: 80ch;
+.index .head .btn-quiet {
+  height: 22px;
+  padding: 0;
 }
-.manage-warning--quiet {
-  color: var(--ink-2);
-  font-weight: 400;
-}
-.manage-list {
+.index .entry {
   display: grid;
-  gap: 0;
+  gap: 2px;
+  width: calc(100% + 20px);
+  margin: 0 -10px;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-.manage-card {
+.index .entry:hover {
+  background: var(--paper-2);
+}
+.index .entry.on {
+  background: var(--hl);
+  color: var(--hl-ink);
+}
+.index .entry.on .meta {
+  color: var(--hl-ink);
+  opacity: 0.75;
+}
+.index .entry strong {
+  font-weight: 500;
+  font-size: 14.5px;
+}
+.index .none {
+  padding: 8px 0;
+  color: var(--ink-3);
+  font-size: 13.5px;
+}
+.index .wizard-note {
+  margin-top: 4px;
+}
+.meta {
+  font-size: 12.5px;
+  color: var(--ink-2);
   display: flex;
   align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pane {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-height: 360px;
+  padding-top: 28px;
+}
+.pane-head {
+  display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--rule);
 }
-.manage-card > div:first-child {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+.pane-head .about {
+  display: grid;
+  gap: 4px;
   min-width: 0;
 }
-.manage-card strong {
+.pane-head strong {
   font-weight: 500;
+  font-size: 15px;
 }
-/* the file's first line, so a row is known by what it says, not its name */
-.manage-card .excerpt {
-  flex-basis: 100%;
-  --lines: 2;
-  font-size: 13px;
-  color: var(--ink-2);
-  overflow-wrap: anywhere;
+.pane-actions {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+  flex: none;
 }
-.manage-card-actions {
+.pane-actions .acts {
   display: flex;
   gap: 4px;
-  flex: none;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-.manage-card--repo {
-  align-items: flex-start;
+.pane-actions .consequence {
+  font-size: 12px;
+  color: var(--ink-2);
+  text-align: right;
+  max-width: 34ch;
 }
-.manage-card--repo > div:first-child {
+.digest {
   display: grid;
   gap: 6px;
+  max-width: 92ch;
+}
+.digest .row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.digest .k {
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.digest .q {
+  color: var(--ink-2);
+}
+.pane-text {
+  margin: 0;
+  font-family: var(--font-typed);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 560px;
+  overflow: auto;
+}
+.pane > .btn-quiet {
+  justify-self: start;
+  height: 22px;
+  padding: 0;
+}
+.pane-empty {
+  padding-top: 10px;
 }
 .repo-link {
   display: inline-flex;
@@ -1767,16 +1851,14 @@ mark.warn,
   color: var(--ink-2);
 }
 .repo-chips,
-.wizard-chip-row,
-.chips {
+.wizard-chip-row {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   align-items: center;
 }
 .repo-chip,
-.wizard-chip,
-.chip {
+.wizard-chip {
   border: 1px solid var(--rule-2);
   padding: 1px 6px;
   font-size: 11px;
@@ -1786,12 +1868,6 @@ mark.warn,
   display: inline-flex;
   align-items: center;
   gap: 3px;
-}
-.repo-features {
-  margin: 0;
-  padding-left: 16px;
-  font-size: 13px;
-  color: var(--ink-2);
 }
 .manage-editor {
   display: grid;
@@ -1822,19 +1898,23 @@ mark.warn,
   font-family: var(--font-typed);
 }
 .danger-zone {
-  border-top-color: var(--ink);
+  gap: 10px;
 }
-.danger-zone h2 {
-  color: var(--ink-2);
+.danger-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 22px;
+  align-items: start;
+  padding: 6px 0;
 }
-.danger-card {
-  align-items: flex-start;
-  border-bottom: 0;
-}
-.danger-card > div:first-child {
+.danger-row .about {
   display: grid;
   gap: 4px;
   max-width: 70ch;
+}
+.danger-row strong {
+  font-weight: 500;
+  font-size: 15px;
 }
 .danger-confirm {
   display: grid;
@@ -2803,8 +2883,12 @@ html[data-vt="route"]::view-transition-new(sheet) {
     transform: none;
   }
   .spread,
-  .record-body {
+  .record-body,
+  .cabinet {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .cabinet {
+    gap: 20px;
   }
 }
 @media (max-width: 720px) {
@@ -2894,9 +2978,25 @@ html[data-vt="route"]::view-transition-new(sheet) {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
   }
-  .manage-card {
+  .pane-head {
     flex-direction: column;
-    align-items: flex-start;
+  }
+  .pane-actions {
+    justify-items: start;
+  }
+  .pane-actions .acts {
+    justify-content: flex-start;
+  }
+  .pane-actions .consequence {
+    text-align: left;
+  }
+  .digest .row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .danger-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
   }
   .wizard-footer {
     flex-wrap: wrap;

@@ -46,18 +46,6 @@ export const sessionTone: Record<SessionStatus, "info" | "good" | "bad"> = {
   abandoned: "bad",
 };
 
-/** The head of a document's text as one quoted line - its line breaks quoted
- * as " / " so a name, a headline and a heading stay apart - and an ellipsis
- * when the text goes on. */
-export function excerptOf(preview: string, total: number): string {
-  const head = preview
-    .trim()
-    .replace(/\s*\n+\s*/g, " / ")
-    .replace(/\s+/g, " ");
-  if (!head) return "";
-  return `“${head}${total > preview.length ? "…" : ""}”`;
-}
-
 type Parsed = { title?: string | null; company_name?: string | null };
 
 function parsedOf(job: { parsed_json?: Record<string, unknown> | null }): Parsed {

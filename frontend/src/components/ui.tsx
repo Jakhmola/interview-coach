@@ -207,6 +207,11 @@ export function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+/** "28 Aug" - a date as the form would pencil it. */
+export function shortDate(value: string) {
+  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 export function shortId(id: string) {
   return `${id.slice(0, 8)}...`;
 }

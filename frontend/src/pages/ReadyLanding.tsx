@@ -2,7 +2,8 @@ import { ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { DocumentItem, JobItem, PrepStatus } from "../api";
-import { Field, JobField, PenNote, SheetHead } from "../components/ui";
+import { Field, JobField, PenNote, SheetHead, shortDate } from "../components/ui";
+import { firstSentence } from "../digest";
 import { useAuth } from "../state/auth";
 
 /**
@@ -44,7 +45,8 @@ export function ReadyLanding({
     behavioral_signals?: unknown;
   };
   const company = status?.company ?? null;
-  const mission = firstSentence((company?.snapshot as { mission?: unknown } | undefined)?.mission);
+  const missionText = (company?.snapshot as { mission?: unknown } | undefined)?.mission;
+  const mission = isString(missionText) ? firstSentence(missionText, 160) : null;
 
   const seniority = isString(brief.seniority) && brief.seniority !== "unknown" ? capitalise(brief.seniority) : null;
   const companyName = isString(brief.company_name) ? brief.company_name : company?.company_name;
@@ -165,15 +167,4 @@ function plural(n: number, noun: string) {
 
 function capitalise(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-function shortDate(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-/** The first sentence of a paragraph, for a one-line company note. */
-function firstSentence(v: unknown): string | null {
-  if (!isString(v)) return null;
-  const m = v.trim().match(/^.*?[.!?](?=\s|$)/);
-  return (m ? m[0] : v.trim()).slice(0, 160);
 }
