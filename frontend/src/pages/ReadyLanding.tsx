@@ -108,21 +108,13 @@ export function ReadyLanding({
           {mustHave.length > 0 ? (
             <div className="row">
               <span className="k">Must have</span>
-              <ul className="lines">
-                {mustHave.map((t) => (
-                  <li key={t}>{t}</li>
-                ))}
-              </ul>
+              <p>{mustHave.join(" · ")}</p>
             </div>
           ) : null}
           {niceToHave.length > 0 ? (
             <div className="row">
               <span className="k">Nice to have</span>
-              <ul className="lines">
-                {niceToHave.map((t) => (
-                  <li key={t}>{t}</li>
-                ))}
-              </ul>
+              <p>{niceToHave.join(" · ")}</p>
             </div>
           ) : null}
           {looksFor.length > 0 ? (

@@ -1619,13 +1619,6 @@ mark.warn,
   text-transform: uppercase;
   color: var(--ink-2);
 }
-.lines {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 3px;
-}
 .margin {
   display: grid;
   gap: 16px;
