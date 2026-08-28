@@ -86,6 +86,9 @@ export function InterviewPage() {
   const { sessionId } = useParams();
   const activeId = sessionId ?? null;
   const [jobs, setJobs] = useState<JobItem[]>([]);
+  // Until the first fetch lands an empty `jobs` means "not known yet", not
+  // "none on file" - saying the latter flashes a wrong headline on every visit.
+  const [loaded, setLoaded] = useState(false);
   const [docs, setDocs] = useState<DocumentItem[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -174,7 +177,9 @@ export function InterviewPage() {
     setLiveItems([]);
     setPendingAnswer(null);
     setIsBusy(false);
-    refresh().catch((err: unknown) => setError(codeFrom(err)));
+    refresh()
+      .catch((err: unknown) => setError(codeFrom(err)))
+      .finally(() => setLoaded(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeId]);
 
@@ -397,27 +402,29 @@ export function InterviewPage() {
   if (!activeJobId || jobs.length === 0) {
     return (
       <div className="practice-empty-wrap">
-        <SheetHead title="Interview scorecard" page="No round open">
+        <SheetHead title="Interview scorecard" page={loaded ? "No round open" : ""}>
           <Field label="Candidate" value={candidate} />
           <JobField />
         </SheetHead>
-        <div className="practice-empty">
-          <h1 className="practice-empty-title">
-            {jobs.length === 0 ? "No job description on file yet" : "Pick a job to practice for"}
-          </h1>
-          <p className="practice-empty-body">
-            {jobs.length === 0 ? (
-              <>
-                <Link to="/setup">Set one up</Link> to start practicing.
-              </>
-            ) : (
-              <>
-                Use the role / company field above to switch, or add one in{" "}
-                <Link to="/setup">Setup</Link>.
-              </>
-            )}
-          </p>
-        </div>
+        {loaded ? (
+          <div className="practice-empty">
+            <h1 className="practice-empty-title">
+              {jobs.length === 0 ? "No job description on file yet" : "Pick a job to practice for"}
+            </h1>
+            <p className="practice-empty-body">
+              {jobs.length === 0 ? (
+                <>
+                  <Link to="/setup">Set one up</Link> to start practicing.
+                </>
+              ) : (
+                <>
+                  Use the role / company field above to switch, or add one in{" "}
+                  <Link to="/setup">Setup</Link>.
+                </>
+              )}
+            </p>
+          </div>
+        ) : null}
       </div>
     );
   }
