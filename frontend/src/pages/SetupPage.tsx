@@ -721,7 +721,6 @@ export function SetupPage() {
         job={selectedJob}
         techDocs={technicalDocs}
         repos={docs.filter((doc) => doc.kind === "github_repo")}
-        status={status}
         onStart={() => navigate("/interview")}
         onAddJob={() => navigate("/setup?new_job=1")}
         onAddDocs={() => navigate("/setup?add_doc=1")}
@@ -1157,7 +1156,6 @@ function ReadyLanding({
   job,
   techDocs,
   repos,
-  status,
   onStart,
   onAddJob,
   onAddDocs,
@@ -1167,7 +1165,6 @@ function ReadyLanding({
   job: JobItem | null;
   techDocs: DocumentItem[];
   repos: DocumentItem[];
-  status: PrepStatus | null;
   onStart: () => void;
   onAddJob: () => void;
   onAddDocs: () => void;
@@ -1196,90 +1193,60 @@ function ReadyLanding({
         <h1 className="ready-title">
           {role || "Role"} <span className="ready-at">@</span> {company || "Company"}
         </h1>
-        <p className="ready-lede">Ready to practice. Start a round, or change what's on file.</p>
+        <p className="ready-lede">Ready to practice. Start a round, or add to the packet first.</p>
         <div className="ready-actions">
           <button className="btn-primary" type="button" onClick={onStart}>
             Start a practice round <ArrowRight size={14} />
           </button>
-          <div className="ready-actions-row">
-            <button className="btn-ghost" type="button" onClick={onAddJob}>
-              Add another job
-            </button>
-            <button className="btn-ghost" type="button" onClick={onAddDocs}>
-              Add supporting doc
-            </button>
-          </div>
           <button className="btn-quiet" type="button" onClick={onManage}>
             Manage CV, JDs &amp; docs
           </button>
         </div>
       </div>
 
+      {/* What is in the packet and what is not; each row carries its own way in. */}
       <section className="section ready-packet" aria-label="What's in the packet">
         <h2>In the packet</h2>
-        <dl className="packet-list">
-          <div>
-            <dt>CV</dt>
-            {cv ? (
-              <dd>
-                <span>{cv.filename}</span>
-                <span className="muted">{cv.char_count.toLocaleString()} chars</span>
-              </dd>
-            ) : (
-              <dd className="empty">none yet</dd>
-            )}
-          </div>
-          <div>
-            <dt>Job description</dt>
-            {job ? (
-              <dd>
-                <span>{job.source_url || "Pasted text"}</span>
-                {job.preview ? <span className="muted">"{job.preview.slice(0, 110)}…"</span> : null}
-              </dd>
-            ) : (
-              <dd className="empty">none yet</dd>
-            )}
-          </div>
-          <div>
-            <dt>Supporting docs</dt>
-            {techDocs.length > 0 ? (
-              <dd>
-                {techDocs.map((d) => (
-                  <span key={d.id}>
-                    {d.filename}
-                    {d.project_title ? <span className="muted"> · "{d.project_title}"</span> : null}
-                  </span>
-                ))}
-              </dd>
-            ) : (
-              <dd className="empty">none</dd>
-            )}
-          </div>
-          <div>
-            <dt>GitHub repos</dt>
-            {repos.length > 0 ? (
-              <dd>
-                {repos.map((d) => (
-                  <span key={d.id}>{d.project_title ?? d.filename}</span>
-                ))}
-              </dd>
-            ) : (
-              <dd className="empty">none</dd>
-            )}
-          </div>
-        </dl>
-        <ul className="checklist" aria-label="Prep">
-          <li className={status?.profile_ready ? "done" : ""}>
+        <ul className="packet-check">
+          <li className={cv ? "done" : ""}>
             <i aria-hidden="true" />
-            Profile built from the CV
+            <span className="k">CV</span>
+            <span className="v">{cv ? cv.filename : "none yet"}</span>
+            <button type="button" className="btn-quiet" onClick={onManage}>
+              {cv ? "Replace" : "Upload"}
+            </button>
           </li>
-          <li className={status?.job_analyzed ? "done" : ""}>
+          <li className={job ? "done" : ""}>
             <i aria-hidden="true" />
-            Job description analyzed
+            <span className="k">Job description</span>
+            <span className="v">{job ? job.source_url || "Pasted text" : "none yet"}</span>
+            <button type="button" className="btn-quiet" onClick={onAddJob}>
+              {job ? "Add another" : "Add"}
+            </button>
           </li>
-          <li className={status?.company_researched ? "done" : ""}>
+          <li className={techDocs.length > 0 ? "done" : ""}>
             <i aria-hidden="true" />
-            Company researched
+            <span className="k">Supporting docs</span>
+            <span className="v">
+              {techDocs.length > 0
+                ? techDocs.map((d) => d.filename).join(" · ")
+                : "none yet - architecture notes, take-homes, project write-ups"}
+            </span>
+            <button type="button" className="btn-quiet" onClick={onAddDocs}>
+              {techDocs.length > 0 ? "Add more" : "Add"}
+            </button>
+          </li>
+          <li className={repos.length > 0 ? "done" : ""}>
+            <i aria-hidden="true" />
+            <span className="k">GitHub repos</span>
+            <span className="v">
+              {repos.length > 0
+                ? repos.map((d) => d.project_title ?? d.filename).join(" · ")
+                : "none yet - public repos ground the deep-dive questions in your code"}
+            </span>
+            <button type="button" className="btn-quiet" onClick={onManage}>
+              {repos.length > 0 ? "Manage" : "Add repos"}
+            </button>
           </li>
         </ul>
       </section>

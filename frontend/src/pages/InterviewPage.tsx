@@ -623,14 +623,6 @@ export function InterviewPage() {
               </div>
             </form>
           ) : null}
-
-          {openThread ? (
-            <div className="rating-row">
-              <span className="cap">Rating</span>
-              <RatingCells score={null} />
-              <span className="hint">scored when the topic closes</span>
-            </div>
-          ) : null}
         </div>
       </div>
 
@@ -646,10 +638,10 @@ export function InterviewPage() {
       ) : null}
 
       <footer className="practice-live-footer">
-        <span>Round in progress. Ending it now files what you have to History.</span>
         <ArmedDeleteButton
           label="End session"
           armedLabel="Click again to end"
+          consequenceLabel="files what you have so far to History"
           onConfirm={() => abandon(detail.id)}
           className="btn-ghost danger"
         />
@@ -894,7 +886,7 @@ function Assessment({ item }: { item: LiveEval }) {
       <span className="lbl pen-lbl">Interviewer's assessment</span>
       <div className="rating-row">
         <span className="cap">Rating</span>
-        <RatingCells score={score} />
+        <RatingCells score={score} scoring={score === null} />
         {score === null ? (
           <span className="practice-loading subtle">
             <span className="pen-dot" aria-hidden="true" />

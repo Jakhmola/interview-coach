@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { JobItem, Session, SessionDetail, SessionStatus, Thread, api } from "../api";
@@ -215,7 +215,7 @@ function HistorySession({ session, token }: { session: Session; token: string })
         <div className="history-card-body">
           <ErrorBanner code={error} />
           {!detail ? <p className="history-card-loading">Loading…</p> : null}
-          {detail?.threads.length === 0 ? <p className="history-turn-empty">No topics recorded.</p> : null}
+          {detail?.threads.length === 0 ? <p className="record-empty">No topics recorded.</p> : null}
           {detail?.threads.map((thread) => (
             <HistoryThread key={thread.id} thread={thread} />
           ))}
@@ -226,48 +226,92 @@ function HistorySession({ session, token }: { session: Session; token: string })
 }
 
 const moveLabels: Record<string, string> = {
-  question: "Interviewer",
   probe: "Probe",
   clarify: "Clarify",
   nudge: "Nudge",
 };
 
+type Message = Thread["messages"][number];
+
+/**
+ * One topic as a record: the full topic line, then the exchange on the left
+ * and the interviewer's verdict on the right. Collapsed, it shows the
+ * question, the candidate's first answer and the verdict cut to a few lines;
+ * "Full exchange" opens every turn and the model answer.
+ */
 function HistoryThread({ thread }: { thread: Thread }) {
+  const [open, setOpen] = useState(false);
+  const num = thread.thread_index + 1;
+  const messages = thread.messages;
+  const question = messages.find((m) => m.role === "interviewer" && (m.kind ?? "question") === "question");
+  const firstAnswer = messages.find((m) => m.role === "candidate");
+  const summary = [question, firstAnswer].filter((m): m is Message => !!m);
+  const shown = open ? messages : summary;
+  const scored = thread.status === "closed" && thread.score !== null && thread.score !== undefined;
+  // Whether there is anything beyond the summary to open (and to close again).
+  const hasMore = messages.length > summary.length || !!thread.model_answer;
+
   return (
-    <div className="history-turn">
-      <div className="history-turn-head">
-        <strong className="history-turn-q">
-          Topic {thread.thread_index + 1}
-          {topicLabel(thread.focus_label) ? <span className="history-turn-focus"> · {topicLabel(thread.focus_label)}</span> : null}
-        </strong>
+    <article className="record">
+      <header className="record-head">
+        <strong className="record-topic">Topic {num}</strong>
+        <span className="record-focus">{topicLabel(thread.focus_label) ?? "Untitled topic"}</span>
         <RatingCells score={thread.score} mini />
+      </header>
+      <div className="record-body">
+        <div className="record-exchange">
+          {shown.map((m) => {
+            const isQ = m.role === "interviewer" && (m.kind ?? "question") === "question";
+            const isFollowUp = m.role === "interviewer" && !isQ;
+            const clamp = !open && m.role === "candidate";
+            const voice = m.role === "candidate" ? "typed" : isFollowUp ? "pen" : "";
+            return (
+              <div key={m.id} className="exchange">
+                <span className={`who${isFollowUp ? " pen" : ""}`}>
+                  {m.role === "candidate" ? "You" : isQ ? `Q${num}` : moveLabels[m.kind ?? ""] ?? "Interviewer"}
+                </span>
+                <p className={`${voice}${clamp ? " clamp" : ""}`.trim()}>{m.text}</p>
+              </div>
+            );
+          })}
+        </div>
+        <div className="record-verdict">
+          {scored ? (
+            <>
+              <span className="who">Rated {thread.score}/10</span>
+              <p
+                className={open ? undefined : "clamp"}
+                style={open ? undefined : ({ "--lines": 4 } as CSSProperties)}
+              >
+                {thread.feedback}
+              </p>
+              {open && thread.model_answer ? (
+                <details className="model-answer" open>
+                  <summary>
+                    <ChevronRight aria-hidden="true" />
+                    Model answer
+                  </summary>
+                  <p>{thread.model_answer}</p>
+                </details>
+              ) : null}
+            </>
+          ) : (
+            <p className="record-empty">No evaluation yet.</p>
+          )}
+        </div>
       </div>
-      {thread.messages.map((m) => (
-        <p key={m.id} className={m.role === "candidate" ? "" : "history-turn-interviewer"}>
-          <span className="history-turn-label">
-            {m.role === "candidate" ? "You" : moveLabels[m.kind ?? "question"] ?? "Interviewer"}
-          </span>{" "}
-          {m.text}
-        </p>
-      ))}
-      {thread.status === "closed" && thread.score !== null && thread.score !== undefined ? (
-        <>
-          <p className="history-turn-interviewer">
-            <span className="history-turn-label">Rated {thread.score}/10</span> {thread.feedback}
-          </p>
-          {thread.model_answer ? (
-            <details className="model-answer">
-              <summary>
-                <ChevronRight aria-hidden="true" />
-                Model answer
-              </summary>
-              <p>{thread.model_answer}</p>
-            </details>
-          ) : null}
-        </>
-      ) : (
-        <p className="history-turn-empty">No evaluation yet.</p>
-      )}
-    </div>
+      {hasMore ? (
+        <button
+          type="button"
+          className="btn-quiet record-toggle"
+          onClick={() => setOpen((x) => !x)}
+          aria-expanded={open}
+        >
+          {open
+            ? "Show less"
+            : `Full exchange · ${messages.length} turn${messages.length === 1 ? "" : "s"}${thread.model_answer ? " · model answer" : ""}`}
+        </button>
+      ) : null}
+    </article>
   );
 }

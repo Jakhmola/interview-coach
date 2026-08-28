@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { Moon, Sun } from "lucide-react";
 
 import { codeFrom, translate } from "../errors";
@@ -106,24 +106,33 @@ export function JobField() {
   );
 }
 
-/** 1-10 rating cells; the scored one is highlighter-filled. */
+/** 1-10 rating cells; the scored one is highlighter-filled. While `scoring`,
+ * the pen runs along the row (each cell's `--i` staggers the sweep). */
 export function RatingCells({
   score,
   mini,
   label,
+  scoring,
 }: {
   score: number | null | undefined;
   mini?: boolean;
   label?: string;
+  scoring?: boolean;
 }) {
+  const unscored = score === null || score === undefined;
   return (
     <div
-      className={`cells${mini ? " mini" : ""}`}
+      className={`cells${mini ? " mini" : ""}${scoring ? " scoring" : ""}`}
       role="img"
-      aria-label={label ?? (score === null || score === undefined ? "Not scored yet" : `Scored ${score} out of 10`)}
+      aria-label={label ?? (scoring ? "Scoring" : unscored ? "Not scored yet" : `Scored ${score} out of 10`)}
     >
       {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-        <span key={n} className={`cell${score === n ? " on" : ""}`} aria-hidden="true">
+        <span
+          key={n}
+          className={`cell${score === n ? " on" : ""}`}
+          aria-hidden="true"
+          style={scoring ? ({ "--i": n - 1 } as CSSProperties) : undefined}
+        >
           {n}
         </span>
       ))}

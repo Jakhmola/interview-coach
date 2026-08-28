@@ -123,17 +123,23 @@ def _truncate(text: str, n: int = 100) -> str:
     return text[: n - 1].rstrip() + "…"
 
 
+FOCUS_LABEL_CHARS = 280
+"""The focus label is persisted as the thread's topic and shown in full on the
+scorecard's previous-topics rows and in History, so it must hold a whole CV
+bullet; the old 140 cut most of them mid-sentence."""
+
+
 def _highlight_label(exp: dict[str, Any], hl: dict[str, Any]) -> str:
     text = (hl.get("text") or "").strip() or "(unnamed highlight)"
     company = (exp.get("company") or "").strip()
-    return _truncate(f'"{text}" at {company}' if company else f'"{text}"', 140)
+    return _truncate(f'"{text}" at {company}' if company else f'"{text}"', FOCUS_LABEL_CHARS)
 
 
 def _project_label(proj: dict[str, Any]) -> str:
     name = (proj.get("name") or "").strip()
     description = (proj.get("description") or "").strip()
     if name and description:
-        return _truncate(f"{name} — {description}", 140)
+        return _truncate(f"{name} — {description}", FOCUS_LABEL_CHARS)
     return name or description or "(unnamed project)"
 
 

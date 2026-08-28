@@ -275,11 +275,11 @@ Two neutral families (desk and paper), one ink ramp, and three pigments that eac
 ### Hierarchy
 - **Hero** (700, 28px, lh 1.2): the one place the role itself is the heading - "GenAI Engineer @ Northwind Labs" on the ready landing.
 - **Display** (700, 24px, caps, 0.02em; 20px under 720px): the form title under its 2px rule ("Interview Scorecard", the login brand).
-- **Headline** (500, 21px, lh 1.35, max 56ch; 17px under 720px): the question in its box. **Page title** (500, 20px): page titles on Setup, History, Manage, the completion title, the modal title (700 caps there).
+- **Headline** (500, 21px, lh 1.35; 17px under 720px): the question in its box, filling the box's width. **Page title** (500, 20px): page titles on Setup, History, Manage, the completion title, the modal title (700 caps there).
 - **Title** (500, 14.5px): values in underlined header fields, list-row primary text.
-- **Body** (400, 15px, lh 1.45): reading text; max 62-80ch on prose. **Meta** (13-13.5px, `--ink-2`): row metadata, the "Your turn" line, page meta (12.5px). **Hint** (12px, 0.06em, `--ink-2`): "Ctrl + Enter submits", "scored when the topic closes".
-- **Typed** (Courier Prime 400, 15.5px on a 26px line): the candidate's responses, the textarea they type in, model answers (14.5/24), typewriter status lines (14px), history transcripts (13.5/22).
-- **Pen** (Archivo 500, wdth 78, 16px, lh 1.35, `--pen`): margin notes; 15.5px in inline remarks, the agenda and previous-topic exchanges; keyed by an 11px/10px caps label ("PROBE", "NUDGE", "AGENDA").
+- **Body** (400, 15px, lh 1.45): reading text. Standalone prose (login pitch, wizard blurbs, the ready lede) keeps a 52-66ch measure; anything inside a box, a record or a row fills its container - a boxed field with an empty right half reads as wasted paper. **Meta** (13-13.5px, `--ink-2`): row metadata, the "Your turn" line, page meta (12.5px). **Hint** (12px, 0.06em, `--ink-2`): "Ctrl + Enter submits", "scored when the topic closes".
+- **Typed** (Courier Prime 400, 15.5px on a 26px line): the candidate's responses, the textarea they type in, model answers (14.5/24), typewriter status lines (14px), exchange transcripts (14/22), the History model answer (13.5/22).
+- **Pen** (Archivo 500, wdth 78, 16px, lh 1.35, `--pen`): margin notes; 15.5px in inline remarks and the agenda, 15px in exchange turns; keyed by an 11px/10px caps label ("PROBE", "NUDGE", "AGENDA").
 - **Label** (700, 10.5px, 0.14em, caps, `--ink-2`): field labels, section heads (11px), previous-topic keys, model-answer summary, the packet index keys; 10px inverted on the box label and status pill.
 - **Control** (700, 11px, 0.16em, caps): buttons; tabs use 0.14em; quiet buttons 0.1em; desk buttons 0.1em.
 
@@ -296,7 +296,9 @@ The sheet is a vertical flex column with a 16px gap; inside it, sections are gri
 
 The live scorecard is two columns: `minmax(0, 1fr) minmax(340px, 400px)` with a `14px 40px` gap. The question box and the main column (responses, remarks, reply box, actions, rating row) occupy the left; the right margin (latest note, agenda, grounded-in) spans both rows and never pushes the form down. Two things stay at hand while a long transcript scrolls: the reply box (`form.composer`) is `position: sticky; bottom: 0` on paper with a 12px paper fade above it, and on desktops at least 981px wide and 780px tall the margin is `sticky; top: 24px`. Under 980px the margin drops below the main column and the note loses its tilt.
 
-The ready landing (Setup, once prep is complete) is two columns, `minmax(0, 1fr) minmax(320px, 460px)` with a `22px 56px` gap: the role and its actions on the left, the "In the packet" index on the right (a `<dl>` table of CV / job description / supporting docs / GitHub repos over a 1px ink rule, then the prep checklist). One column under 980px.
+The ready landing (Setup, once prep is complete) is two columns, `minmax(0, 1fr) minmax(320px, 460px)` with a `22px 56px` gap: the role, a one-line lede and the start button on the left, the "In the packet" checklist on the right (`.packet-check`: CV / job description / supporting docs / GitHub repos, each row a 12px square that is filled when the item is on file, a caps key, the value or a one-line "none yet" nudge in `--ink-3`, and a quiet action - Replace / Add another / Add more / Add repos). It tells the candidate what is in the packet, what is not, and where to add it; nothing else. The landing is one column under 980px; under 720px each row reflows (square, key and action on the first line, value below).
+
+History records (`.record`) use the same width: a head row with the topic number, the full topic label (wrapping, never truncated by the UI) and mini rating cells; then `minmax(0, 3fr) minmax(0, 2fr)` with the exchange on the left and the interviewer's verdict on the right. Collapsed, the exchange shows the question and the candidate's first answer (`.clamp`, 3 lines) and the verdict its first 4 lines; "Full exchange · n turns" opens every turn and the model answer, "Show less" folds it back. One column under 980px.
 
 Spacing rhythm: 4, 6, 8, 10, 12, 14, 16, 18, 22, 28. Row lists (jobs, docs, sessions, previous topics) use 10px vertical padding with a `--rule` divider and no side padding; hovered rows tint `--paper-2`. Modals are a `min(720px, 100%)` slip with `28px 32px 24px` padding over a 55% black backdrop.
 
@@ -340,7 +342,7 @@ Off-sheet controls (who, day/night, log out) in `--on-desk`, 11px 700 caps 0.1em
 Header field on the scorecard: 10px caps label in `--ink-2`, 3px gap, 14.5px 500 value with a 1px ink underline, single line with ellipsis (`.wrap` clamps to 3 lines). Empty value is `--ink-3` at 400. The active-job field is this shape as a button; its menu is a slip with `--paper-2` hover rows and a highlighter-filled current row.
 
 ### Boxed Field
-1px ink box, `22px 20px 16px` padding, with an inverted label (`--ink` fill, `--paper` text, 10px 700 caps 0.14em, `3px 8px`) overlapping the top-left corner at -1px. Variants: `.q` (question, 21px 500, max 56ch), `.r` (a filed response, typed text on `--rule` 26px rulings, filling the box ruling for ruling exactly as the reply box did), `.reply` (padding 0, the textarea inside grows with its content via `field-sizing: content` up to 44vh; `focus-within` draws the 2px highlighter ring). The round-type fieldset on the start screen is the same box with a `<legend>` as label.
+1px ink box, `22px 20px 16px` padding, with an inverted label (`--ink` fill, `--paper` text, 10px 700 caps 0.14em, `3px 8px`) overlapping the top-left corner at -1px. Whatever is in a box fills it: no measure caps on the question, a response, the assessment or the model answer. Variants: `.q` (question, 21px 500), `.r` (a filed response, typed text on `--rule` 26px rulings, filling the box ruling for ruling exactly as the reply box did), `.reply` (padding 0, the textarea inside grows with its content via `field-sizing: content` up to 44vh; `focus-within` draws the 2px highlighter ring), `.assessment` (pen-labelled; rating row, feedback, model answer). The round-type fieldset on the start screen is the same box with a `<legend>` as label.
 
 ### Inputs / Fields
 - **Text input:** bare 1px ink underline, transparent, `7px 0`, 15px; focus adds a 2px highlighter underline. Placeholder `--ink-3`.
@@ -353,11 +355,11 @@ Header field on the scorecard: 10px caps label in `--ink-2`, 3px gap, 14.5px 500
 - **Caret:** `--pen` in every field.
 
 ### Rating Cells
-Ten 30px squares (mini: 22px; 26px under 720px) with 1px ink borders, 4px apart, 12px 600 tabular numerals in `--ink-2`. The scored cell fills `--hl` with `--hl-ink` and lands with the stamp animation (260ms, `cubic-bezier(.16,1,.3,1)`, from `scale(1.35) rotate(-6deg)` at 40% opacity). Exposed as one `role="img"` with an aria-label.
+Ten 30px squares (mini: 22px; 26px under 720px) with 1px ink borders, 4px apart, 12px 600 tabular numerals in `--ink-2`. The row appears only where there is a score or one being decided: in the interviewer's assessment (arriving with it), on the completed round, on previous-topic rows and History records - never as an empty placeholder under the reply box. While the score is being decided (`.cells.scoring`) the pen runs along the row: each cell tints highlighter for a beat, staggered 110ms per cell (`--i`), on a 1.6s loop. The scored cell then fills `--hl` with `--hl-ink` and lands with the stamp animation (260ms, `cubic-bezier(.16,1,.3,1)`, from `scale(1.35) rotate(-6deg)` at 40% opacity). Exposed as one `role="img"` with an aria-label ("Scoring" while the sweep runs).
 
 ### Red-Pen Note and Remark
 - **Margin note** (`.note`): `--pen`, rotated -1.2deg from its top-left (upright under 980px and for `.static` notes), 11px caps key with a 34x18 hand-drawn arrow SVG, then pen text at 16px. Agenda is a `.checklist.pen`: 12px hollow squares in currentColor, filled with an inset paper ring when done.
-- **Inline remark** (`.remark`): an earlier interviewer move written on the form between responses; `82px minmax(0,1fr)` grid, 10px caps key, 15.5px pen text max 64ch, indented 20px.
+- **Inline remark** (`.remark`): an earlier interviewer move written on the form between responses; `82px minmax(0,1fr)` grid, 10px caps key, 15.5px pen text across the column, indented 20px.
 - Both stream in with a 220ms 4px rise (`.stream-in`) and end with a 2px blinking caret while text is arriving; while the note streams, the arrow draws itself (`pathLength` 1, dash offset 1 to 0 over 420ms).
 
 ### Marks and Banners
@@ -373,7 +375,7 @@ Ten 30px squares (mini: 22px; 26px under 720px) with 1px ink borders, 4px apart,
 1px `--rule-2` outline, `1px 6px`, 11px 600 0.04em in `--ink-2`, square. Used for repo languages and wizard tags; no selected state.
 
 ### Lists and Rows
-Job, document, session, previous-topic and manage rows: 10px vertical padding, `--rule` bottom divider, no side padding, `--paper-2` on hover. Selected rows (current job, chosen round type) fill highlighter and gain 10px side padding. Previous topics are `<details>` rows with a `82px 1fr auto` summary carrying the caps key, the truncated focus, and mini rating cells.
+Job, document, session, previous-topic and manage rows: 10px vertical padding, `--rule` bottom divider, no side padding, `--paper-2` on hover. Selected rows (current job, chosen round type) fill highlighter and gain 10px side padding. Previous topics are `<details>` rows with a `82px 1fr auto` summary carrying the caps key, the truncated focus, and mini rating cells. A filed turn anywhere (previous topics, History records) is an `.exchange`: a `120px minmax(0,1fr)` grid, caps key (`--pen` for the interviewer's moves), then the words in the speaker's face. The live round's foot holds only the End session control (ghost, `--ink-2`); its consequence ("files what you have so far to History") is written only once the control is armed.
 
 ### Modal (slip)
 `min(720px, 100%)` paper slip with grain and `--slip-shadow`, `28px 32px 24px`, title under a 2px ink rule, 30px square ink-outlined close button (hover inverts), footer over a 1px ink rule. Backdrop `rgba(0,0,0,.55)`. The count/context line sits under the title as meta, never above it.
@@ -392,6 +394,7 @@ The stream-in, stamp, caret and pen dot are the hand at work; the paper itself m
 - **Turning the page:** the streamed next question (`next-question`) moves up into the question box, which takes that name for the one transition that opens a new topic (`pageTurn`); a closed topic's assessment box and its previous-topics row share `topic-<index>`, so the assessment folds into the index. The composer returns only after the turn has settled, rising in with `.stream-in`.
 - **Pulling the next sheet:** a plain click on an index tab runs the navigation inside a transition tagged `<html data-vt="route">`: the old sheet (`sheet`) fades out in 120ms, the new one rises 10px in 280ms, and the ink fill slides from tab to tab (`active-tab`).
 - **The highlighter swipe:** the "Your turn" mark is painted left-to-right over 380ms (`background-size` 0 to 100%) as the reply box opens.
+- **The pen along the row:** while a topic is being scored, the assessment's rating cells arrive with the box and tint highlighter one after another (110ms stagger, 1.6s loop) until the score stamps its cell.
 - Names are unique per snapshot by construction; a duplicate would abort the transition (Chrome logs it), so treat a console warning as a defect.
 
 ### Colophon
