@@ -126,7 +126,7 @@ export function ActiveJobChip() {
             className="active-job-menu-item add"
             onClick={() => {
               setOpen(false);
-              navigate("/setup?new_job=1");
+              navigate("/setup?step=jd");
             }}
           >
             <span className="active-job-menu-item-label">

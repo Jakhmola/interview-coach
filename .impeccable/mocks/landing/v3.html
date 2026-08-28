@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V3 · Bare cover</title>
+<script>if (location.hash === "#night") document.documentElement.dataset.theme = "dark";</script>
+<link rel="stylesheet" href="landing.css">
+<style>
+
+.box.next { display: flex; align-items: center; justify-content: space-between; gap: 28px; padding: 26px 20px 20px; }
+.box.next p { margin: 0; font-size: 21px; font-weight: 500; line-height: 1.35; text-wrap: pretty; }
+.box.next .btn-primary { flex: none; }
+@media (max-width: 720px) { .box.next { flex-direction: column; align-items: flex-start; } .box.next p { font-size: 17px; } }
+
+.ready-actions { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 2px 0 0 20px; }
+.ready-onfile { display: inline-flex; align-items: center; gap: 12px; font-size: 13.5px; color: var(--ink-2); }
+.ready-onfile .btn-quiet { height: 24px; padding: 0; }
+
+</style>
+</head>
+<body>
+<div class="desk">
+  <div class="desk-bar">
+    <nav class="tabs"><a class="tab active" href="#">Setup</a><a class="tab" href="#">Practice</a><a class="tab" href="#">History</a></nav>
+    <div class="desk-tools"><span class="who">packet-review@gmail.com</span><button class="desk-btn"><span>Night</span></button><button class="desk-btn"><span>Log out</span></button></div>
+  </div>
+  <main class="sheet">
+    <i class="staple a"></i><i class="staple b"></i>
+    <div class="wizard">
+      <header class="sheet-head"><h1>The packet</h1><span class="page">Prepped 28 Aug</span></header>
+      <div class="fields">
+        <div class="f"><span class="cap">Candidate</span><span class="v">packet-review@gmail.com</span></div>
+        <div class="f wide"><span class="cap">Role / company</span><button class="active-job-pill"><span class="active-job-value"><span class="active-job-role">GenAI Engineer</span><span class="active-job-company">Northwind Labs</span></span><svg class="active-job-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></div>
+      </div>
+
+
+<div class="box next"><span class="lbl">Next</span>
+  <p>One topic at a time: the interviewer asks, follows up, then scores it and shows a model answer.</p>
+  <button class="btn-primary" type="button">Start a round <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+</div>
+
+<div class="ready-actions"><span class="ready-onfile"><span>Grounded in cv-synthetic.docx, project-doc-synthetic.docx and the Northwind Labs JD · no repos yet</span><a class="btn-quiet" href="#">Manage</a></span></div>
+
+    </div>
+    <footer class="sheet-foot">Interview Coach · runs on your machine</footer>
+  </main>
+</div>
+</body>
+</html>

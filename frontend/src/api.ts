@@ -431,8 +431,13 @@ export const api = {
   patchJob: (token: string, id: string, body: { text?: string; url?: string }) =>
     apiFetch<JobDetail>(`/jobs/${id}`, { method: "PATCH", token, body: JSON.stringify(body) }),
   deleteJob: (token: string, id: string) => apiFetch<void>(`/jobs/${id}`, { method: "DELETE", token }),
-  prepStatus: (token: string, jobId: string) =>
-    apiFetch<PrepStatus>(`/sessions/prepare/status?job_id=${encodeURIComponent(jobId)}`, { token }),
+  /** `detail` adds the profile, JD analysis and company snapshot payloads;
+   * the readiness poll in AppShell leaves it off. */
+  prepStatus: (token: string, jobId: string, detail = false) =>
+    apiFetch<PrepStatus>(
+      `/sessions/prepare/status?job_id=${encodeURIComponent(jobId)}${detail ? "&detail=true" : ""}`,
+      { token },
+    ),
   createSession: (token: string, job_id: string, round_type: RoundType, n_questions: number) =>
     apiFetch<Session>("/sessions", {
       method: "POST",

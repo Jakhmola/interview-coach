@@ -55,6 +55,7 @@ graphify-out/
 
 # Impeccable (design workflow) - keep config, briefs, HTML mocks + approval sidecars; drop rasters and transient state
 .impeccable/mocks/**/*.png
+.impeccable/mocks/landing/landing.css
 .impeccable/review/
 .impeccable/questions/
 .impeccable/live/

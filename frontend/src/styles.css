@@ -1562,83 +1562,97 @@ mark.warn,
   color: var(--ink-3);
 }
 
-/* ready landing: the packet's contents, one full-width row per item - a
-   square filled when it is on file, the key, what it is (name, a short
-   meta, its first line), and the way to add or change it - then the one
-   action. The role is named once, in the header's ROLE / COMPANY field. */
-.packet-check {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  border-top: 1px solid var(--ink);
-}
-.packet-check li {
-  display: grid;
-  grid-template-columns: 12px 150px minmax(0, 1fr) auto;
-  gap: 10px 18px;
-  align-items: start;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--rule);
-  font-size: 14.5px;
-  line-height: 1.45;
-}
-.packet-check li i {
-  width: 12px;
-  height: 12px;
-  margin-top: 4px;
-  border: 1.5px solid var(--ink);
-  display: inline-block;
-}
-.packet-check li.done i {
-  background: var(--ink);
-  box-shadow: inset 0 0 0 2px var(--paper);
-}
-.packet-check .k {
-  padding-top: 4px;
-  font-weight: 700;
-  font-size: 10.5px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--ink-2);
-}
-.packet-check .v {
-  min-width: 0;
-  display: grid;
-  gap: 10px;
-}
-.packet-check .item {
-  display: grid;
-  gap: 1px;
-}
-.packet-check .t {
-  font-weight: 500;
-  overflow-wrap: anywhere;
-}
-.packet-check .t em {
-  font-style: normal;
-  font-weight: 400;
-  font-size: 13px;
-  color: var(--ink-2);
-}
-.packet-check .x {
-  font-size: 13px;
-  color: var(--ink-2);
-  overflow-wrap: anywhere;
-}
-.packet-check li:not(.done) .t {
-  font-weight: 400;
-  color: var(--ink-3);
-}
-.packet-check .btn-quiet {
-  height: 21px;
-  padding: 0;
-}
+/* ready landing: the packet's cover - the one action with what is on file
+   in a line beside it (Manage owns the inventory), then the brief the
+   interviewer works from in three columns (the role as analysed, the
+   company notes, the candidate as extracted) and the rounds filed for this
+   role. The role itself is named once, in the header's ROLE / COMPANY field. */
 .ready-actions {
   display: flex;
   align-items: center;
   gap: 18px;
+  flex-wrap: wrap;
   padding-top: 2px;
+}
+.ready-onfile {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.ready-onfile .btn-quiet {
+  height: 24px;
+  padding: 0;
+}
+.brief {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 22px 40px;
+  align-items: start;
+}
+.brief-lede {
+  font-size: 14.5px;
+  line-height: 1.5;
+  --lines: 4;
+}
+.brief-row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: baseline;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.brief-row .k {
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+.brief-row .checklist {
+  gap: 4px;
+}
+.brief-row .checklist li {
+  align-items: baseline;
+  font-size: 13.5px;
+}
+.brief-row .checklist li i {
+  transform: translateY(1px);
+}
+.lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.round-list {
+  display: grid;
+}
+.round-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 14px;
+}
+.round-row strong {
+  font-weight: 500;
+}
+.round-row-meta {
+  color: var(--ink-2);
+  font-size: 12.5px;
+}
+.round-row .status-pill {
+  margin-left: auto;
+}
+.round-row .btn-quiet {
+  height: 24px;
+  padding: 0;
 }
 
 /* ═══════════════ manage: file inventory ═══════════════ */
@@ -1708,6 +1722,14 @@ mark.warn,
 .manage-card strong {
   font-weight: 500;
 }
+/* the file's first line, so a row is known by what it says, not its name */
+.manage-card .excerpt {
+  flex-basis: 100%;
+  --lines: 2;
+  font-size: 13px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
 .manage-card-actions {
   display: flex;
   gap: 4px;
@@ -1730,13 +1752,16 @@ mark.warn,
   color: var(--ink-2);
 }
 .repo-chips,
-.wizard-chip-row {
+.wizard-chip-row,
+.chips {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  align-items: center;
 }
 .repo-chip,
-.wizard-chip {
+.wizard-chip,
+.chip {
   border: 1px solid var(--rule-2);
   padding: 1px 6px;
   font-size: 11px;
@@ -2192,24 +2217,6 @@ mark.warn,
   font-weight: 500;
   font-size: 15.5px;
   line-height: 1.35;
-}
-.page-break {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: var(--ink-2);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  padding-top: 8px;
-}
-.page-break::before,
-.page-break::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--ink);
 }
 .box.r {
   padding-top: 24px;
@@ -2859,28 +2866,14 @@ html[data-vt="route"]::view-transition-new(sheet) {
   .record-head .cells {
     grid-column: 1 / -1;
   }
-  .packet-check li {
-    grid-template-columns: 12px minmax(0, 1fr) auto;
-    grid-template-areas:
-      "i k b"
-      "v v v";
-    gap: 6px 12px;
-  }
-  .packet-check li i {
-    grid-area: i;
-  }
-  .packet-check .k {
-    grid-area: k;
-  }
-  .packet-check .v {
-    grid-area: v;
-  }
-  .packet-check .btn-quiet {
-    grid-area: b;
-  }
   .ready-actions {
-    flex-wrap: wrap;
     gap: 12px;
+  }
+  .ready-onfile {
+    margin-left: 0;
+  }
+  .brief {
+    grid-template-columns: minmax(0, 1fr);
   }
   .manage-card {
     flex-direction: column;

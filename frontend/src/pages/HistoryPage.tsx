@@ -4,22 +4,8 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { JobItem, Session, SessionDetail, SessionStatus, Thread, api } from "../api";
 import { ErrorBanner, RatingCells, SheetHead } from "../components/ui";
 import { codeFrom } from "../errors";
-import { topicLabel } from "../jobLabel";
+import { roundLabels, sessionTone, topicLabel } from "../jobLabel";
 import { useAuth } from "../state/auth";
-
-const roundLabels = {
-  experience_deep_dive: "Experience deep-dive",
-  technical_challenge: "Technical challenge",
-  behavioral_star: "Behavioral / STAR",
-};
-
-// The stamp's colour is the state: complete is ok green, abandoned is the red
-// pen, active is plain ink.
-const statusTone: Record<SessionStatus, string> = {
-  active: "info",
-  complete: "good",
-  abandoned: "bad",
-};
 
 export function HistoryPage() {
   const { token } = useAuth();
@@ -201,7 +187,7 @@ function HistorySession({ session, token }: { session: Session; token: string })
             {average !== null ? <> · {average.toFixed(1)}/10 average</> : null}
           </span>
         </div>
-        <span className={`history-card-status status-${statusTone[session.status]}`}>
+        <span className={`history-card-status status-${sessionTone[session.status]}`}>
           {session.status}
         </span>
         <ChevronDown

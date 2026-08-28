@@ -25,7 +25,7 @@ import { MappingModal, MappingDecision } from "../components/MappingModal";
 import { RepoSelectModal } from "../components/RepoSelectModal";
 import { ErrorBanner, Field, SheetHead, StatusPill, formatDate } from "../components/ui";
 import { codeFrom } from "../errors";
-import { jobLabel, jobSubtitle } from "../jobLabel";
+import { excerptOf, jobLabel, jobSubtitle } from "../jobLabel";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
 
@@ -314,6 +314,7 @@ export function ManagePage() {
                 <strong>{cv.filename}</strong>
                 <span className="muted">{cv.char_count.toLocaleString()} chars</span>
                 {cv.embedding_status ? <EmbedPill status={cv.embedding_status} /> : null}
+                <span className="excerpt clamp">{excerptOf(cv.preview, cv.char_count)}</span>
               </div>
               <div className="manage-card-actions">
                 <input
@@ -373,6 +374,7 @@ export function ManagePage() {
                           .join(" · ")}
                       </span>
                       {j.id === activeJobId ? <StatusPill tone="good">Active</StatusPill> : null}
+                      <span className="excerpt clamp">{excerptOf(j.preview, j.char_count)}</span>
                     </div>
                     <div className="manage-card-actions">
                       {j.id !== activeJobId ? (
@@ -446,6 +448,7 @@ export function ManagePage() {
                         {d.char_count.toLocaleString()} chars
                       </span>
                       {d.embedding_status ? <EmbedPill status={d.embedding_status} /> : null}
+                      <span className="excerpt clamp">{excerptOf(d.preview, d.char_count)}</span>
                     </div>
                     <div className="manage-card-actions">
                       <button

@@ -18,10 +18,37 @@
  * about the shape on the wire; we read role/company defensively.
  */
 
-import { JobItem } from "./api";
+import { JobItem, RoundType, SessionStatus } from "./api";
 
 const URL_LABEL_CHARS = 70;
 const TEXT_LABEL_CHARS = 80;
+
+/** The three round types as the form names them. */
+export const roundLabels: Record<RoundType, string> = {
+  experience_deep_dive: "Experience deep-dive",
+  technical_challenge: "Technical challenge",
+  behavioral_star: "Behavioral / STAR",
+};
+
+/** A session's fate as a stamp colour: complete is ok green, abandoned is the
+ * red pen, active is plain ink. */
+export const sessionTone: Record<SessionStatus, "info" | "good" | "bad"> = {
+  active: "info",
+  complete: "good",
+  abandoned: "bad",
+};
+
+/** The head of a document's text as one quoted line - its line breaks quoted
+ * as " / " so a name, a headline and a heading stay apart - and an ellipsis
+ * when the text goes on. */
+export function excerptOf(preview: string, total: number): string {
+  const head = preview
+    .trim()
+    .replace(/\s*\n+\s*/g, " / ")
+    .replace(/\s+/g, " ");
+  if (!head) return "";
+  return `“${head}${total > preview.length ? "…" : ""}”`;
+}
 
 type Parsed = { title?: string | null; company_name?: string | null };
 

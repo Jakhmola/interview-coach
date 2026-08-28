@@ -1,6 +1,6 @@
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, ChevronRight, Play, RotateCcw } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import Confetti from "react-confetti";
 
 import {
@@ -19,17 +19,11 @@ import { ArmedDeleteButton } from "../components/ArmedDeleteButton";
 import { LoadingStatus } from "../components/LoadingStatus";
 import { ErrorBanner, Field, JobField, RatingCells, SheetHead } from "../components/ui";
 import { codeFrom } from "../errors";
-import { topicLabel, topicTitle } from "../jobLabel";
+import { roundLabels, topicLabel, topicTitle } from "../jobLabel";
 import { useStreamAbort } from "../hooks/useStreamAbort";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
 import { viewTransition } from "../viewTransition";
-
-const roundLabels: Record<RoundType, string> = {
-  experience_deep_dive: "Experience deep-dive",
-  technical_challenge: "Technical challenge",
-  behavioral_star: "Behavioral / STAR",
-};
 
 const roundDescriptions: Record<RoundType, string> = {
   experience_deep_dive:
@@ -97,10 +91,14 @@ export function InterviewPage() {
   const { activeJobId, activeJob } = useActiveJob();
   const messageAbort = useStreamAbort();
   const windowSize = useWindowSize();
+  const navigate = useNavigate();
+  // The open round is the URL (`/interview/:sessionId`): starting or resuming
+  // one pushes it, so Back is the start screen, where the round stays listed.
+  const { sessionId } = useParams();
+  const activeId = sessionId ?? null;
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [docs, setDocs] = useState<DocumentItem[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [roundType, setRoundType] = useState<RoundType>("experience_deep_dive");
   const [nQuestions, setNQuestions] = useState(5);
@@ -110,9 +108,9 @@ export function InterviewPage() {
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [celebrationPieces, setCelebrationPieces] = useState<number | null>(null);
-  // True only for the view transition that opens a new topic, so the
-  // streamed next question can travel up into the question box.
-  const [pageTurn, setPageTurn] = useState(false);
+  // The thread the current round-trip was sent for; a streamed move for any
+  // other thread is the next topic opening, which turns the page.
+  const openIndexRef = useRef(-1);
   const bottomRef = useRef<HTMLDivElement>(null);
   const celebratedSessionsRef = useRef<Set<string>>(new Set());
 
@@ -142,11 +140,22 @@ export function InterviewPage() {
   };
 
   useEffect(() => {
+    // A different (or no) round in the URL: drop the last one's sheet and
+    // its overlay before the new one loads, so nothing stale shows.
+    messageAbort.abort();
+    setDetail(null);
+    setLiveItems([]);
+    setPendingAnswer(null);
+    setIsBusy(false);
     refresh().catch((err: unknown) => setError(codeFrom(err)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeId]);
 
   useEffect(() => {
+    // Follow the conversation down the sheet - except when the page has just
+    // turned to a new topic, which reads from the top.
+    const turned = liveItems.some((i) => i.type === "move" && i.threadIndex !== openIndexRef.current);
+    if (turned) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [detail?.threads, liveItems, pendingAnswer]);
 
@@ -165,12 +174,13 @@ export function InterviewPage() {
   //
   // Both ends of the round-trip are view transitions: `prepare` files the
   // typed answer as a response (the reply box morphs into it), and the
-  // refetch turns the page (a closed topic folds into the index, the next
-  // question moves up). The composer comes back only once the turn has
-  // settled, so it never gets morphed into.
+  // refetch settles the sheet on the persisted threads. A page turn - the
+  // next topic opening - happens mid-stream, the moment its first frame
+  // arrives (see handleFrame). The composer comes back only once the
+  // refetch has settled, so it never gets morphed into.
   const sendMessage = async (sessionId: string, message: string | null, prepare?: () => void) => {
     if (!token) return;
-    const openIndex = detail?.threads.find((t) => t.status === "open")?.thread_index ?? -1;
+    openIndexRef.current = detail?.threads.find((t) => t.status === "open")?.thread_index ?? -1;
     setError(null);
     const signal = messageAbort.fresh();
     await viewTransition(() => {
@@ -181,14 +191,11 @@ export function InterviewPage() {
     try {
       await messageStream(token, sessionId, message, handleFrame, signal);
       const next = await api.getSession(token, sessionId);
-      const nextOpen = next.threads.find((t) => t.status === "open")?.thread_index ?? -1;
       await viewTransition(() => {
-        setPageTurn(nextOpen !== openIndex);
         setDetail(next);
         setLiveItems([]);
         setPendingAnswer(null);
       }).finished;
-      setPageTurn(false);
     } catch (err) {
       setError(codeFrom(err));
       setLiveItems([]);
@@ -202,10 +209,21 @@ export function InterviewPage() {
     switch (frame.event) {
       case "move": {
         const d = frame.data as { kind: MoveKind; thread_index: number };
-        setLiveItems((items) => [
-          ...items,
-          { type: "move", key: `m${items.length}`, kind: d.kind, threadIndex: d.thread_index, text: "" },
-        ]);
+        const apply = () =>
+          setLiveItems((items) => [
+            ...items,
+            { type: "move", key: `m${items.length}`, kind: d.kind, threadIndex: d.thread_index, text: "" },
+          ]);
+        if (d.thread_index !== openIndexRef.current) {
+          // The next topic is opening: turn the page now - the scored topic
+          // folds into the index, the question box clears for the new
+          // question to stream into - and read from the top of the sheet.
+          void viewTransition(apply).updateCallbackDone.then(() =>
+            window.scrollTo({ top: 0, behavior: "smooth" }),
+          );
+        } else {
+          apply();
+        }
         break;
       }
       case "token": {
@@ -290,9 +308,8 @@ export function InterviewPage() {
     setError(null);
     try {
       const session = await api.createSession(token, activeJobId, roundType, nQuestions);
-      setActiveId(session.id);
+      navigate(`/interview/${session.id}`);
       setDetail(await api.getSession(token, session.id));
-      await refresh();
       // Empty body opens the first thread + streams the opening question.
       await sendMessage(session.id, null);
     } catch (err) {
@@ -307,9 +324,7 @@ export function InterviewPage() {
     } catch (err) {
       setError(codeFrom(err));
     }
-    setActiveId(null);
-    setDetail(null);
-    await refresh();
+    navigate("/interview");
   };
 
   const openThread = useMemo(
@@ -448,7 +463,7 @@ export function InterviewPage() {
                   type="button"
                   key={s.id}
                   className="practice-resume-item"
-                  onClick={() => setActiveId(s.id)}
+                  onClick={() => navigate(`/interview/${s.id}`)}
                 >
                   <span>Resume {roundLabels[s.round_type]}</span>
                   <span className="practice-resume-meta">
@@ -523,14 +538,7 @@ export function InterviewPage() {
             Filed to <Link to="/history">History</Link>. Start another round whenever you're ready.
           </p>
           <div>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => {
-                setActiveId(null);
-                setDetail(null);
-              }}
-            >
+            <button type="button" className="btn-primary" onClick={() => navigate("/interview")}>
               <RotateCcw /> Start another round
             </button>
           </div>
@@ -549,26 +557,32 @@ export function InterviewPage() {
 
   // ───── Live round: the scorecard ─────
 
-  const closedThreads = detail.threads.filter((t) => t.status === "closed");
-  const topicNum = Math.min(Math.max(detail.threads.length, 1), detail.n_questions);
   const showThinking = isBusy && liveItems.length === 0;
   const lastIsFollowUp = lastMessage?.role === "interviewer" && lastMessage.kind !== "question";
 
-  const { question, main, margin } = buildScorecard({
+  const { question, main, margin, closing, topicIndex } = buildScorecard({
     openThread,
     pendingAnswer,
     liveItems,
     docs,
     showThinking,
-    pageTurn,
   });
+  // A topic scored mid-stream is already filed under Previous topics while
+  // the next question streams; the refetch replaces it with the real row.
+  const prevThreads = [...detail.threads.filter((t) => t.status === "closed"), ...(closing ? [closing] : [])];
+  const topicNum = Math.min(topicIndex + 1, detail.n_questions);
 
   return (
     <div className="practice-live">
       <SheetHead title="Interview scorecard" page={roundLabels[detail.round_type]}>
         <Field label="Candidate" value={candidate} />
         <JobField />
-        <Field label="Topic" value={topicTitle(openThread?.focus_label)} empty="(opening the topic)" wrap />
+        <Field
+          label="Topic"
+          value={closing ? undefined : topicTitle(openThread?.focus_label)}
+          empty="(opening the topic)"
+          wrap
+        />
         <Field label="No." value={`${topicNum} of ${detail.n_questions}`} />
       </SheetHead>
 
@@ -628,10 +642,10 @@ export function InterviewPage() {
 
       <div ref={bottomRef} />
 
-      {closedThreads.length > 0 ? (
+      {prevThreads.length > 0 ? (
         <section className="prev" aria-label="Previous topics">
           <span className="cap">Previous topics</span>
-          {closedThreads.map((t) => (
+          {prevThreads.map((t) => (
             <PrevTopic key={t.id} thread={t} docs={docs} />
           ))}
         </section>
@@ -663,11 +677,15 @@ type Utterance = {
 /**
  * Lays the open topic out as the scorecard: the question box, then the main
  * column (each typed response, the interviewer's earlier remarks written
- * inline between them, the live evaluation, a streaming next question), and
- * the margin (the interviewer's latest note in red pen, level with the
- * question as on the comp, over the thread's agenda and sources). Live
- * stream items overlay at the end; a move for the *next* topic opens a new
- * page under a page-break rule.
+ * inline between them, the live evaluation), and the margin (the
+ * interviewer's latest note in red pen, level with the question as on the
+ * comp, over the thread's agenda and sources). Live stream items overlay at
+ * the end. A move for a *different* thread is the next topic opening: the
+ * sheet turns - the topic just scored is returned as `closing`, a closed
+ * thread built from the live evaluation so it files under Previous topics
+ * (its assessment box folds into that row), and the new question streams
+ * in the question box of an otherwise clean sheet. Its agenda and sources
+ * arrive with the refetch.
  */
 function buildScorecard({
   openThread,
@@ -675,15 +693,19 @@ function buildScorecard({
   liveItems,
   docs,
   showThinking,
-  pageTurn,
 }: {
   openThread: Thread | null;
   pendingAnswer: string | null;
   liveItems: LiveItem[];
   docs: DocumentItem[];
   showThinking: boolean;
-  pageTurn: boolean;
-}): { question: ReactNode; main: ReactNode[]; margin: ReactNode[] } {
+}): {
+  question: ReactNode;
+  main: ReactNode[];
+  margin: ReactNode[];
+  closing: Thread | null;
+  topicIndex: number;
+} {
   const main: ReactNode[] = [];
   const margin: ReactNode[] = [];
 
@@ -711,15 +733,49 @@ function buildScorecard({
     }
   }
 
+  if (nextQuestion) {
+    const closing: Thread | null = openThread
+      ? {
+          ...openThread,
+          status: "closed",
+          score: evalItem?.score ?? openThread.score ?? null,
+          feedback: evalItem?.feedback || openThread.feedback || null,
+          model_answer: evalItem?.modelAnswer || openThread.model_answer || null,
+          messages: [
+            ...openThread.messages,
+            // What this round-trip added to the topic and the refetch has not
+            // persisted yet: the answer just filed and any move streamed for it.
+            ...utterances
+              .filter((u) => u.key === "pending" || u.typing)
+              .map((u, i) => ({
+                id: u.key,
+                thread_id: openThread.id,
+                seq: openThread.messages.length + i,
+                role: u.role,
+                kind: u.role === "candidate" ? null : u.kind,
+                text: u.text,
+                created_at: openThread.created_at,
+              })),
+          ],
+        }
+      : null;
+    const question = (
+      <div className="box q sc-question" key={nextQuestion.key} style={{ viewTransitionName: "question" }}>
+        <span className="lbl">{nextQuestion.threadIndex + 1}. Question</span>
+        <p>
+          {nextQuestion.text}
+          <span className="cursor-blink" />
+        </p>
+      </div>
+    );
+    return { question, main, margin, closing, topicIndex: nextQuestion.threadIndex };
+  }
+
   // The question box + the margin's agenda and sources.
   const q = utterances.find((u) => u.role === "interviewer" && u.kind === "question");
   const question =
     q && openThread ? (
-      <div
-        className="box q sc-question"
-        key={q.key}
-        style={{ viewTransitionName: pageTurn ? "next-question" : "question" }}
-      >
+      <div className="box q sc-question" key={q.key} style={{ viewTransitionName: "question" }}>
         <span className="lbl">{openThread.thread_index + 1}. Question</span>
         <p>
           {q.text}
@@ -771,31 +827,6 @@ function buildScorecard({
     );
   }
 
-  if (nextQuestion) {
-    // The round's very first question opens on a fresh page; only a topic
-    // that follows a closed one gets the page-break rule.
-    if (currentIndex >= 0) {
-      main.push(
-        <div key="break" className="page-break">
-          Next topic
-        </div>,
-      );
-    }
-    main.push(
-      <div
-        key={nextQuestion.key}
-        className="box q stream-in"
-        style={{ viewTransitionName: "next-question" }}
-      >
-        <span className="lbl">{nextQuestion.threadIndex + 1}. Question</span>
-        <p>
-          {nextQuestion.text}
-          <span className="cursor-blink" />
-        </p>
-      </div>,
-    );
-  }
-
   if (latestNote) {
     margin.push(
       <PenNote key={latestNote.key} kind={latestNote.kind} text={latestNote.text} typing={latestNote.typing} />,
@@ -805,7 +836,7 @@ function buildScorecard({
     margin.push(<TopicMargin key="agenda" thread={openThread} docs={docs} />);
   }
 
-  return { question, main, margin };
+  return { question, main, margin, closing: null, topicIndex: Math.max(currentIndex, 0) };
 }
 
 /** An earlier interviewer move, written on the form between two responses. */

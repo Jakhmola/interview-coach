@@ -57,7 +57,9 @@ export function App() {
             <Route index element={<Navigate to="/setup" replace />} />
             <Route path="setup" element={<SetupPage />} />
             <Route path="setup/manage" element={<ManagePage />} />
-            <Route path="interview" element={<InterviewPage />} />
+            {/* A live round has its own URL, so Back from a round is the
+                start screen (where it stays resumable), not the last page. */}
+            <Route path="interview/:sessionId?" element={<InterviewPage />} />
             <Route path="history" element={<HistoryPage />} />
           </Route>
           <Route path="*" element={<Navigate to="/setup" replace />} />

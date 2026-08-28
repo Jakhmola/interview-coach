@@ -1,13 +1,4 @@
-import {
-  ChangeEvent,
-  FormEvent,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, CheckCircle2, FileUp, GitBranch, LinkIcon } from "lucide-react";
 import { Link, useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 
@@ -38,6 +29,7 @@ import { useStreamAbort } from "../hooks/useStreamAbort";
 import { jobLabel } from "../jobLabel";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
+import { ReadyLanding } from "./ReadyLanding";
 
 const nodeLabels: Record<string, string> = {
   profile_builder: "Reading your CV",
@@ -176,18 +168,6 @@ export function SetupPage() {
   // Non-null → render <RepoSelectModal />; on submit we POST
   // /sessions/prepare/resume_repos which re-opens the SSE stream.
   const [pendingRepos, setPendingRepos] = useState<RepoListing[] | null>(null);
-  const [step, setStep] = useState<Step>("cv");
-  const [didInitStep, setDidInitStep] = useState(false);
-  // Phase 22: when the user explicitly enters the wizard from
-  // ReadyLanding (?new_job=1 / ?add_doc=1) or by uploading a new
-  // supporting doc, we suppress the landing short-circuit so they
-  // can actually see the step they navigated to. Auto-cleared once
-  // prep completes and there's no outstanding work (the natural
-  // recompute then shows the landing). This is the targeted
-  // replacement for the deleted ``overrideReady`` flag - same intent
-  // (keep the wizard visible while there's pending wizard work),
-  // narrower scope (auto-clears, not sticky).
-  const [bypassLanding, setBypassLanding] = useState(false);
   const [jdMode, setJdMode] = useState<"paste" | "url">("paste");
   const messageTimerRef = useRef<number | null>(null);
   // Phase 22: auto-prep is work-driven, not fire-once. The ref stores a
@@ -209,12 +189,32 @@ export function SetupPage() {
   const cv = docs.find((doc) => doc.kind === "cv");
   const technicalDocs = docs.filter((doc) => doc.kind === "project_doc");
   const selectedJob = jobs.find((j) => j.id === activeJobId) ?? null;
-  const stepIndex = STEPS.indexOf(step);
 
   const setupReady = useMemo(
     () => Boolean(hasCv && selectedJob && status?.can_start),
     [hasCv, selectedJob, status?.can_start],
   );
+
+  // The wizard step lives in the URL (`?step=jd`), so the browser's Back
+  // walks the steps and returns to the landing, and "New job description"
+  // from any page is a plain link. No step in the URL means the next thing
+  // to do; an explicit step keeps the wizard visible even when the packet
+  // is complete (adding a job or a doc), until prep finishes and clears it.
+  const stepParam = searchParams.get("step");
+  const forcedStep = STEPS.includes(stepParam as Step) ? (stepParam as Step) : null;
+  const step: Step = forcedStep ?? (!hasCv ? "cv" : !selectedJob ? "github" : "prep");
+  const stepIndex = STEPS.indexOf(step);
+  const setStep = (next: Step, opts?: { replace?: boolean }) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("step", next);
+    setSearchParams(params, { replace: opts?.replace });
+  };
+  const clearStep = () => {
+    if (!forcedStep) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("step");
+    setSearchParams(params, { replace: true });
+  };
 
   const load = async () => {
     if (!token) return;
@@ -258,7 +258,7 @@ export function SetupPage() {
       setPendingRepos(null);
     }
     api
-      .prepStatus(token, activeJobId)
+      .prepStatus(token, activeJobId, true)
       .then((s) => {
         setStatus(s);
         setStatusJobId(activeJobId);
@@ -269,39 +269,6 @@ export function SetupPage() {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeJobId]);
-
-  // Phase 22: query-param navigation from ReadyLanding. Consume the
-  // params each time they change so re-entering /setup with a different
-  // param (`?new_job=1` then `?add_doc=1`) lands the user correctly.
-  // We strip the params after handling so the effect doesn't loop.
-  useEffect(() => {
-    if (isLoading) return;
-    const newJob = searchParams.get("new_job");
-    const addDoc = searchParams.get("add_doc");
-    if (!newJob && !addDoc) return;
-    if (newJob) {
-      setStep("jd");
-      setActiveJobId(null);
-    } else if (addDoc) {
-      setStep("docs");
-    }
-    setBypassLanding(true);
-    setDidInitStep(true);
-    const next = new URLSearchParams(searchParams);
-    next.delete("new_job");
-    next.delete("add_doc");
-    setSearchParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, searchParams]);
-
-  // One-shot initial step picker - runs once after the first load.
-  useEffect(() => {
-    if (isLoading || didInitStep) return;
-    if (!hasCv) setStep("cv");
-    else if (!selectedJob) setStep("github"); // resume at the cv → github → jd sequence
-    else if (!status?.can_start) setStep("prep");
-    setDidInitStep(true);
-  }, [isLoading, didInitStep, hasCv, selectedJob, status?.can_start]);
 
   useEffect(() => {
     if (!message) return;
@@ -466,13 +433,13 @@ export function SetupPage() {
     try {
       await prepareSessionStream(token, runJobId, frameHandler, signal);
       await load();
-      const nextStatus = await api.prepStatus(token, runJobId);
+      const nextStatus = await api.prepStatus(token, runJobId, true);
       setStatus(nextStatus);
       setStatusJobId(runJobId);
       await refreshReadiness();
       await refreshActiveJob();
       if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
-        setBypassLanding(false);
+        clearStep();
         failedAutoPrepJobsRef.current.delete(runJobId);
       }
     } catch (err) {
@@ -502,12 +469,12 @@ export function SetupPage() {
         signal,
       );
       await load();
-      const nextStatus = await api.prepStatus(token, runJobId);
+      const nextStatus = await api.prepStatus(token, runJobId, true);
       setStatus(nextStatus);
       setStatusJobId(runJobId);
       await refreshReadiness();
       if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
-        setBypassLanding(false);
+        clearStep();
       }
     } catch (err) {
       setError(codeFrom(err));
@@ -539,12 +506,12 @@ export function SetupPage() {
         signal,
       );
       await load();
-      const nextStatus = await api.prepStatus(token, runJobId);
+      const nextStatus = await api.prepStatus(token, runJobId, true);
       setStatus(nextStatus);
       setStatusJobId(runJobId);
       await refreshReadiness();
       if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
-        setBypassLanding(false);
+        clearStep();
       }
     } catch (err) {
       setError(codeFrom(err));
@@ -639,7 +606,7 @@ export function SetupPage() {
       // button is the explicit advance to prep. (Pre-Phase-25 this
       // routed straight to prep, blocking multi-doc uploads.)
       if (activeJobId) {
-        const nextStatus = await api.prepStatus(token, activeJobId);
+        const nextStatus = await api.prepStatus(token, activeJobId, true);
         setStatus(nextStatus);
         setStatusJobId(activeJobId);
       }
@@ -705,7 +672,7 @@ export function SetupPage() {
   };
   const goBack = () => {
     const idx = STEPS.indexOf(step);
-    if (idx > 0) setStep(STEPS[idx - 1]);
+    if (idx > 0) setStep(STEPS[idx - 1], { replace: true });
   };
 
   if (isLoading) {
@@ -717,22 +684,19 @@ export function SetupPage() {
     );
   }
 
-  // Phase 22: landing recomputes from real readiness every render, but
-  // ``bypassLanding`` keeps the wizard visible while the user is in
-  // the middle of an explicit wizard task they navigated to (Add
-  // another job, Add supporting doc, mid-stream prep). Cleared when
-  // prep completes and there's no outstanding mapping work.
+  // The landing is the packet's cover: shown when the packet is complete
+  // and nothing is in flight, unless the URL names a wizard step (adding a
+  // job or a doc), which prep clears once it finishes.
   const hasUnmapped = (status?.unmapped_project_doc_count ?? 0) > 0;
-  if (setupReady && !isPreparing && !hasUnmapped && !bypassLanding) {
+  if (setupReady && selectedJob && !isPreparing && !hasUnmapped && !forcedStep) {
     return (
       <ReadyLanding
-        cv={cv}
+        status={status}
         job={selectedJob}
+        cv={cv}
         techDocs={technicalDocs}
         repos={docs.filter((doc) => doc.kind === "github_repo")}
         onStart={() => navigate("/interview")}
-        onAddJob={() => navigate("/setup?new_job=1")}
-        onAddDocs={() => navigate("/setup?add_doc=1")}
         onManage={() => navigate("/setup/manage")}
       />
     );
@@ -1158,193 +1122,7 @@ function StepPrep({
     </div>
   );
 }
-// ─────────────────────────── Ready landing + helpers ─────────────────────
-
-function ReadyLanding({
-  cv,
-  job,
-  techDocs,
-  repos,
-  onStart,
-  onAddJob,
-  onAddDocs,
-  onManage,
-}: {
-  cv: DocumentItem | undefined;
-  job: JobItem | null;
-  techDocs: DocumentItem[];
-  repos: DocumentItem[];
-  onStart: () => void;
-  onAddJob: () => void;
-  onAddDocs: () => void;
-  onManage: () => void;
-}) {
-  const { user } = useAuth();
-  // The role is named once, in the ROLE / COMPANY field (which is also the
-  // switcher); the packet rows below say what each file on record *is*.
-  return (
-    <div className="wizard">
-      <SheetHead title="Candidate intake" page="Complete · ready to practice">
-        <Field label="Candidate" value={user?.email} />
-        <JobField />
-      </SheetHead>
-
-      <ul className="packet-check" aria-label="What's in the packet">
-        <PacketRow k="CV" done={!!cv} action={cv ? "Replace" : "Upload"} onAction={onManage}>
-          {cv ? (
-            <PacketItem
-              title={cv.filename}
-              meta={chars(cv.char_count)}
-              excerpt={excerptOf(cv.preview, cv.char_count)}
-            />
-          ) : null}
-        </PacketRow>
-        <PacketRow
-          k="Job description"
-          done={!!job}
-          action={job ? "Add another" : "Add"}
-          onAction={onAddJob}
-        >
-          {job ? (
-            <PacketItem
-              title={job.source_url ? job.source_url.replace(/^https?:\/\//, "") : "Pasted text"}
-              meta={`${shortDate(job.created_at)} · ${chars(job.char_count)}`}
-              excerpt={excerptOf(job.preview, job.char_count)}
-            />
-          ) : null}
-        </PacketRow>
-        <PacketRow
-          k="Supporting docs"
-          done={techDocs.length > 0}
-          hint="Architecture notes, take-homes, project write-ups."
-          action={techDocs.length > 0 ? "Add more" : "Add"}
-          onAction={onAddDocs}
-        >
-          {techDocs.map((d) => (
-            <PacketItem
-              key={d.id}
-              title={d.filename}
-              meta={
-                d.project_title
-                  ? `filed under "${d.project_title}" · ${chars(d.char_count)}`
-                  : chars(d.char_count)
-              }
-              excerpt={excerptOf(d.preview, d.char_count)}
-            />
-          ))}
-        </PacketRow>
-        <PacketRow
-          k="GitHub repos"
-          done={repos.length > 0}
-          hint="Public repos let the deep-dive ask about your own code."
-          action={repos.length > 0 ? "Manage" : "Add repos"}
-          onAction={onManage}
-        >
-          {repos.map((d) => {
-            const pj = (d.parsed_json ?? {}) as { description?: unknown; tech?: unknown };
-            const tech = Array.isArray(pj.tech)
-              ? pj.tech.filter((t): t is string => typeof t === "string").slice(0, 4)
-              : [];
-            return (
-              <PacketItem
-                key={d.id}
-                title={d.project_title ?? d.filename}
-                meta={tech.join(" · ")}
-                excerpt={typeof pj.description === "string" ? pj.description : ""}
-              />
-            );
-          })}
-        </PacketRow>
-      </ul>
-
-      <div className="ready-actions">
-        <button className="btn-primary" type="button" onClick={onStart}>
-          Start a practice round <ArrowRight size={14} />
-        </button>
-        <button className="btn-quiet" type="button" onClick={onManage}>
-          Manage CV, JDs &amp; docs
-        </button>
-      </div>
-    </div>
-  );
-}
-
-/** One line of the packet checklist: a square that is filled when the item is
- * on file, its key, what is on file (or "none yet" and why it would matter),
- * and the way to add or change it. */
-function PacketRow({
-  k,
-  done,
-  hint,
-  action,
-  onAction,
-  children,
-}: {
-  k: string;
-  done: boolean;
-  hint?: string;
-  action: string;
-  onAction: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <li className={done ? "done" : ""}>
-      <i aria-hidden="true" />
-      <span className="k">{k}</span>
-      <div className="v">
-        {done ? (
-          children
-        ) : (
-          <div className="item">
-            <span className="t">none yet</span>
-            {hint ? <span className="x">{hint}</span> : null}
-          </div>
-        )}
-      </div>
-      <button type="button" className="btn-quiet" onClick={onAction}>
-        {action}
-      </button>
-    </li>
-  );
-}
-
-/** A file on record: its name, a short meta, and its first line so the
- * candidate can tell what it is without opening it. */
-function PacketItem({ title, meta, excerpt }: { title: string; meta?: string; excerpt: string }) {
-  return (
-    <div className="item">
-      <span className="t">
-        {title}
-        {meta ? <em> · {meta}</em> : null}
-      </span>
-      {excerpt ? (
-        <span className="x clamp" style={{ "--lines": 2 } as CSSProperties}>
-          {excerpt}
-        </span>
-      ) : null}
-    </div>
-  );
-}
-
-function chars(n: number) {
-  return `${n.toLocaleString()} chars`;
-}
-
-function shortDate(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
-}
-
-/** The head of a document's text as one quoted line - its line breaks quoted
- * as " / " so a name, a headline and a heading stay apart - and an ellipsis
- * when the text goes on. */
-function excerptOf(preview: string, total: number) {
-  const head = preview
-    .trim()
-    .replace(/\s*\n+\s*/g, " / ")
-    .replace(/\s+/g, " ");
-  if (!head) return "";
-  return `“${head}${total > preview.length ? "…" : ""}”`;
-}
+// ─────────────────────────── helpers ─────────────────────────────────────
 
 function Check({ label, ok }: { label: string; ok?: boolean }) {
   return (
