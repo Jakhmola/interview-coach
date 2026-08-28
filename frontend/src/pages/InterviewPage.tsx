@@ -99,8 +99,11 @@ export function InterviewPage() {
   // True while the round's closing marks (stamp, highlighter, verdict) are
   // being made for the first time this visit; a revisit shows them still.
   const [stamped, setStamped] = useState(false);
+  // The scored topic kept on the sheet, assessment and all, until the
+  // candidate turns the page; the next question is written behind it.
+  const [heldIndex, setHeldIndex] = useState<number | null>(null);
   // The thread the current round-trip was sent for; a streamed move for any
-  // other thread is the next topic opening, which turns the page.
+  // other thread is the next topic opening.
   const openIndexRef = useRef(-1);
   const bottomRef = useRef<HTMLDivElement>(null);
   const stampedSessionsRef = useRef<Set<string>>(new Set());
@@ -117,13 +120,33 @@ export function InterviewPage() {
 
   // Settle the sheet on the persisted round. The first time a round arrives
   // closed, its closing marks play - in the same render, so the stamp never
-  // shows still for a frame before it lands.
-  const settle = (next: SessionDetail) => {
+  // shows still for a frame before it lands. A round that closes on this
+  // sheet (`hold`) keeps its last assessment readable instead; the stamp
+  // waits for the candidate to ask for the scorecard (turnPage).
+  const settle = (next: SessionDetail, hold = false) => {
     setDetail(next);
     if (next.status !== "active" && !stampedSessionsRef.current.has(next.id)) {
+      const last = next.threads.filter((t) => t.status === "closed").at(-1);
+      if (hold && last) {
+        setHeldIndex(last.thread_index);
+        return;
+      }
       stampedSessionsRef.current.add(next.id);
       setStamped(true);
     }
+  };
+
+  // The candidate turns the page: the scored topic folds into the index and
+  // the next question - or the closing stamp - reads from the top of the sheet.
+  const turnPage = () => {
+    const closing = detail !== null && detail.status !== "active";
+    void viewTransition(() => {
+      setHeldIndex(null);
+      if (closing && !stampedSessionsRef.current.has(detail.id)) {
+        stampedSessionsRef.current.add(detail.id);
+        setStamped(true);
+      }
+    }).updateCallbackDone.then(() => window.scrollTo({ top: 0, behavior: "smooth" }));
   };
 
   const refresh = async () => {
@@ -147,6 +170,7 @@ export function InterviewPage() {
     messageAbort.abort();
     setDetail(null);
     setStamped(false);
+    setHeldIndex(null);
     setLiveItems([]);
     setPendingAnswer(null);
     setIsBusy(false);
@@ -188,7 +212,7 @@ export function InterviewPage() {
       await messageStream(token, sessionId, message, handleFrame, signal);
       const next = await api.getSession(token, sessionId);
       await viewTransition(() => {
-        settle(next);
+        settle(next, true);
         setLiveItems([]);
         setPendingAnswer(null);
       }).finished;
@@ -210,13 +234,17 @@ export function InterviewPage() {
             ...items,
             { type: "move", key: `m${items.length}`, kind: d.kind, threadIndex: d.thread_index, text: "" },
           ]);
-        if (d.thread_index !== openIndexRef.current) {
-          // The next topic is opening: turn the page now - the scored topic
-          // folds into the index, the question box clears for the new
-          // question to stream into - and read from the top of the sheet.
+        if (d.thread_index !== openIndexRef.current && openIndexRef.current < 0) {
+          // The round's first question: its box comes onto the sheet.
           void viewTransition(apply).updateCallbackDone.then(() =>
             window.scrollTo({ top: 0, behavior: "smooth" }),
           );
+        } else if (d.thread_index !== openIndexRef.current) {
+          // The next topic is opening while the candidate reads the
+          // assessment: keep this page and write the question behind it;
+          // the candidate turns the page (turnPage) when ready.
+          apply();
+          setHeldIndex(openIndexRef.current);
         } else {
           apply();
         }
@@ -332,7 +360,7 @@ export function InterviewPage() {
     detail?.status === "active" && !!openThread && lastMessage?.role === "interviewer";
   const needsBegin = detail?.status === "active" && (detail?.threads.length ?? 0) === 0;
   const composerOpen =
-    awaitingAnswer && !isBusy && liveItems.length === 0 && pendingAnswer === null;
+    awaitingAnswer && !isBusy && liveItems.length === 0 && pendingAnswer === null && heldIndex === null;
 
   const submitAnswer = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -480,7 +508,7 @@ export function InterviewPage() {
 
   // ───── Completed / abandoned ─────
 
-  if (detail.status !== "active") {
+  if (detail.status !== "active" && heldIndex === null) {
     const scored = detail.threads.filter((t) => t.score !== null && t.score !== undefined);
     const complete = detail.status === "complete";
     const roundDate = new Date(detail.created_at).toLocaleDateString(undefined, { dateStyle: "medium" });
@@ -550,16 +578,25 @@ export function InterviewPage() {
   const showThinking = isBusy && liveItems.length === 0;
   const lastIsFollowUp = lastMessage?.role === "interviewer" && lastMessage.kind !== "question";
 
+  // While the candidate reads a scored topic, that topic is the sheet - not
+  // the one the interviewer has already opened behind it.
+  const held = heldIndex === null ? null : (detail.threads.find((t) => t.thread_index === heldIndex) ?? null);
+  const sheetThread = held ?? openThread;
   const { question, main, margin, closing, topicIndex } = buildScorecard({
-    openThread,
+    openThread: sheetThread,
     pendingAnswer,
     liveItems,
     docs,
     showThinking,
+    held: held !== null,
   });
   // A topic scored mid-stream is already filed under Previous topics while
   // the next question streams; the refetch replaces it with the real row.
-  const prevThreads = [...detail.threads.filter((t) => t.status === "closed"), ...(closing ? [closing] : [])];
+  // The held topic stays on the sheet, so it is not in the index yet.
+  const prevThreads = [
+    ...detail.threads.filter((t) => t.status === "closed" && t.thread_index !== heldIndex),
+    ...(closing ? [closing] : []),
+  ];
   const topicNum = Math.min(topicIndex + 1, detail.n_questions);
 
   return (
@@ -569,7 +606,7 @@ export function InterviewPage() {
         <JobField />
         <Field
           label="Topic"
-          value={closing ? undefined : topicTitle(openThread?.focus_label)}
+          value={closing ? undefined : topicTitle(sheetThread?.focus_label)}
           empty="(opening the topic)"
           wrap
         />
@@ -627,6 +664,29 @@ export function InterviewPage() {
               </div>
             </form>
           ) : null}
+
+          {heldIndex !== null ? (
+            <div className="composer stream-in">
+              <p className="turn">
+                <mark>Your turn</mark>{" "}
+                {detail.status === "active"
+                  ? "read the assessment, then turn the page."
+                  : "read the last assessment, then see the scorecard."}
+              </p>
+              <div className="actions">
+                <span className="hint">
+                  {detail.status !== "active"
+                    ? "Every topic is scored"
+                    : isBusy
+                      ? "The interviewer is writing the next question"
+                      : "The next question is ready"}
+                </span>
+                <button className="btn-primary" type="button" onClick={turnPage}>
+                  {detail.status === "active" ? "Next topic" : "See the scorecard"} <ArrowRight />
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -683,12 +743,16 @@ function buildScorecard({
   liveItems,
   docs,
   showThinking,
+  held,
 }: {
   openThread: Thread | null;
   pendingAnswer: string | null;
   liveItems: LiveItem[];
   docs: DocumentItem[];
   showThinking: boolean;
+  /** The sheet is a scored topic the candidate is still reading: a move for
+   * another thread is written behind it, not turned to. */
+  held: boolean;
 }): {
   question: ReactNode;
   main: ReactNode[];
@@ -715,7 +779,7 @@ function buildScorecard({
     if (item.type === "move") {
       if (item.threadIndex === currentIndex || (currentIndex === -1 && item.kind !== "question")) {
         utterances.push({ key: item.key, role: "interviewer", kind: item.kind, text: item.text, typing: true });
-      } else {
+      } else if (!held) {
         nextQuestion = item;
       }
     } else {
@@ -802,6 +866,24 @@ function buildScorecard({
 
   if (evalItem) {
     main.push(<Assessment key={evalItem.key} item={evalItem} />);
+  } else if (held && openThread && openThread.status === "closed") {
+    // The refetch has filed the topic; its assessment stays on the sheet
+    // as filed until the page turns.
+    main.push(
+      <Assessment
+        key="filed"
+        still
+        item={{
+          type: "eval",
+          key: "filed",
+          threadIndex: openThread.thread_index,
+          score: openThread.score ?? null,
+          feedback: openThread.feedback ?? "",
+          modelAnswer: openThread.model_answer ?? "",
+          phase: "done",
+        }}
+      />,
+    );
   }
 
   if (showThinking) {
@@ -878,11 +960,11 @@ function TopicMargin({ thread, docs }: { thread: Thread; docs: DocumentItem[] })
   );
 }
 
-function Assessment({ item }: { item: LiveEval }) {
+function Assessment({ item, still }: { item: LiveEval; still?: boolean }) {
   const { score, feedback, modelAnswer, phase } = item;
   return (
     <div
-      className="box assessment stream-in"
+      className={still ? "box assessment" : "box assessment stream-in"}
       aria-live="polite"
       style={{ viewTransitionName: `topic-${item.threadIndex}` }}
     >

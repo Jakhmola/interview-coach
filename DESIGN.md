@@ -105,6 +105,13 @@ typography:
     fontWeight: 700
     letterSpacing: "0.16em"
     textTransform: "uppercase"
+  stamp:
+    fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif"
+    fontSize: "28px"
+    fontWeight: 700
+    lineHeight: 1.1
+    letterSpacing: "0.18em"
+    textTransform: "uppercase"
 rounded:
   none: "0"
   tab: "3px 3px 0 0"
@@ -390,7 +397,7 @@ Job, document, session, previous-topic and manage rows: 10px vertical padding, `
 ### Motion: the paper moving
 The stream-in, stamp, caret and pen dot are the hand at work; the paper itself moves through document view transitions (`frontend/src/viewTransition.ts`, a `startViewTransition` + `flushSync` helper that applies the update plainly where the API is missing or reduced motion is on). Groups ease over 320ms on `cubic-bezier(.16,1,.3,1)`, old/new snapshots crossfade in 200ms, the root in 140ms.
 - **Filing a response:** the reply box (`view-transition-name: composer`) morphs into the just-submitted response, which carries the same name only while the interviewer is thinking.
-- **Turning the page:** the page turns the moment the next topic's first frame arrives, not when its question has finished streaming. A streamed move for a thread other than the open one runs one view transition in which the scored topic's assessment box folds into its previous-topics row (they share `topic-<index>`; the row is built from the live evaluation until the refetch replaces it), the question box (`question`) clears for the new question to stream into, and the window scrolls to the top so the new topic reads from the head of the sheet. The refetch that follows changes nothing visible; the composer returns after it, rising in with `.stream-in`.
+- **Turning the page:** the candidate turns it. When a topic is scored, its sheet stays - question, responses, remarks and the assessment box - while the interviewer writes the next question behind it (a streamed move for another thread is kept in `liveItems` but not shown); in the reply box's place a sticky `.composer` holds "Your turn - read the assessment, then turn the page", a hint that says whether the next question is still being written or ready, and one primary **Next topic**. The refetch changes nothing visible: the scored topic is rebuilt from the persisted thread (`held`) and kept out of the previous-topics index. Clicking runs one view transition in which the assessment box folds into its previous-topics row (they share `topic-<index>`), the question box (`question`) shows the next question (streaming if the click came early), the hold control morphs into the reply box (`composer`), and the window scrolls to the top so the new topic reads from the head of the sheet. After the last topic the same hold reads "read the last assessment, then see the scorecard" with **See the scorecard**; clicking it turns to the closing, and only then does the stamp land. Reduced motion turns the page plainly.
 - **Pulling the next sheet:** a plain click on an index tab runs the navigation inside a transition tagged `<html data-vt="route">`: the old sheet (`sheet`) fades out in 120ms, the new one rises 10px in 280ms, and the ink fill slides from tab to tab (`active-tab`).
 - **The highlighter swipe:** the "Your turn" mark is painted left-to-right over 380ms (`background-size` 0 to 100%) as the reply box opens.
 - **The pen along the row:** while a topic is being scored, the assessment's rating cells arrive with the box and tint highlighter one after another (110ms stagger, 1.6s loop) until the score stamps its cell.
