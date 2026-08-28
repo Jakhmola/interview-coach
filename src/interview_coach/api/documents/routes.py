@@ -17,6 +17,7 @@ from interview_coach.api.documents.schemas import (
     RemapConfirmRequest,
 )
 from interview_coach.api.errors import blocking_sessions_http_exception
+from interview_coach.api.jobs.routes import PREVIEW_CHARS
 from interview_coach.db import repos
 from interview_coach.db.models import User
 from interview_coach.db.session import get_db
@@ -194,6 +195,7 @@ async def list_documents(
                 byte_size=d.byte_size,
                 created_at=d.created_at,
                 char_count=len(d.raw_text),
+                preview=d.raw_text[:PREVIEW_CHARS],
                 project_title=d.project_title,
                 parsed_json=d.parsed_json,
                 embedding_status=await _embedding_status_for(d, session),

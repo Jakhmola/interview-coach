@@ -1,0 +1,16 @@
+{
+  "approved": true,
+  "approvedOn": "2026-08-28",
+  "card": "model-pick",
+  "world": "The Hiring Packet - hiring-committee packets and interviewer scorecards",
+  "comp": ".impeccable/mocks/decision/model-pick.png",
+  "source": ".impeccable/mocks/decision/model-pick.html",
+  "medium": "hand-built HTML mock, screenshot at 1440x900 (no image generation available; 0 higgsfield credits)",
+  "stocks": {
+    "light": ".impeccable/mocks/stock/offwhite-charcoal.html",
+    "dark": ".impeccable/mocks/stock/dark-slate-night.html",
+    "note": "user asked for a toggle between the two (2026-08-28)"
+  },
+  "seed": "6228d936",
+  "chosenVia": "user reply in chat after viewing the mocks (decision page was closed)"
+}

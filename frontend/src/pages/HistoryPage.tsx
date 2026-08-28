@@ -1,22 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { JobItem, Session, SessionDetail, SessionStatus, Thread, api } from "../api";
-import { ErrorBanner } from "../components/ui";
+import { ErrorBanner, RatingCells, SheetHead } from "../components/ui";
 import { codeFrom } from "../errors";
+import { roundLabels, sessionTone, topicLabel } from "../jobLabel";
 import { useAuth } from "../state/auth";
-
-const roundLabels = {
-  experience_deep_dive: "Experience deep-dive",
-  technical_challenge: "Technical challenge",
-  behavioral_star: "Behavioral / STAR",
-};
-
-const statusTone: Record<SessionStatus, string> = {
-  active: "info",
-  complete: "good",
-  abandoned: "neutral",
-};
 
 export function HistoryPage() {
   const { token } = useAuth();
@@ -96,9 +85,9 @@ export function HistoryPage() {
 
   return (
     <div className="history">
+      <SheetHead title="Session records" page={`${sessions.length} session${sessions.length === 1 ? "" : "s"} on file`} />
       <header className="history-header">
-        <h1 className="history-title">History</h1>
-        <div className="history-filter">
+        <div className="history-filter" role="group" aria-label="Filter by status">
           {(["all", "complete", "active", "abandoned"] as const).map((f) => (
             <button
               key={f}
@@ -116,7 +105,11 @@ export function HistoryPage() {
 
       {filtered.length === 0 ? (
         <div className="history-empty">
-          <p>No sessions yet.</p>
+          <p>
+            {sessions.length === 0
+              ? "Nothing filed yet. Your first practice round will appear here with every topic, rating, and model answer."
+              : "No sessions match this filter."}
+          </p>
         </div>
       ) : (
         <div className="history-groups">
@@ -190,11 +183,11 @@ function HistorySession({ session, token }: { session: Session; token: string })
         <div className="history-card-main">
           <strong>{roundLabels[session.round_type]}</strong>
           <span className="history-card-meta">
-            {date} · {session.n_questions} q
-            {average !== null ? <> · {average.toFixed(1)}/10</> : null}
+            {date} · {session.n_questions} topic{session.n_questions === 1 ? "" : "s"}
+            {average !== null ? <> · {average.toFixed(1)}/10 average</> : null}
           </span>
         </div>
-        <span className={`history-card-status status-${statusTone[session.status]}`}>
+        <span className={`history-card-status status-${sessionTone[session.status]}`}>
           {session.status}
         </span>
         <ChevronDown
@@ -206,7 +199,7 @@ function HistorySession({ session, token }: { session: Session; token: string })
         <div className="history-card-body">
           <ErrorBanner code={error} />
           {!detail ? <p className="history-card-loading">Loading…</p> : null}
-          {detail?.threads.length === 0 ? <p>No topics recorded.</p> : null}
+          {detail?.threads.length === 0 ? <p className="record-empty">No topics recorded.</p> : null}
           {detail?.threads.map((thread) => (
             <HistoryThread key={thread.id} thread={thread} />
           ))}
@@ -217,42 +210,92 @@ function HistorySession({ session, token }: { session: Session; token: string })
 }
 
 const moveLabels: Record<string, string> = {
-  question: "Interviewer",
-  probe: "Follow-up",
+  probe: "Probe",
   clarify: "Clarify",
   nudge: "Nudge",
 };
 
+type Message = Thread["messages"][number];
+
+/**
+ * One topic as a record: the full topic line, then the exchange on the left
+ * and the interviewer's verdict on the right. Collapsed, it shows the
+ * question, the candidate's first answer and the verdict cut to a few lines;
+ * "Full exchange" opens every turn and the model answer.
+ */
 function HistoryThread({ thread }: { thread: Thread }) {
+  const [open, setOpen] = useState(false);
+  const num = thread.thread_index + 1;
+  const messages = thread.messages;
+  const question = messages.find((m) => m.role === "interviewer" && (m.kind ?? "question") === "question");
+  const firstAnswer = messages.find((m) => m.role === "candidate");
+  const summary = [question, firstAnswer].filter((m): m is Message => !!m);
+  const shown = open ? messages : summary;
+  const scored = thread.status === "closed" && thread.score !== null && thread.score !== undefined;
+  // Whether there is anything beyond the summary to open (and to close again).
+  const hasMore = messages.length > summary.length || !!thread.model_answer;
+
   return (
-    <div className="history-turn">
-      <strong className="history-turn-q">
-        Topic {thread.thread_index + 1}
-        {thread.focus_label ? <span className="history-turn-focus"> · {thread.focus_label}</span> : null}
-      </strong>
-      {thread.messages.map((m) => (
-        <p key={m.id} className={m.role === "candidate" ? "" : "history-turn-interviewer"}>
-          <span className="history-turn-label">
-            {m.role === "candidate" ? "You" : moveLabels[m.kind ?? "question"] ?? "Interviewer"}
-          </span>{" "}
-          {m.text}
-        </p>
-      ))}
-      {thread.status === "closed" && thread.score !== null && thread.score !== undefined ? (
-        <>
-          <p>
-            <span className="history-turn-label">{thread.score}/10</span> {thread.feedback}
-          </p>
-          {thread.model_answer ? (
-            <details>
-              <summary>Model answer</summary>
-              <p>{thread.model_answer}</p>
-            </details>
-          ) : null}
-        </>
-      ) : (
-        <p className="history-turn-empty">No evaluation yet.</p>
-      )}
-    </div>
+    <article className="record">
+      <header className="record-head">
+        <strong className="record-topic">Topic {num}</strong>
+        <span className="record-focus">{topicLabel(thread.focus_label) ?? "Untitled topic"}</span>
+        <RatingCells score={thread.score} mini />
+      </header>
+      <div className="record-body">
+        <div className="record-exchange">
+          {shown.map((m) => {
+            const isQ = m.role === "interviewer" && (m.kind ?? "question") === "question";
+            const isFollowUp = m.role === "interviewer" && !isQ;
+            const clamp = !open && m.role === "candidate";
+            const voice = m.role === "candidate" ? "typed" : isFollowUp ? "pen" : "";
+            return (
+              <div key={m.id} className="exchange">
+                <span className={`who${isFollowUp ? " pen" : ""}`}>
+                  {m.role === "candidate" ? "You" : isQ ? `Q${num}` : moveLabels[m.kind ?? ""] ?? "Interviewer"}
+                </span>
+                <p className={`${voice}${clamp ? " clamp" : ""}`.trim()}>{m.text}</p>
+              </div>
+            );
+          })}
+        </div>
+        <div className="record-verdict">
+          {scored ? (
+            <>
+              <span className="who">Rated {thread.score}/10</span>
+              <p
+                className={open ? undefined : "clamp"}
+                style={open ? undefined : ({ "--lines": 4 } as CSSProperties)}
+              >
+                {thread.feedback}
+              </p>
+              {open && thread.model_answer ? (
+                <details className="model-answer" open>
+                  <summary>
+                    <ChevronRight aria-hidden="true" />
+                    Model answer
+                  </summary>
+                  <p>{thread.model_answer}</p>
+                </details>
+              ) : null}
+            </>
+          ) : (
+            <p className="record-empty">No evaluation yet.</p>
+          )}
+        </div>
+      </div>
+      {hasMore ? (
+        <button
+          type="button"
+          className="btn-quiet record-toggle"
+          onClick={() => setOpen((x) => !x)}
+          aria-expanded={open}
+        >
+          {open
+            ? "Show less"
+            : `Full exchange · ${messages.length} turn${messages.length === 1 ? "" : "s"}${thread.model_answer ? " · model answer" : ""}`}
+        </button>
+      ) : null}
+    </article>
   );
 }

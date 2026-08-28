@@ -52,3 +52,12 @@ tests/integration/eval/questions/
 
 # Graphify knowledge-graph output (regenerated locally; not source)
 graphify-out/
+
+# Impeccable (design workflow) - keep config, briefs, HTML mocks + approval sidecars; drop rasters and transient state
+.impeccable/mocks/**/*.png
+.impeccable/mocks/landing/landing.css
+.impeccable/mocks/manage/manage.css
+.impeccable/review/
+.impeccable/questions/
+.impeccable/live/
+.impeccable/hook.cache.json

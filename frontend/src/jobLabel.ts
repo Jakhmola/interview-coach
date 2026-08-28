@@ -1,5 +1,5 @@
 /**
- * Phase 22 — single helper for the JD display label.
+ * Phase 22 - single helper for the JD display label.
  *
  * The wizard, Manage list, ActiveJobChip dropdown, and ReadyLanding
  * all need to render the same thing for a given job, otherwise the
@@ -7,21 +7,58 @@
  * with no way to tell them apart). One helper, one truth.
  *
  * Preference order:
- *   1. ``role @ company``  — both extracted by ``job_analyzer``.
- *   2. ``role``           — analyzer got a title but no company name.
- *   3. ``company``        — analyzer got a company but no title.
- *   4. ``source_url`` minus scheme — for URL-pulled JDs pre-analysis.
+ *   1. ``role @ company``  - both extracted by ``job_analyzer``.
+ *   2. ``role``           - analyzer got a title but no company name.
+ *   3. ``company``        - analyzer got a company but no title.
+ *   4. ``source_url`` minus scheme - for URL-pulled JDs pre-analysis.
  *   5. first ~80 chars of the text preview, in quotes.
- *   6. ``"Pasted JD"`` — last-resort fallback.
+ *   6. ``"Pasted JD"`` - last-resort fallback.
  *
  * ``parsed_json`` arrives as ``unknown`` because the backend is loose
  * about the shape on the wire; we read role/company defensively.
  */
 
-import { JobItem } from "./api";
+import { JobItem, MoveKind, RoundType, SessionStatus } from "./api";
 
 const URL_LABEL_CHARS = 70;
 const TEXT_LABEL_CHARS = 80;
+
+/** The three round types as the form names them. */
+export const roundLabels: Record<RoundType, string> = {
+  experience_deep_dive: "Experience deep-dive",
+  technical_challenge: "Technical challenge",
+  behavioral_star: "Behavioral / STAR",
+};
+
+/** The interviewer's moves as the form keys them. */
+export const moveLabels: Record<MoveKind, string> = {
+  question: "Question",
+  probe: "Probe",
+  clarify: "Clarify",
+  nudge: "Nudge",
+};
+
+/** The interviewer's closing line on a completed round, from the scores alone:
+ * a band for the average, then where the round was strongest and weakest when
+ * the topics differ. Null until something is scored. */
+export function verdict(threads: { thread_index: number; score?: number | null }[]): string | null {
+  const scored = threads.filter((t) => t.score !== null && t.score !== undefined);
+  if (!scored.length) return null;
+  const avg = scored.reduce((sum, t) => sum + (t.score ?? 0), 0) / scored.length;
+  const band = avg >= 8 ? "Strong round." : avg >= 6 ? "Solid round." : "Keep at it.";
+  const best = scored.reduce((a, b) => ((b.score ?? 0) > (a.score ?? 0) ? b : a));
+  const worst = scored.reduce((a, b) => ((b.score ?? 0) < (a.score ?? 0) ? b : a));
+  if (scored.length < 2 || best.score === worst.score) return band;
+  return `${band} Strongest on topic ${best.thread_index + 1}, weakest on topic ${worst.thread_index + 1}.`;
+}
+
+/** A session's fate as a stamp colour: complete is ok green, abandoned is the
+ * red pen, active is plain ink. */
+export const sessionTone: Record<SessionStatus, "info" | "good" | "bad"> = {
+  active: "info",
+  complete: "good",
+  abandoned: "bad",
+};
 
 type Parsed = { title?: string | null; company_name?: string | null };
 
@@ -55,4 +92,23 @@ export function jobSubtitle(job: JobItem): string | null {
   if (!(role || company)) return null;
   if (job.source_url) return job.source_url.replace(/^https?:\/\//, "");
   return "pasted";
+}
+
+/** A thread's focus label as form copy: CV-highlight labels arrive wrapped in quotes. */
+export function topicLabel(label: string | null | undefined): string | undefined {
+  const t = (label ?? "").trim().replace(/^["\u201c]+|["\u201d]+$/g, "").trim();
+  return t || undefined;
+}
+
+/**
+ * The scorecard's TOPIC field: the highlight's headline clause, the way an
+ * interviewer would write the topic on the form ("Built an LLM-powered
+ * conversational agent with retrieval over product docs"), not the whole
+ * CV bullet with its metrics. Lists and History keep the full label.
+ */
+export function topicTitle(label: string | null | undefined): string | undefined {
+  const full = topicLabel(label);
+  if (!full) return undefined;
+  const clause = full.split(/[;:]|\s[-\u2013\u2014]\s/)[0].trim();
+  return clause || full;
 }

@@ -1,0 +1,63 @@
+{
+  "buildPath": "code",
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "design-system-color",
+        "value": "#fff",
+        "createdAt": "2026-08-28T10:05:35.177Z",
+        "reason": "DESIGN.md Two-Stock Rule: #fff on pen-filled controls is a listed exception (pen label, armed button, typed-confirmation button)"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#b9b9bd",
+        "createdAt": "2026-08-28T10:05:35.231Z",
+        "reason": "DESIGN.md Two-Stock Rule: the staple greys are a listed exception (night staple)"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#8a8a90",
+        "createdAt": "2026-08-28T10:05:35.275Z",
+        "reason": "DESIGN.md Two-Stock Rule: the staple greys are a listed exception (night staple inset)"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#8e8e8e",
+        "createdAt": "2026-08-28T10:05:35.325Z",
+        "reason": "DESIGN.md Two-Stock Rule: the staple greys are a listed exception (day staple)"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#6a6a6a",
+        "createdAt": "2026-08-28T10:05:35.381Z",
+        "reason": "DESIGN.md Two-Stock Rule: the staple greys are a listed exception (day staple inset)"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(0, 0, 0, 0.5)",
+        "createdAt": "2026-08-28T10:05:35.430Z",
+        "reason": "DESIGN.md Two-Stock Rule: the staple greys are a listed exception (night staple drop)"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(0, 0, 0, 0.55)",
+        "createdAt": "2026-08-28T10:05:35.481Z",
+        "reason": "DESIGN.md Two-Stock Rule and Modal (slip): the 55% black modal backdrop is a listed exception"
+      },
+      {
+        "rule": "design-system-radius",
+        "value": "999px",
+        "createdAt": "2026-08-28T10:05:35.524Z",
+        "reason": "DESIGN.md Shapes governs the sheet; the html scrollbar thumb is off-sheet browser chrome themed from the desk"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "17px",
+        "createdAt": "2026-08-28T10:05:35.568Z",
+        "reason": "DESIGN.md Typography Hierarchy: the headline's documented 17px step under 720px"
+      }
+    ]
+  }
+}

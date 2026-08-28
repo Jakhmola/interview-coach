@@ -551,11 +551,15 @@ async def session_message(
         gstate = await interview_graph.aget_state(config)
     except Exception:  # noqa: BLE001
         gstate = None
-    is_paused = gstate is not None and bool(gstate.next)
+    # Paused means parked on the ``await_candidate`` interrupt. A non-empty
+    # ``next`` alone is not enough: a run cut off mid-node (client disconnect)
+    # leaves ``next`` pointing at the node it died in with no interrupt, and
+    # resuming that replays the node from its pre-run state.
+    is_paused = gstate is not None and any(t.interrupts for t in gstate.tasks)
 
     graph_input: Any
+    msg = (body.message or "").strip()
     if is_paused:
-        msg = (body.message or "").strip()
         if not msg:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty_message")
         graph_input = Command(resume={"message": msg})
@@ -580,6 +584,28 @@ async def session_message(
             "job": hydrated["job"],
             "company": hydrated["company"],
         }
+        # The DB is the truth about an open thread. If an earlier run committed
+        # one but was cut off before the graph checkpointed it, opening again
+        # would violate ``uq_threads_session_thread`` - adopt it instead and
+        # carry on conducting. Grounding isn't persisted, so the conductor
+        # continues without it for this thread.
+        open_thread = await repos.get_open_thread(session, session_id)
+        if open_thread is not None:
+            if not msg:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty_message")
+            msgs = await repos.list_messages_for_thread(session, open_thread.id)
+            graph_input.update(
+                {
+                    "thread_id": str(open_thread.id),
+                    "thread_index": open_thread.thread_index,
+                    "anchors": list(open_thread.anchors_json or []),
+                    "focus_key": open_thread.focus_key,
+                    "focus_label": open_thread.focus_label,
+                    "focus_document_ids": list(open_thread.focus_document_ids or []),
+                    "followups_used": max(0, sum(1 for m in msgs if m.role == "interviewer") - 1),
+                    "pending_message": msg,
+                }
+            )
 
     trace_meta = {
         "graph": "interview",
@@ -621,6 +647,9 @@ async def session_message(
         except StreamingJsonError as e:
             logger.exception("Interview streaming failed for session=%s", session_id)
             yield sse_event("error", {"code": "streaming_json_error", "detail": str(e)})
+        except Exception:  # noqa: BLE001 - the stream must always end with a frame
+            logger.exception("Interview turn failed for session=%s", session_id)
+            yield sse_event("error", {"code": "interview_failed"})
         finally:
             await flush_langfuse()
 

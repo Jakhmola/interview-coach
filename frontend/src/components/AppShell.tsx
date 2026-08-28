@@ -1,17 +1,17 @@
-import { History, LogOut, Mic2, Settings2, Sparkles } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, api } from "../api";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
-import { ActiveJobChip } from "./ActiveJobChip";
-import { ErrorBanner } from "./ui";
+import { viewTransition } from "../viewTransition";
+import { ErrorBanner, Staples, StockToggle } from "./ui";
 
 const navItems = [
-  { to: "/setup", label: "Setup", icon: Settings2 },
-  { to: "/interview", label: "Practice", icon: Mic2 },
-  { to: "/history", label: "History", icon: History },
+  { to: "/setup", label: "Setup" },
+  { to: "/interview", label: "Practice" },
+  { to: "/history", label: "History" },
 ];
 
 export function AppShell() {
@@ -32,7 +32,7 @@ export function AppShell() {
     setReadinessError(null);
     try {
       // Phase 25 (B15): completeness is per-active-job. Pre-Phase-25
-      // this asked "does the user have *any* ready job?" — once a
+      // this asked "does the user have *any* ready job?" - once a
       // user had one ready job, switching to a brand-new un-prepped
       // job let them navigate to /interview, which then errored on
       // missing context. Now we gate on the active job's own status,
@@ -67,30 +67,21 @@ export function AppShell() {
   }, [hasCheckedReadiness, isSetupComplete, location.pathname, navigate]);
 
   return (
-    <div className="shell">
-      <aside className="sidebar" aria-label="Primary navigation">
-        <div className="sidebar-brand">
-          <span className="sidebar-brand-mark">
-            <Sparkles size={16} />
-          </span>
-          <span className="sidebar-brand-name">Interview Coach</span>
-        </div>
-
-        <nav className="sidebar-nav">
+    <div className="desk">
+      <div className="desk-bar">
+        <nav className="tabs" aria-label="Primary navigation">
           {navItems.map((item) => {
-            const Icon = item.icon;
             const locked = item.to !== "/setup" && hasCheckedReadiness && !isSetupComplete;
             if (locked) {
               return (
                 <button
                   key={item.to}
                   type="button"
-                  className="sidebar-nav-item locked"
+                  className="tab locked"
                   disabled
                   title="Complete setup first"
                 >
-                  <Icon size={16} />
-                  <span>{item.label}</span>
+                  {item.label}
                 </button>
               );
             }
@@ -98,39 +89,39 @@ export function AppShell() {
               <NavLink
                 key={item.to}
                 to={item.to}
-                className={({ isActive }) =>
-                  `sidebar-nav-item${isActive ? " active" : ""}`
-                }
+                className={({ isActive }) => `tab${isActive ? " active" : ""}`}
+                onClick={(event) => {
+                  // Plain left click: pull the next sheet with a view
+                  // transition. Modified clicks keep the browser's behaviour.
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  if (event.button !== 0 || location.pathname === item.to) return;
+                  event.preventDefault();
+                  viewTransition(() => navigate(item.to), "route");
+                }}
               >
-                <Icon size={16} />
-                <span>{item.label}</span>
+                {item.label}
               </NavLink>
             );
           })}
         </nav>
 
-        <div className="sidebar-footer">
-          <ActiveJobChip />
-          <div className="sidebar-account">
-            <span className="sidebar-account-email" title={user?.email}>
-              {user?.email}
-            </span>
-            <button
-              type="button"
-              className="sidebar-account-logout"
-              onClick={logout}
-              title="Log out"
-              aria-label="Log out"
-            >
-              <LogOut size={14} />
-            </button>
-          </div>
+        <div className="desk-tools">
+          <span className="who" title={user?.email}>
+            {user?.email}
+          </span>
+          <StockToggle />
+          <button type="button" className="desk-btn" onClick={logout} title="Log out">
+            <LogOut />
+            <span>Log out</span>
+          </button>
         </div>
-      </aside>
+      </div>
 
-      <main className="canvas">
+      <main className="sheet">
+        <Staples />
         <ErrorBanner code={readinessError} />
         <Outlet context={{ refreshReadiness, isSetupComplete }} />
+        <footer className="sheet-foot">Interview Coach · runs on your machine</footer>
       </main>
     </div>
   );

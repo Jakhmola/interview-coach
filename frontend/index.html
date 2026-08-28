@@ -3,9 +3,36 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <title>Interview Coach</title>
+    <!-- The packet on the desk: a sheet, its inverted label, two rulings, a highlighter mark. -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%231f1f22'/%3E%3Crect x='5' y='3' width='22' height='26' fill='%23f5f2ea'/%3E%3Crect x='5' y='3' width='9' height='4' fill='%231b1b1f'/%3E%3Crect x='9' y='12' width='14' height='2' fill='%231b1b1f'/%3E%3Crect x='9' y='17' width='14' height='2' fill='%231b1b1f'/%3E%3Crect x='9' y='22' width='7' height='3' fill='%23ffe94d'/%3E%3C/svg%3E"
+    />
+    <script>
+      // Paper stock (light/dark) before first paint, so the sheet never flashes.
+      try {
+        var s = localStorage.getItem("stock");
+        if (s !== "light" && s !== "dark") {
+          s = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        document.documentElement.dataset.theme = s;
+      } catch (e) {
+        document.documentElement.dataset.theme = "light";
+      }
+    </script>
   </head>
   <body>
+    <!--
+    THESIS: The interview rendered as the hiring packet the panel fills in: a paper scorecard, typed transcript, red-pen margin notes. Refuses the dark chat-bubble app with a sidebar.
+    OWN-WORLD: Off-white photocopy pages (night stock: slate pages, light ink) on a charcoal desk. Index tabs cut from the sheet's top edge, 1px black ruling, boxed fields with inverted labels, Archivo caps for form lettering, Courier Prime for the candidate's typed words, red ballpoint for the interviewer, yellow highlighter for scores and the current turn.
+    STORY: The candidate watches the document that decides their fate being filled in live, reads whose turn it is from the highlighter, and answers on the form's next lines.
+    FIRST VIEWPORT: Tabs above the sheet; scorecard header fields; QUESTION box; CANDIDATE RESPONSE box with "Your turn"; response lines + SUBMIT; 1-10 rating row; red-pen probe, agenda, sources in the right margin; previous topics at the foot.
+    FORM: The Hiring Packet, grounded candidate 1 of 7, chosen over the roll's Checkride; seed 6228d936.
+    FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance.
+    -->
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

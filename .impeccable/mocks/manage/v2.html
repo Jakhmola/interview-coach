@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V2 · Digest</title>
+<script>if (location.hash === "#night") document.documentElement.dataset.theme = "dark";</script>
+<link rel="stylesheet" href="manage.css">
+<style>
+/* chrome shared by every variant */
+.manage-page { display: grid; gap: 22px; }
+.back { justify-self: start; height: 24px; padding: 0; margin-top: -8px; }
+.manage-section { display: grid; gap: 10px; border-top: 1px solid var(--ink); padding-top: 10px; }
+.manage-section h2 { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); margin: 0; }
+.manage-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.actions { display: grid; gap: 4px; justify-items: end; flex: none; }
+.actions .row { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.actions .consequence { font-size: 12px; color: var(--ink-2); text-align: right; max-width: 30ch; }
+.meta { font-size: 12.5px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.danger .about { max-width: 70ch; }
+
+.file { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 22px; align-items: start; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.file .about { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.file .about strong { font-weight: 500; font-size: 15px; }
+.digest { display: grid; gap: 4px; margin-top: 4px; max-width: 92ch; }
+.digest .row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 13.5px; line-height: 1.5; }
+.digest .k { font-weight: 700; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
+.digest .row p { margin: 0; }
+.digest .row p.q { color: var(--ink-2); }
+.digest .repo-chips { margin-top: 2px; }
+.file .about .btn-quiet { justify-self: start; height: 22px; padding: 0; margin-top: 2px; }
+@media (max-width: 720px) { .file { grid-template-columns: minmax(0, 1fr); } .file .actions { justify-items: start; } .digest .row { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+</style>
+</head>
+<body>
+<div class="desk">
+  <div class="desk-bar">
+    <nav class="tabs"><a class="tab active" href="#">Setup</a><a class="tab" href="#">Practice</a><a class="tab" href="#">History</a></nav>
+    <div class="desk-tools"><span class="who">packet-review@gmail.com</span><button class="desk-btn"><span>Night</span></button><button class="desk-btn"><span>Log out</span></button></div>
+  </div>
+  <main class="sheet">
+    <i class="staple a"></i><i class="staple b"></i>
+    <div class="manage-page">
+      <header class="sheet-head"><h1>On file</h1><span class="page">4 of 4 in the packet</span></header>
+      <div class="fields">
+        <div class="f"><span class="cap">Candidate</span><span class="v">packet-review@gmail.com</span></div>
+      </div>
+      <a class="btn-quiet back" href="#"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>Back to the packet</a>
+
+<section class="manage-section">
+  <h2>CV</h2>
+  <div class="file">
+    <div class="about">
+      <strong>cv-synthetic.docx</strong><span class="meta">Uploaded 27 Aug · 1,083 chars</span>
+      <div class="digest">
+        <div class="row"><span class="k">Candidate</span><p>Priya Raman · GenAI Engineer · Bengaluru</p></div>
+        <div class="row"><span class="k">Roles</span><p>Senior Machine Learning Engineer, Bobble AI (2022 - present) · Data Scientist, Aurora Analytics (2019 - 2022)</p></div>
+        <div class="row"><span class="k">Skills</span><p>Python · PyTorch · LangChain · FastAPI · Postgres · pgvector · Docker · prompt engineering · RAG · evaluation · Airflow · AWS</p></div>
+        <div class="row"><span class="k">Education</span><p>M.Tech Computer Science, IIT Madras, 2019</p></div>
+      </div>
+      <a class="btn-quiet" href="#">Read the full text</a>
+    </div>
+    <div class="actions"><div class="row"><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 12v6"/><path d="m15 15-3-3-3 3"/></svg> Replace CV</button></div><span class="consequence">Rebuilds the profile and remaps 1 doc.</span></div>
+  </div>
+</section>
+<section class="manage-section">
+  <h2>Job descriptions</h2>
+  <div class="file">
+    <div class="about">
+      <strong>GenAI Engineer @ Northwind Labs</strong><span class="meta">Pasted 28 Aug · 1,088 chars <span class="status-pill status-good">Active</span></span>
+      <div class="digest">
+        <div class="row"><span class="k">Opens</span><p class="q">“Northwind Labs builds decision-support tools for logistics operators. We are hiring a GenAI Engineer to own our LLM features end to end.”</p></div>
+        <div class="row"><span class="k">Read as</span><p>Senior · Bengaluru, hybrid · 5 responsibilities · 4 must-haves · 3 nice-to-haves</p></div>
+      </div>
+      <a class="btn-quiet" href="#">Read the full text</a>
+    </div>
+    <div class="actions"><div class="row"><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg> Re-analyze</button><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg> Delete</button></div></div>
+  </div>
+</section>
+<section class="manage-section">
+  <h2>Supporting docs</h2>
+  <div class="file">
+    <div class="about">
+      <strong>project-doc-synthetic.docx</strong><span class="meta">Uploaded 27 Aug · 1,245 chars</span>
+      <div class="digest">
+        <div class="row"><span class="k">Opens</span><p class="q">“LLM-Powered Conversational Agent - Bobble AI (design note)”</p></div>
+        <div class="row"><span class="k">Sections</span><p>Retrieval · Generation and prompts · Evaluation and guardrails</p></div>
+        <div class="row"><span class="k">Filed under</span><p>Bobble AI · “Built an LLM-powered conversational agent with retrieval over product docs…”</p></div>
+      </div>
+      <a class="btn-quiet" href="#">Read the full text</a>
+    </div>
+    <div class="actions"><div class="row"><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg> Remap</button><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg> Delete</button></div></div>
+  </div>
+</section>
+<section class="manage-section">
+  <div class="manage-section-head"><h2>GitHub repos</h2><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Add / manage repos</button></div>
+  <div class="file">
+    <div class="about">
+      <strong>keyboard-rag</strong><a class="repo-link" href="#"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg> github.com/priyaraman/keyboard-rag</a>
+      <div class="digest">
+        <div class="row"><span class="k">Tech</span><div class="repo-chips"><span class="repo-chip">Python</span><span class="repo-chip">FastAPI</span><span class="repo-chip">pgvector</span><span class="repo-chip">Jina</span><span class="repo-chip">Langfuse</span></div></div>
+        <div class="row"><span class="k">Does</span><p>Hybrid BM25 + vector retrieval fused with reciprocal rank fusion · Incremental embedding keyed on document hash · Three prompt variants generated in parallel under a semaphore · Offline eval set of 1,200 labelled prompts</p></div>
+      </div>
+    </div>
+    <div class="actions"><div class="row"><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg> Delete</button></div></div>
+  </div>
+</section>
+
+<section class="manage-section danger">
+  <h2>Danger zone</h2>
+  <div class="file plain">
+    <div class="about"><strong>Reset account</strong><span class="meta">Deletes every file, job description, session and the profile. Your login stays.</span></div>
+    <div class="actions"><div class="row"><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg> Reset account…</button></div></div>
+  </div>
+</section>
+
+
+    </div>
+    <footer class="sheet-foot">Interview Coach · runs on your machine</footer>
+  </main>
+</div>
+</body>
+</html>

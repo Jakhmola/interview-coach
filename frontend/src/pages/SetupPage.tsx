@@ -23,12 +23,13 @@ import {
 import { LoadingStatus } from "../components/LoadingStatus";
 import { MappingModal } from "../components/MappingModal";
 import { RepoSelectModal } from "../components/RepoSelectModal";
-import { ErrorBanner, StatusPill } from "../components/ui";
+import { ErrorBanner, Field, JobField, SheetHead, StatusPill } from "../components/ui";
 import { codeFrom } from "../errors";
 import { useStreamAbort } from "../hooks/useStreamAbort";
 import { jobLabel } from "../jobLabel";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
+import { ReadyLanding } from "./ReadyLanding";
 
 const nodeLabels: Record<string, string> = {
   profile_builder: "Reading your CV",
@@ -75,17 +76,17 @@ const PREP_NODE_KEYS = [
 ];
 
 // Per-node prep state: the settled pill plus the verdict reason that rode in on
-// node_started/node_skipped (Phase 27 protocol). node_done merges — it updates
+// node_started/node_skipped (Phase 27 protocol). node_done merges - it updates
 // the pill but preserves the reason captured at start (Phase 28).
 type NodePill = { pill: string; reason?: PrepRunReason | PrepSkipReason };
 
 // Phase 28: terminal-state sub-label for the run reasons that tell a story.
-// Total over (node, reason, pill) — any combo not listed returns null so
+// Total over (node, reason, pill) - any combo not listed returns null so
 // TaskStatus keeps its plain fallback. Targets the real firing set traced
 // through prep_cache.py: `stale` only fires on profile_builder; `degraded`
 // only on company_researcher. `missing` and every skip reason mean "reused /
 // nothing changed" → no added copy on the fresh-setup happy path. (`forced`
-// has no UI trigger — the "Refresh company info" button was removed — so it is
+// has no UI trigger - the "Refresh company info" button was removed - so it is
 // deliberately unhandled; if the backend ever emits it, it degrades to plain
 // copy rather than rendering a button-driven message no path can produce.)
 //
@@ -99,10 +100,10 @@ export function nodeReasonLabel(
   pill: string,
 ): string | null {
   if (node === "profile_builder" && reason === "stale" && pill === "done") {
-    return "Rebuilt — your documents changed";
+    return "Rebuilt - your documents changed";
   }
   if (node === "company_researcher" && reason === "degraded" && pill === "done") {
-    return "Recovered — earlier company info was incomplete";
+    return "Recovered - earlier company info was incomplete";
   }
   return null;
 }
@@ -121,10 +122,17 @@ const STEP_TITLES: Record<Step, string> = {
   docs: "Add supporting docs (optional)",
   prep: "Process the setup",
 };
+const STEP_SHORT: Record<Step, string> = {
+  cv: "CV",
+  github: "GitHub",
+  jd: "Job description",
+  docs: "Docs",
+  prep: "Prep",
+};
 const STEP_BLURBS: Record<Step, string> = {
   cv: "We'll read it once and use it to ground every question.",
   github: "Verify your handle now; you'll pick which public repos to include during prep.",
-  jd: "Role, company, must-haves — we'll extract them automatically.",
+  jd: "Role, company, must-haves - we'll extract them automatically.",
   docs: "Architecture notes, take-homes, or project write-ups. Skip if you don't have any.",
   prep: "Reads your CV, walks supporting docs, analyzes the JD, researches the company.",
 };
@@ -132,7 +140,7 @@ const STEP_BLURBS: Record<Step, string> = {
 // ─────────────────────────── Page ─────────────────────────────────────────
 
 export function SetupPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const navigate = useNavigate();
   const { refreshReadiness } = useOutletContext<SetupOutletContext>();
   const { activeJobId, jobs, setActiveJobId, refresh: refreshActiveJob } = useActiveJob();
@@ -142,7 +150,7 @@ export function SetupPage() {
   const [docs, setDocs] = useState<DocumentItem[]>([]);
   const [status, setStatus] = useState<PrepStatus | null>(null);
   // Phase 22: which job the held status payload describes. Auto-prep
-  // refuses to fire until this matches `activeJobId` — kills the race
+  // refuses to fire until this matches `activeJobId` - kills the race
   // where Stage-2 saves a new job, status is still stale for the
   // previous job, and the effect prematurely fires prep against the
   // wrong target.
@@ -160,18 +168,6 @@ export function SetupPage() {
   // Non-null → render <RepoSelectModal />; on submit we POST
   // /sessions/prepare/resume_repos which re-opens the SSE stream.
   const [pendingRepos, setPendingRepos] = useState<RepoListing[] | null>(null);
-  const [step, setStep] = useState<Step>("cv");
-  const [didInitStep, setDidInitStep] = useState(false);
-  // Phase 22: when the user explicitly enters the wizard from
-  // ReadyLanding (?new_job=1 / ?add_doc=1) or by uploading a new
-  // supporting doc, we suppress the landing short-circuit so they
-  // can actually see the step they navigated to. Auto-cleared once
-  // prep completes and there's no outstanding work (the natural
-  // recompute then shows the landing). This is the targeted
-  // replacement for the deleted ``overrideReady`` flag — same intent
-  // (keep the wizard visible while there's pending wizard work),
-  // narrower scope (auto-clears, not sticky).
-  const [bypassLanding, setBypassLanding] = useState(false);
   const [jdMode, setJdMode] = useState<"paste" | "url">("paste");
   const messageTimerRef = useRef<number | null>(null);
   // Phase 22: auto-prep is work-driven, not fire-once. The ref stores a
@@ -183,7 +179,7 @@ export function SetupPage() {
   // event. Phase 22: company-research soft errors no longer surface
   // here (they're swallowed inside the graph node and reported as a
   // degraded ``node_done``), so this set fills only on genuinely
-  // fatal errors — ``NoDocumentsError`` or downstream LLM failures.
+  // fatal errors - ``NoDocumentsError`` or downstream LLM failures.
   // We refuse to auto-refire for jobs in the set until the user
   // takes an explicit action (manual Run prep click, Re-analyze from
   // Manage, etc.).
@@ -193,19 +189,39 @@ export function SetupPage() {
   const cv = docs.find((doc) => doc.kind === "cv");
   const technicalDocs = docs.filter((doc) => doc.kind === "project_doc");
   const selectedJob = jobs.find((j) => j.id === activeJobId) ?? null;
-  const stepIndex = STEPS.indexOf(step);
 
   const setupReady = useMemo(
     () => Boolean(hasCv && selectedJob && status?.can_start),
     [hasCv, selectedJob, status?.can_start],
   );
 
+  // The wizard step lives in the URL (`?step=jd`), so the browser's Back
+  // walks the steps and returns to the landing, and "New job description"
+  // from any page is a plain link. No step in the URL means the next thing
+  // to do; an explicit step keeps the wizard visible even when the packet
+  // is complete (adding a job or a doc), until prep finishes and clears it.
+  const stepParam = searchParams.get("step");
+  const forcedStep = STEPS.includes(stepParam as Step) ? (stepParam as Step) : null;
+  const step: Step = forcedStep ?? (!hasCv ? "cv" : !selectedJob ? "github" : "prep");
+  const stepIndex = STEPS.indexOf(step);
+  const setStep = (next: Step, opts?: { replace?: boolean }) => {
+    const params = new URLSearchParams(searchParams);
+    params.set("step", next);
+    setSearchParams(params, { replace: opts?.replace });
+  };
+  const clearStep = () => {
+    if (!forcedStep) return;
+    const params = new URLSearchParams(searchParams);
+    params.delete("step");
+    setSearchParams(params, { replace: true });
+  };
+
   const load = async () => {
     if (!token) return;
     setIsLoading(true);
     setError(null);
     try {
-      // Phase 22: jobs live on ActiveJobContext now — refreshing it
+      // Phase 22: jobs live on ActiveJobContext now - refreshing it
       // updates the sidebar dropdown + Setup wizard + Manage + the
       // landing in one go. We only own ``docs`` locally.
       const [nextDocs] = await Promise.all([api.listDocuments(token), refreshActiveJob()]);
@@ -232,7 +248,7 @@ export function SetupPage() {
     // job when the user switches, abort it cleanly. Without this the
     // tail of the prior stream keeps writing into setStatus /
     // setNodeState / failedAutoPrepJobsRef under the *new* activeJobId
-    // — node pills appear to belong to the new job, failure flags get
+    // - node pills appear to belong to the new job, failure flags get
     // mis-attributed (already addressed for runPrep by B7's pinning,
     // but the abort is what stops the bytes flowing).
     if (isPreparing) {
@@ -242,7 +258,7 @@ export function SetupPage() {
       setPendingRepos(null);
     }
     api
-      .prepStatus(token, activeJobId)
+      .prepStatus(token, activeJobId, true)
       .then((s) => {
         setStatus(s);
         setStatusJobId(activeJobId);
@@ -253,39 +269,6 @@ export function SetupPage() {
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeJobId]);
-
-  // Phase 22: query-param navigation from ReadyLanding. Consume the
-  // params each time they change so re-entering /setup with a different
-  // param (`?new_job=1` then `?add_doc=1`) lands the user correctly.
-  // We strip the params after handling so the effect doesn't loop.
-  useEffect(() => {
-    if (isLoading) return;
-    const newJob = searchParams.get("new_job");
-    const addDoc = searchParams.get("add_doc");
-    if (!newJob && !addDoc) return;
-    if (newJob) {
-      setStep("jd");
-      setActiveJobId(null);
-    } else if (addDoc) {
-      setStep("docs");
-    }
-    setBypassLanding(true);
-    setDidInitStep(true);
-    const next = new URLSearchParams(searchParams);
-    next.delete("new_job");
-    next.delete("add_doc");
-    setSearchParams(next, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, searchParams]);
-
-  // One-shot initial step picker — runs once after the first load.
-  useEffect(() => {
-    if (isLoading || didInitStep) return;
-    if (!hasCv) setStep("cv");
-    else if (!selectedJob) setStep("github"); // resume at the cv → github → jd sequence
-    else if (!status?.can_start) setStep("prep");
-    setDidInitStep(true);
-  }, [isLoading, didInitStep, hasCv, selectedJob, status?.can_start]);
 
   useEffect(() => {
     if (!message) return;
@@ -321,7 +304,7 @@ export function SetupPage() {
       n_projects?: number;
     };
     if (frame.event === "node_started" && data.node) {
-      // Keep the run reason — node_done merges it through to the settled pill.
+      // Keep the run reason - node_done merges it through to the settled pill.
       setNodeState((c) => ({
         ...c,
         [data.node!]: { pill: "running", reason: data.reason },
@@ -342,19 +325,19 @@ export function SetupPage() {
           setMessage(
             data.code === "no_github_token"
               ? "GitHub ingestion is rate-limited without a token, so only one repo was ingested. Set GITHUB_TOKEN to include more."
-              : "Some repos couldn't be ingested — the rest were folded into your profile.",
+              : "Some repos couldn't be ingested - the rest were folded into your profile.",
           );
         } else {
           setMessage(
             data.code === "CompanyNameMissing"
-              ? "Couldn't extract a company name from this JD — questions will be less company-specific. Fix it any time via Manage → Re-analyze."
-              : "Company research came up empty — questions will be less company-specific. Try again later from Manage.",
+              ? "Couldn't extract a company name from this JD - questions will be less company-specific. Fix it any time via Manage → Re-analyze."
+              : "Company research came up empty - questions will be less company-specific. Try again later from Manage.",
           );
         }
       }
     } else if (frame.event === "node_skipped" && data.node) {
       // Phase 25: a doc_mapping skip is the loop finishing (no unmapped
-      // docs left, or a company-only refresh) — never a cache hit. The
+      // docs left, or a company-only refresh) - never a cache hit. The
       // mapping it just walked ran fresh, so don't render "Using cached
       // result". Only profile/JD/company skips are genuine cache hits.
       // Phase 32: a github skip ("no_repos_selected") is likewise a "nothing
@@ -426,8 +409,8 @@ export function SetupPage() {
   const runPrep = async () => {
     if (!token || !activeJobId) return;
     // Phase 25 (B7): pin the job id we're prepping at function entry.
-    // If the user switches the active job mid-stream, every write —
-    // status, failure flag, SSE error handler — still references the
+    // If the user switches the active job mid-stream, every write -
+    // status, failure flag, SSE error handler - still references the
     // job the run was *for*, not whatever's active when the closure
     // fires. Otherwise a failure on job A could be recorded against
     // job B and a successful run on A could refresh job B's status.
@@ -450,13 +433,13 @@ export function SetupPage() {
     try {
       await prepareSessionStream(token, runJobId, frameHandler, signal);
       await load();
-      const nextStatus = await api.prepStatus(token, runJobId);
+      const nextStatus = await api.prepStatus(token, runJobId, true);
       setStatus(nextStatus);
       setStatusJobId(runJobId);
       await refreshReadiness();
       await refreshActiveJob();
       if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
-        setBypassLanding(false);
+        clearStep();
         failedAutoPrepJobsRef.current.delete(runJobId);
       }
     } catch (err) {
@@ -470,7 +453,7 @@ export function SetupPage() {
     | { action: "apply"; rows: MappingRow[]; title: string; extracted: DocIntakeExtracted }
     | { action: "skip" }) => {
     if (!token || !activeJobId) return;
-    // Phase 25 (B7): same job-id pinning as runPrep — a job switch
+    // Phase 25 (B7): same job-id pinning as runPrep - a job switch
     // mid-resume must not corrupt the bookkeeping for the job whose
     // mapping the user just confirmed.
     const runJobId = activeJobId;
@@ -486,12 +469,12 @@ export function SetupPage() {
         signal,
       );
       await load();
-      const nextStatus = await api.prepStatus(token, runJobId);
+      const nextStatus = await api.prepStatus(token, runJobId, true);
       setStatus(nextStatus);
       setStatusJobId(runJobId);
       await refreshReadiness();
       if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
-        setBypassLanding(false);
+        clearStep();
       }
     } catch (err) {
       setError(codeFrom(err));
@@ -504,8 +487,8 @@ export function SetupPage() {
     }
   };
 
-  // Phase 32: resume after the repo-selection modal. Mirrors resumeMapping —
-  // same job-id pinning, same stream pump — but threads the chosen URLs into
+  // Phase 32: resume after the repo-selection modal. Mirrors resumeMapping -
+  // same job-id pinning, same stream pump - but threads the chosen URLs into
   // the github interrupt. The graph then ingests + folds and walks on into the
   // doc-mapping loop, so the same SSE handler drives the rest of prep.
   const resumeRepos = async (selectedUrls: string[]) => {
@@ -523,12 +506,12 @@ export function SetupPage() {
         signal,
       );
       await load();
-      const nextStatus = await api.prepStatus(token, runJobId);
+      const nextStatus = await api.prepStatus(token, runJobId, true);
       setStatus(nextStatus);
       setStatusJobId(runJobId);
       await refreshReadiness();
       if (nextStatus.can_start && (nextStatus.unmapped_project_doc_count ?? 0) === 0) {
-        setBypassLanding(false);
+        clearStep();
       }
     } catch (err) {
       setError(codeFrom(err));
@@ -539,7 +522,7 @@ export function SetupPage() {
   };
 
   // Phase 22: work-driven auto-prep. Fires whenever there's outstanding
-  // setup work that prep would resolve — either a missing
+  // setup work that prep would resolve - either a missing
   // profile/job-analysis/snapshot OR a project_doc the user uploaded
   // and hasn't mapped yet. The (job, signature) key re-arms when work
   // legitimately changes, so uploading a new supporting doc from
@@ -547,7 +530,7 @@ export function SetupPage() {
   // Guards:
   //   - status must match the active job (`statusJobId === activeJobId`)
   //     so a Stage-2 race doesn't fire prep against the prior job;
-  //   - skip the CV step — the user hasn't told us anything to prep yet;
+  //   - skip the CV step - the user hasn't told us anything to prep yet;
   //   - in-flight prep takes priority over re-firing.
   useEffect(() => {
     if (!token || !activeJobId || !hasCv) return;
@@ -558,7 +541,7 @@ export function SetupPage() {
     // state mid-modal. Wait for the user's decision (apply/skip)
     // before allowing another run.
     if (pendingMapping) return;
-    // Phase 32: same for an open repo-selection modal — re-firing prep
+    // Phase 32: same for an open repo-selection modal - re-firing prep
     // would destroy the github interrupt state mid-modal.
     if (pendingRepos) return;
     // Phase 25 (B1): the docs step is where the user is actively
@@ -568,7 +551,7 @@ export function SetupPage() {
     if (step === "cv" || step === "github" || step === "docs") return;
     if (statusJobId !== activeJobId) return;
     if (!status) return;
-    // Don't auto-refire on a job that just failed — let the user
+    // Don't auto-refire on a job that just failed - let the user
     // take an explicit action (manual Run prep, Re-analyze, etc.).
     if (failedAutoPrepJobsRef.current.has(activeJobId)) return;
     const unmapped = status.unmapped_project_doc_count ?? 0;
@@ -595,7 +578,7 @@ export function SetupPage() {
       await api.uploadDocument(token, "cv", event.target.files[0]);
       setMessage(
         wasReplace
-          ? "New CV uploaded. Your project doc mappings were cleared — we'll re-ask during prep."
+          ? "New CV uploaded. Your project doc mappings were cleared - we'll re-ask during prep."
           : "Got it.",
       );
       await load();
@@ -623,7 +606,7 @@ export function SetupPage() {
       // button is the explicit advance to prep. (Pre-Phase-25 this
       // routed straight to prep, blocking multi-doc uploads.)
       if (activeJobId) {
-        const nextStatus = await api.prepStatus(token, activeJobId);
+        const nextStatus = await api.prepStatus(token, activeJobId, true);
         setStatus(nextStatus);
         setStatusJobId(activeJobId);
       }
@@ -648,7 +631,7 @@ export function SetupPage() {
       setMessage("Job description saved.");
       // Phase 25 (#4): commit activeJobId and the docs step in the same
       // render so the auto-prep effect never sees the transient
-      // (newJob, step="jd") window. The B1 guard only blocks cv/docs —
+      // (newJob, step="jd") window. The B1 guard only blocks cv/docs -
       // a job that's active while step is still "jd" auto-fires a full
       // prep with zero docs, skipping doc_mapping, *before* the user can
       // add a supporting doc. Setting step before the await keeps both
@@ -673,7 +656,7 @@ export function SetupPage() {
     try {
       const job = await api.submitJobUrl(token, url);
       setMessage("Fetched and saved.");
-      // Phase 25 (#4): see submitJobText — commit activeJobId + docs step
+      // Phase 25 (#4): see submitJobText - commit activeJobId + docs step
       // together so auto-prep can't fire a doc-less prep in the gap.
       setActiveJobId(job.id);
       setStep("docs");
@@ -689,32 +672,31 @@ export function SetupPage() {
   };
   const goBack = () => {
     const idx = STEPS.indexOf(step);
-    if (idx > 0) setStep(STEPS[idx - 1]);
+    if (idx > 0) setStep(STEPS[idx - 1], { replace: true });
   };
 
   if (isLoading) {
     return (
       <div className="wizard">
+        <SheetHead title="Candidate intake" />
         <p className="wizard-loading">Loading your setup…</p>
       </div>
     );
   }
 
-  // Phase 22: landing recomputes from real readiness every render, but
-  // ``bypassLanding`` keeps the wizard visible while the user is in
-  // the middle of an explicit wizard task they navigated to (Add
-  // another job, Add supporting doc, mid-stream prep). Cleared when
-  // prep completes and there's no outstanding mapping work.
+  // The landing is the packet's cover: shown when the packet is complete
+  // and nothing is in flight, unless the URL names a wizard step (adding a
+  // job or a doc), which prep clears once it finishes.
   const hasUnmapped = (status?.unmapped_project_doc_count ?? 0) > 0;
-  if (setupReady && !isPreparing && !hasUnmapped && !bypassLanding) {
+  if (setupReady && selectedJob && !isPreparing && !hasUnmapped && !forcedStep) {
     return (
       <ReadyLanding
-        cv={cv}
+        status={status}
         job={selectedJob}
-        techDocCount={technicalDocs.length}
+        cv={cv}
+        techDocs={technicalDocs}
+        repos={docs.filter((doc) => doc.kind === "github_repo")}
         onStart={() => navigate("/interview")}
-        onAddJob={() => navigate("/setup?new_job=1")}
-        onAddDocs={() => navigate("/setup?add_doc=1")}
         onManage={() => navigate("/setup/manage")}
       />
     );
@@ -722,19 +704,25 @@ export function SetupPage() {
 
   return (
     <div className="wizard">
+      <SheetHead title="Candidate intake" page={`Page ${stepIndex + 1} of ${STEPS.length}`}>
+        <Field label="Candidate" value={user?.email} />
+        <JobField />
+        <Field label="CV on file" value={cv?.filename} empty="none yet" />
+      </SheetHead>
+
       <header className="wizard-header">
-        <div className="wizard-progress">
+        <div className="wizard-progress" aria-label="Intake steps">
           {STEPS.map((s, i) => (
             <span
               key={s}
               className={`wizard-dot${i === stepIndex ? " active" : ""}${i < stepIndex ? " done" : ""}`}
               title={STEP_TITLES[s]}
-            />
+              aria-current={i === stepIndex ? "step" : undefined}
+            >
+              {STEP_SHORT[s]}
+            </span>
           ))}
         </div>
-        <span className="wizard-step-counter">
-          Step {stepIndex + 1} of {STEPS.length}
-        </span>
       </header>
 
       <div className="wizard-stage">
@@ -775,7 +763,7 @@ export function SetupPage() {
       {/* Phase 22: mapping HITL renders as a top-level modal so it floats
           above the wizard regardless of which step the user is on. ESC /
           backdrop close = "skip this doc" (matches the modal's Skip button
-          and the prep_graph's HITL contract — skipping is the user's
+          and the prep_graph's HITL contract - skipping is the user's
           escape hatch). */}
       <MappingModal
         open={pendingMapping != null}
@@ -785,7 +773,7 @@ export function SetupPage() {
         onClose={() => resumeMapping({ action: "skip" })}
       />
 
-      {/* Phase 32: repo-selection HITL — same top-level modal pattern as
+      {/* Phase 32: repo-selection HITL - same top-level modal pattern as
           mapping. Closing / skipping resumes with an empty selection. */}
       <RepoSelectModal
         open={pendingRepos != null}
@@ -813,7 +801,7 @@ export function SetupPage() {
           ) : null}
 
           {/* Phase 22: the wizard footer never shows "Start practicing".
-              ReadyLanding owns that affordance — once setup is genuinely
+              ReadyLanding owns that affordance - once setup is genuinely
               complete the page re-renders and the landing replaces this
               footer entirely. */}
           {step === "prep" ? null : step === "jd" ? (
@@ -882,7 +870,7 @@ function StepGithub({ token }: { token: string | null }) {
 
   // Pre-fill from the persisted handle, falling back to a CV-mined suggestion.
   // When the suggestion comes from the CV (and nothing's persisted yet) we
-  // auto-verify it so the card lands already-confirmed — the user only has to
+  // auto-verify it so the card lands already-confirmed - the user only has to
   // touch it to correct a wrong guess.
   useEffect(() => {
     if (!token) return;
@@ -896,11 +884,11 @@ function StepGithub({ token }: { token: string | null }) {
         if (s.current) {
           setPhase("ok"); // already verified in a prior session
         } else if (s.cv_suggested) {
-          void verify(s.cv_suggested); // mined from the CV — confirm it for them
+          void verify(s.cv_suggested); // mined from the CV - confirm it for them
         }
       })
       .catch(() => {
-        /* non-fatal — the card still works with manual entry */
+        /* non-fatal - the card still works with manual entry */
       });
     return () => {
       cancelled = true;
@@ -957,7 +945,7 @@ function StepGithub({ token }: { token: string | null }) {
           {typeof result?.public_repos === "number"
             ? `${result.public_repos} public repos`
             : "Verified"}
-          {" — you'll pick which to include during prep."}
+          {" - you'll pick which to include during prep."}
         </p>
       ) : null}
       {phase === "notfound" ? (
@@ -1061,7 +1049,7 @@ function StepDocs({
       <label className="dropzone">
         <FileUp size={24} />
         <span className="dropzone-title">Add a project doc</span>
-        <span className="dropzone-sub">Optional — PDF or DOCX</span>
+        <span className="dropzone-sub">Optional - PDF or DOCX</span>
         <input type="file" accept=".pdf,.docx" onChange={onPick} hidden />
       </label>
 
@@ -1073,7 +1061,7 @@ function StepDocs({
               <div key={d.id} className="wizard-doc-item">
                 <strong>{d.filename}</strong>
                 <span className="wizard-doc-meta">
-                  {d.project_title ? `"${d.project_title}"` : "Unmapped — we'll ask in the next step"}
+                  {d.project_title ? `"${d.project_title}"` : "Unmapped - we'll ask in the next step"}
                 </span>
                 {pill ? <StatusPill tone={pill.tone}>{pill.label}</StatusPill> : null}
               </div>
@@ -1134,73 +1122,7 @@ function StepPrep({
     </div>
   );
 }
-// ─────────────────────────── Ready landing + helpers ─────────────────────
-
-function ReadyLanding({
-  cv,
-  job,
-  techDocCount,
-  onStart,
-  onAddJob,
-  onAddDocs,
-  onManage,
-}: {
-  cv: DocumentItem | undefined;
-  job: JobItem | null;
-  techDocCount: number;
-  onStart: () => void;
-  onAddJob: () => void;
-  onAddDocs: () => void;
-  onManage: () => void;
-}) {
-  // Phase 22: parsed_json now arrives on the list endpoint too, so
-  // ReadyLanding can derive role/company straight from the active
-  // JobItem instead of taking a separate ``activeJobParsed`` prop
-  // that could drift from what Manage/dropdown render.
-  const parsed = (job?.parsed_json as
-    | { title?: string; company_name?: string }
-    | null
-    | undefined) ?? null;
-  const role = parsed?.title;
-  const company = parsed?.company_name;
-  return (
-    <div className="ready-landing">
-      <span className="ready-eyebrow">Ready to practice</span>
-      <h1 className="ready-title">
-        {role || "Role"} <span className="ready-at">@</span> {company || "Company"}
-      </h1>
-      <div className="ready-meta">
-        {cv ? <span>CV · {cv.filename}</span> : null}
-        {job ? (
-          <span>
-            JD · {job.source_url || (job.preview ? `"${job.preview.slice(0, 80)}…"` : "Pasted")}
-          </span>
-        ) : null}
-        <span>
-          {techDocCount === 0
-            ? "No supporting docs"
-            : `${techDocCount} supporting doc${techDocCount === 1 ? "" : "s"}`}
-        </span>
-      </div>
-      <div className="ready-actions">
-        <button className="btn-primary" type="button" onClick={onStart}>
-          Start a practice round <ArrowRight size={14} />
-        </button>
-        <div className="ready-actions-row">
-          <button className="btn-ghost" type="button" onClick={onAddJob}>
-            Add another job
-          </button>
-          <button className="btn-ghost" type="button" onClick={onAddDocs}>
-            Add supporting doc
-          </button>
-        </div>
-        <button className="btn-quiet" type="button" onClick={onManage}>
-          Manage CV, JDs &amp; docs
-        </button>
-      </div>
-    </div>
-  );
-}
+// ─────────────────────────── helpers ─────────────────────────────────────
 
 function Check({ label, ok }: { label: string; ok?: boolean }) {
   return (

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V5 · Index line</title>
+<script>if (location.hash === "#night") document.documentElement.dataset.theme = "dark";</script>
+<link rel="stylesheet" href="landing.css">
+<style>
+
+.box.next { display: flex; align-items: center; justify-content: space-between; gap: 28px; padding: 26px 20px 20px; }
+.box.next p { margin: 0; font-size: 21px; font-weight: 500; line-height: 1.35; text-wrap: pretty; }
+.box.next .btn-primary { flex: none; }
+@media (max-width: 720px) { .box.next { flex-direction: column; align-items: flex-start; } .box.next p { font-size: 17px; } }
+
+.box.brief { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.box.brief .lede { font-size: 16px; font-weight: 500; line-height: 1.4; }
+.box.brief .row { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 14px; line-height: 1.5; color: var(--ink); }
+.box.brief .k { font-weight: 700; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
+.box.brief .row p { margin: 0; }
+.box.brief .sep { color: var(--ink-3); }
+@media (max-width: 720px) { .box.brief .row { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+.index { display: grid; gap: 6px; padding: 2px 0 0 2px; }
+.index ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 24px; font-size: 14px; }
+.index li { display: inline-flex; align-items: center; gap: 8px; }
+.index li i { width: 12px; height: 12px; border: 1.5px solid var(--ink); display: inline-block; }
+.index li.done i { background: var(--ink); box-shadow: inset 0 0 0 2px var(--paper); }
+.index li.missing { color: var(--ink-3); }
+.index li .btn-quiet { height: 18px; padding: 0; color: var(--ink-2); }
+.index .tally { margin-left: auto; font-weight: 700; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
+.index .hint { font-size: 12.5px; }
+
+</style>
+</head>
+<body>
+<div class="desk">
+  <div class="desk-bar">
+    <nav class="tabs"><a class="tab active" href="#">Setup</a><a class="tab" href="#">Practice</a><a class="tab" href="#">History</a></nav>
+    <div class="desk-tools"><span class="who">packet-review@gmail.com</span><button class="desk-btn"><span>Night</span></button><button class="desk-btn"><span>Log out</span></button></div>
+  </div>
+  <main class="sheet">
+    <i class="staple a"></i><i class="staple b"></i>
+    <div class="wizard">
+      <header class="sheet-head"><h1>The packet</h1><span class="page">Prepped 28 Aug</span></header>
+      <div class="fields">
+        <div class="f"><span class="cap">Candidate</span><span class="v">packet-review@gmail.com</span></div>
+        <div class="f wide"><span class="cap">Role / company</span><button class="active-job-pill"><span class="active-job-value"><span class="active-job-role">GenAI Engineer</span><span class="active-job-company">Northwind Labs</span></span><svg class="active-job-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></div>
+      </div>
+
+
+<div class="box next"><span class="lbl">Next</span>
+  <p>One topic at a time: the interviewer asks, follows up, then scores it and shows a model answer.</p>
+  <button class="btn-primary" type="button">Start a round <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+</div>
+
+<div class="index" aria-label="What is in the packet">
+  <ul>
+    <li class="done"><i></i>CV</li>
+    <li class="done"><i></i>Job description</li>
+    <li class="done"><i></i>1 supporting doc</li>
+    <li class="missing"><i></i>GitHub repos <a class="btn-quiet" href="#">Add</a></li>
+    <li class="tally">3 of 4 in the packet</li>
+  </ul>
+  <span class="hint">Public repos let the deep-dive ask about your own code, not just what the CV says about it.</span>
+</div>
+
+<div class="box brief"><span class="lbl">Role brief</span>
+  <p class="lede">Senior GenAI Engineer at Northwind Labs, which builds decision-support tools for logistics operators.</p>
+  <div class="row"><span class="k">Must have</span><p>4+ years in ML/backend engineering, 1+ shipping LLM features to production <span class="sep">·</span> Strong Python; experience with FastAPI, Postgres, vector search (pgvector or similar) <span class="sep">·</span> Hands-on with RAG, prompt engineering, and LLM evaluation <span class="sep">·</span> Clear written communication; you document decisions</p></div>
+  <div class="row"><span class="k">Nice to have</span><p>Experience with agent frameworks (LangGraph or similar) <span class="sep">·</span> Observability (Langfuse) <span class="sep">·</span> GPU inference tuning</p></div>
+  <div class="row"><span class="k">Looks for</span><p>cross-team communication <span class="sep">·</span> ownership <span class="sep">·</span> clear communication <span class="sep">·</span> stakeholder management</p></div>
+</div>
+
+
+    </div>
+    <footer class="sheet-foot">Interview Coach · runs on your machine</footer>
+  </main>
+</div>
+</body>
+</html>

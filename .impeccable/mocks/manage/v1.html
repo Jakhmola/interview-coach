@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V1 · Slips</title>
+<script>if (location.hash === "#night") document.documentElement.dataset.theme = "dark";</script>
+<link rel="stylesheet" href="manage.css">
+<style>
+/* chrome shared by every variant */
+.manage-page { display: grid; gap: 22px; }
+.back { justify-self: start; height: 24px; padding: 0; margin-top: -8px; }
+.manage-section { display: grid; gap: 10px; border-top: 1px solid var(--ink); padding-top: 10px; }
+.manage-section h2 { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); margin: 0; }
+.manage-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.actions { display: grid; gap: 4px; justify-items: end; flex: none; }
+.actions .row { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.actions .consequence { font-size: 12px; color: var(--ink-2); text-align: right; max-width: 30ch; }
+.meta { font-size: 12.5px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.danger .about { max-width: 70ch; }
+
+.file { display: grid; grid-template-columns: 160px minmax(0, 1fr) auto; gap: 0 22px; align-items: start; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.file.plain { grid-template-columns: minmax(0, 1fr) auto; }
+.file .about { display: grid; gap: 6px; padding-top: 2px; align-content: start; }
+.file .about strong { font-weight: 500; font-size: 15px; }
+.file .about .btn-quiet { justify-self: start; height: 22px; padding: 0; margin-top: 2px; }
+.thumb { display: block; width: 160px; height: 200px; padding: 12px 11px; text-align: left; background: var(--paper); border: 1px solid var(--rule-2); box-shadow: 0 5px 14px rgba(0, 0, 0, 0.16); overflow: hidden; position: relative; font-family: var(--font-typed); font-size: 8.5px; line-height: 1.32; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; cursor: zoom-in; transition: transform 160ms cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 160ms; }
+.thumb b { display: block; color: var(--ink); font-weight: 700; margin-bottom: 2px; }
+.thumb::after { content: ""; position: absolute; inset: auto 0 0 0; height: 48px; background: linear-gradient(transparent, var(--paper)); }
+.thumb:hover { transform: translateY(-2px) rotate(-0.6deg); box-shadow: 0 10px 22px rgba(0, 0, 0, 0.2); }
+.thumb.readme { font-size: 9px; }
+@media (max-width: 720px) { .file { grid-template-columns: 120px minmax(0, 1fr); } .file .actions { grid-column: 1 / -1; justify-items: start; } .thumb { width: 120px; height: 150px; font-size: 7px; } }
+
+</style>
+</head>
+<body>
+<div class="desk">
+  <div class="desk-bar">
+    <nav class="tabs"><a class="tab active" href="#">Setup</a><a class="tab" href="#">Practice</a><a class="tab" href="#">History</a></nav>
+    <div class="desk-tools"><span class="who">packet-review@gmail.com</span><button class="desk-btn"><span>Night</span></button><button class="desk-btn"><span>Log out</span></button></div>
+  </div>
+  <main class="sheet">
+    <i class="staple a"></i><i class="staple b"></i>
+    <div class="manage-page">
+      <header class="sheet-head"><h1>On file</h1><span class="page">4 of 4 in the packet</span></header>
+      <div class="fields">
+        <div class="f"><span class="cap">Candidate</span><span class="v">packet-review@gmail.com</span></div>
+      </div>
+      <a class="btn-quiet back" href="#"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>Back to the packet</a>
+
+<section class="manage-section">
+  <h2>CV</h2>
+  <div class="file">
+    <button class="thumb " type="button" aria-label="Open the full text"><b>Priya Raman</b>GenAI Engineer · Bengaluru · priya.raman@example.com · github.com/priyaraman (synthetic CV for UI review)
+Experience
+Bobble AI - Senior Machine Learning Engineer (2022 - present)
+Designed a modular prompt system for a keyboard assistant: reusable tone, guideline and output-format blocks; 70% of prompt structure shared across features.
+Built an LLM-powered conversational agent with retrieval over product docs; cut escalation rate 30% and doubled campaign CTR during seasonal launches.
+Introduced parallel generation across three prompt variants per request, reducing perceived latency to a single LLM call; owned the evaluation harness (BLEU, human preference, guardrail checks).
+Aurora Analytics - Data Scientist (2019 - 2022)
+Shipped a churn model (XGBoost) feeding a retention dashboard used by 40 account managers.
+Migrated batch feature pipelines to Airflow; p95 pipeline latency down 55%.
+Skills
+Python, PyTorch, LangChain, FastAPI, Postgres, pgvector, Docker, prompt engineering, RAG, evaluation, Airflow, AWS
+Education
+M.Tech Computer Science, IIT Madras, 2019</button>
+    <div class="about"><strong>cv-synthetic.docx</strong><span class="meta">Uploaded 27 Aug · 1,083 chars</span><a class="btn-quiet" href="#">Read the full text</a></div>
+    <div class="actions"><div class="row"><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 12v6"/><path d="m15 15-3-3-3 3"/></svg> Replace CV</button></div><span class="consequence">Rebuilds the profile and remaps 1 doc.</span></div>
+  </div>
+</section>
+<section class="manage-section">
+  <h2>Job descriptions</h2>
+  <div class="file">
+    <button class="thumb " type="button" aria-label="Open the full text"><b>GenAI Engineer - Northwind Labs (Bengaluru, hybrid)</b>
+Northwind Labs builds decision-support tools for logistics operators. We are hiring a GenAI Engineer to own our LLM features end to end.
+
+What you will do
+- Design and ship retrieval-augmented assistants over operational documents (SOPs, incident logs, contracts).
+- Build evaluation harnesses: offline metrics, human preference loops, guardrails and red-teaming.
+- Own prompt systems and model routing across hosted and self-hosted models (llama.cpp, vLLM).
+- Optimise latency and cost: batching, caching, parallel generation, streaming.
+- Work with product and ops to turn ambiguous workflows into reliable agents.
+
+Must have
+- 4+ years in ML/backend engineering, 1+ shipping LLM features to production.
+- Strong Python; experience with FastAPI, Postgres, vector search (pgvector or similar).
+- Hands-on with RAG, prompt engineering, and LLM evaluation.
+- Clear written communication; you document decisions.
+
+Nice to have
+- Experience with agent frameworks (LangGraph or similar), observability (Langfuse), and GPU inference tuning.</button>
+    <div class="about"><strong>GenAI Engineer @ Northwind Labs</strong><span class="meta">Pasted 28 Aug · 1,088 chars <span class="status-pill status-good">Active</span></span><a class="btn-quiet" href="#">Read the full text</a></div>
+    <div class="actions"><div class="row"><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg> Re-analyze</button><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg> Delete</button></div></div>
+  </div>
+</section>
+<section class="manage-section">
+  <h2>Supporting docs</h2>
+  <div class="file">
+    <button class="thumb " type="button" aria-label="Open the full text"><b>LLM-Powered Conversational Agent - Bobble AI (design note)</b>Synthetic project write-up for UI review. Architecture note for the retrieval-augmented keyboard assistant shipped at Bobble AI in 2023.
+Retrieval
+Product docs were chunked at 400-600 tokens with 15% overlap and embedded with a Jina model into pgvector. Queries ran hybrid BM25 plus vector search fused with reciprocal rank fusion; a metadata filter restricted search to the user locale and product surface. Nightly re-embedding was replaced by incremental embedding keyed on document hash, cutting embedding cost by roughly 80%.
+Generation and prompts
+Prompts were assembled from versioned blocks (tone, guidelines, output format). Three variants were generated in parallel under a semaphore of three and a per-request token budget; the fastest well-formed response was returned, taking p95 latency from 4.2 s to 1.6 s.
+Evaluation and guardrails
+An offline set of 1,200 labelled prompts scored relevance and format compliance; a weekly panel of five raters scored preference. Guardrails combined regex filters with a small unsafe-content classifier; failures were logged to Langfuse with the prompt version. Escalation rate fell 30% and campaign CTR doubled during the seasonal launch.</button>
+    <div class="about"><strong>project-doc-synthetic.docx</strong><span class="meta">Filed under “LLM-Powered Conversational Agent” at Bobble AI · 1,245 chars</span><a class="btn-quiet" href="#">Read the full text</a></div>
+    <div class="actions"><div class="row"><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg> Remap</button><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg> Delete</button></div></div>
+  </div>
+</section>
+<section class="manage-section">
+  <div class="manage-section-head"><h2>GitHub repos</h2><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Add / manage repos</button></div>
+  <div class="file">
+    <button class="thumb readme" type="button" aria-label="Open the full text"><b># keyboard-rag</b>Retrieval-augmented assistant for a mobile keyboard.
+
+## What it does
+- Chunks product docs (400-600 tokens, 15% overlap) into pgvector
+- Hybrid BM25 + vector search, fused with RRF
+- Three prompt variants in parallel; fastest well-formed wins
+- Offline eval: 1,200 labelled prompts, weekly rater panel
+
+## Stack
+Python · FastAPI · pgvector · Jina embeddings · Langfuse</button>
+    <div class="about"><strong>keyboard-rag</strong><a class="repo-link" href="#"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg> github.com/priyaraman/keyboard-rag</a><div class="repo-chips"><span class="repo-chip">Python</span><span class="repo-chip">FastAPI</span><span class="repo-chip">pgvector</span><span class="repo-chip">Jina</span><span class="repo-chip">Langfuse</span></div></div>
+    <div class="actions"><div class="row"><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg> Delete</button></div></div>
+  </div>
+</section>
+
+<section class="manage-section danger">
+  <h2>Danger zone</h2>
+  <div class="file plain">
+    <div class="about"><strong>Reset account</strong><span class="meta">Deletes every file, job description, session and the profile. Your login stays.</span></div>
+    <div class="actions"><div class="row"><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg> Reset account…</button></div></div>
+  </div>
+</section>
+
+
+    </div>
+    <footer class="sheet-foot">Interview Coach · runs on your machine</footer>
+  </main>
+</div>
+</body>
+</html>

@@ -12,7 +12,7 @@ import {
 //
 // Identical between the prep-graph HITL pause and the out-of-graph remap
 // flow used by Manage. Lives in one component so the two surfaces share
-// vocabulary — nothing diverges silently.
+// vocabulary - nothing diverges silently.
 
 export type Selection =
   | { kind: "highlight"; experienceIdx: number; highlightIdx: number }
@@ -80,7 +80,7 @@ export function MappingModal({
   /** Called on backdrop click + ESC. Parent decides what that means. */
   onClose: () => void;
 }) {
-  // Body scroll-lock while the modal is open — reinforces the "do this
+  // Body scroll-lock while the modal is open - reinforces the "do this
   // first" contract the user already implicitly accepted by clicking
   // through to the mapping step / Remap button.
   useEffect(() => {

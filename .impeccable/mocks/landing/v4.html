@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V4 · Ruler</title>
+<script>if (location.hash === "#night") document.documentElement.dataset.theme = "dark";</script>
+<link rel="stylesheet" href="landing.css">
+<style>
+
+.box.next { display: flex; align-items: center; justify-content: space-between; gap: 28px; padding: 26px 20px 20px; }
+.box.next p { margin: 0; font-size: 21px; font-weight: 500; line-height: 1.35; text-wrap: pretty; }
+.box.next .btn-primary { flex: none; }
+@media (max-width: 720px) { .box.next { flex-direction: column; align-items: flex-start; } .box.next p { font-size: 17px; } }
+
+.box.brief { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.box.brief .lede { font-size: 16px; font-weight: 500; line-height: 1.4; }
+.box.brief .row { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 14px; line-height: 1.5; color: var(--ink); }
+.box.brief .k { font-weight: 700; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
+.box.brief .row p { margin: 0; }
+.box.brief .sep { color: var(--ink-3); }
+@media (max-width: 720px) { .box.brief .row { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
+
+.ruler { display: grid; gap: 8px; }
+.ruler-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.ruler-head .k { font-weight: 700; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
+.ruler-head .k b { color: var(--ink); }
+.ruler-head .btn-quiet { height: 22px; padding: 0; }
+.ruler-bar { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.seg { display: grid; gap: 6px; min-width: 0; }
+.seg i { display: block; height: 8px; background: var(--ink); }
+.seg.missing i { height: 6px; background: transparent; border: 1px dashed var(--rule-2); }
+.seg .k { font-weight: 700; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); }
+.seg .v { font-size: 13px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.seg.missing .k, .seg.missing .v { color: var(--ink-3); }
+.seg.missing .v .btn-quiet { height: 18px; padding: 0; margin-left: 6px; color: var(--ink-2); }
+@media (max-width: 720px) { .ruler-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+</style>
+</head>
+<body>
+<div class="desk">
+  <div class="desk-bar">
+    <nav class="tabs"><a class="tab active" href="#">Setup</a><a class="tab" href="#">Practice</a><a class="tab" href="#">History</a></nav>
+    <div class="desk-tools"><span class="who">packet-review@gmail.com</span><button class="desk-btn"><span>Night</span></button><button class="desk-btn"><span>Log out</span></button></div>
+  </div>
+  <main class="sheet">
+    <i class="staple a"></i><i class="staple b"></i>
+    <div class="wizard">
+      <header class="sheet-head"><h1>The packet</h1><span class="page">Prepped 28 Aug</span></header>
+      <div class="fields">
+        <div class="f"><span class="cap">Candidate</span><span class="v">packet-review@gmail.com</span></div>
+        <div class="f wide"><span class="cap">Role / company</span><button class="active-job-pill"><span class="active-job-value"><span class="active-job-role">GenAI Engineer</span><span class="active-job-company">Northwind Labs</span></span><svg class="active-job-caret" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button></div>
+      </div>
+
+
+<div class="box next"><span class="lbl">Next</span>
+  <p>One topic at a time: the interviewer asks, follows up, then scores it and shows a model answer.</p>
+  <button class="btn-primary" type="button">Start a round <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></button>
+</div>
+
+<div class="ruler" aria-label="How full the packet is">
+  <div class="ruler-head"><span class="k">Packet · <b>3 of 4</b> · 75%</span><a class="btn-quiet" href="#">Manage</a></div>
+  <div class="ruler-bar">
+    <div class="seg"><i></i><span class="k">CV</span><span class="v">cv-synthetic.docx</span></div>
+    <div class="seg"><i></i><span class="k">Job description</span><span class="v">Pasted 28 Aug</span></div>
+    <div class="seg"><i></i><span class="k">Supporting docs</span><span class="v">1 · project-doc-synthetic.docx</span></div>
+    <div class="seg missing"><i></i><span class="k">GitHub repos</span><span class="v">None yet · questions about your own code need them<a class="btn-quiet" href="#">Add repos</a></span></div>
+  </div>
+</div>
+
+<div class="box brief"><span class="lbl">Role brief</span>
+  <p class="lede">Senior GenAI Engineer at Northwind Labs, which builds decision-support tools for logistics operators.</p>
+  <div class="row"><span class="k">Must have</span><p>4+ years in ML/backend engineering, 1+ shipping LLM features to production <span class="sep">·</span> Strong Python; experience with FastAPI, Postgres, vector search (pgvector or similar) <span class="sep">·</span> Hands-on with RAG, prompt engineering, and LLM evaluation <span class="sep">·</span> Clear written communication; you document decisions</p></div>
+  <div class="row"><span class="k">Nice to have</span><p>Experience with agent frameworks (LangGraph or similar) <span class="sep">·</span> Observability (Langfuse) <span class="sep">·</span> GPU inference tuning</p></div>
+  <div class="row"><span class="k">Looks for</span><p>cross-team communication <span class="sep">·</span> ownership <span class="sep">·</span> clear communication <span class="sep">·</span> stakeholder management</p></div>
+</div>
+
+
+    </div>
+    <footer class="sheet-foot">Interview Coach · runs on your machine</footer>
+  </main>
+</div>
+</body>
+</html>

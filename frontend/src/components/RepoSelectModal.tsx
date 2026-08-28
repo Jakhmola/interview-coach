@@ -11,7 +11,7 @@ import { RepoListing } from "../api";
  * closing equals "select none" (the user's escape hatch), which deselects
  * everything previously ingested.
  *
- * The picker is deliberately coarse — name, description, language, stars,
+ * The picker is deliberately coarse - name, description, language, stars,
  * last-pushed, archived flag, CV-mention pre-check, and a search box. No
  * JD/tech ranking here: the rich signal doesn't exist pre-ingestion (focus
  * weighting handles relevance downstream).
@@ -22,7 +22,7 @@ export function RepoSelectModal({
   busy,
   onSubmit,
   onClose,
-  closeLabel = "Skip — no repos",
+  closeLabel = "Skip - no repos",
 }: {
   open: boolean;
   repos: RepoListing[] | null;
@@ -64,7 +64,7 @@ export function RepoSelectModal({
       }}
     >
       <div
-        className="mapping-modal"
+        className="mapping-modal wide"
         role="dialog"
         aria-modal="true"
         aria-labelledby="repo-modal-title"
@@ -81,6 +81,11 @@ export function RepoSelectModal({
   );
 }
 
+/** "Jan 2023" - a repo's last push; the day would be noise next to years-old repos. */
+function monthYear(value: string) {
+  return new Date(value).toLocaleDateString(undefined, { month: "short", year: "numeric" });
+}
+
 function RepoSelectBody({
   repos,
   busy,
@@ -95,7 +100,7 @@ function RepoSelectBody({
   closeLabel: string;
 }) {
   // Pre-check CV-mentioned repos (setup), already-ingested ones (Manage / the
-  // user's prior selection), and any that failed to ingest — so a retry
+  // user's prior selection), and any that failed to ingest - so a retry
   // resubmits the same set; unchecking a failed repo skips it instead.
   const [selected, setSelected] = useState<Set<string>>(
     () =>
@@ -155,7 +160,7 @@ function RepoSelectBody({
         </div>
       </header>
 
-      <div className="mapping-modal-body">
+      <div className="mapping-modal-body repo-body">
         <label className="wizard-form">
           <input
             value={query}
@@ -165,25 +170,34 @@ function RepoSelectBody({
           />
         </label>
 
-        <div className="wizard-mapping-targets">
+        <div className="repo-list">
           {filtered.length === 0 ? (
             <p className="wizard-blurb">No repos match your filter.</p>
           ) : (
             filtered.map((r) => (
-              <label key={r.html_url} className="wizard-checkbox-row">
+              <label
+                key={r.html_url}
+                className={selected.has(r.html_url) ? "repo-row checked" : "repo-row"}
+              >
                 <input
                   type="checkbox"
                   checked={selected.has(r.html_url)}
                   onChange={() => toggle(r.html_url)}
                   disabled={busy}
                 />
-                <span>
+                <span className="repo-main">
                   <strong>{r.full_name}</strong>
                   {r.cv_mentioned ? <em className="wizard-suggested-tag"> on your CV</em> : null}
                   {r.archived ? <em className="wizard-suggested-tag"> archived</em> : null}
-                  {r.description ? (
-                    <span className="wizard-doc-meta"> — {r.description}</span>
+                  {r.description ? <span className="repo-desc clamp">{r.description}</span> : null}
+                  {r.ingest_error ? (
+                    <span className="repo-desc repo-err">
+                      <AlertTriangle size={11} /> {r.ingest_error.step} step failed -{" "}
+                      {r.ingest_error.reason}
+                    </span>
                   ) : null}
+                </span>
+                <span className="repo-side">
                   <span className="wizard-chip-row">
                     {r.language ? <span className="wizard-chip">{r.language}</span> : null}
                     {r.stars > 0 ? (
@@ -192,12 +206,7 @@ function RepoSelectBody({
                       </span>
                     ) : null}
                   </span>
-                  {r.ingest_error ? (
-                    <span className="wizard-doc-meta danger">
-                      <AlertTriangle size={11} /> {r.ingest_error.step} step failed —{" "}
-                      {r.ingest_error.reason}
-                    </span>
-                  ) : null}
+                  {r.pushed_at ? <span className="repo-pushed">Pushed {monthYear(r.pushed_at)}</span> : null}
                 </span>
               </label>
             ))

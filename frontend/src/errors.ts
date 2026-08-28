@@ -28,7 +28,7 @@ export const ERRORS: Record<string, ErrorEntry> = {
   },
   "upload your CV and build a profile before adding project docs": {
     message: "Your profile is still being built.",
-    hint: "This can take up to a minute or two after CV upload — the mapping will open as soon as it's ready.",
+    hint: "This can take up to a minute or two after CV upload - the mapping will open as soon as it's ready.",
   },
   "apply_mapping needs a profile; upload your CV first": {
     message: "Your profile is still being built.",
@@ -50,7 +50,7 @@ export const ERRORS: Record<string, ErrorEntry> = {
   },
   NoSearchHits: {
     message: "No public info found about this company.",
-    hint: "Re-analyze the JD from Manage — if the company name looks off, paste a clearer version.",
+    hint: "Re-analyze the JD from Manage - if the company name looks off, paste a clearer version.",
   },
   NoUsablePages: {
     message: "Found search results but couldn't read them.",
@@ -59,7 +59,7 @@ export const ERRORS: Record<string, ErrorEntry> = {
 
   // Sessions
   session_not_found: {
-    message: "We couldn't find that session — it may have been deleted.",
+    message: "We couldn't find that session - it may have been deleted.",
   },
   session_status_abandoned: {
     message: "This session was ended.",
@@ -78,19 +78,19 @@ export const ERRORS: Record<string, ErrorEntry> = {
   // (e.g. it was already evaluated). Refreshing reloads the live state.
   ThreadNotFound: {
     message: "We lost track of the current topic.",
-    hint: "Refresh to reload this round — your progress is saved.",
+    hint: "Refresh to reload this round - your progress is saved.",
   },
   streaming_json_error: {
     message: "The interviewer's response came back malformed.",
-    hint: "Send your message again — your progress is saved.",
+    hint: "Send your message again - your progress is saved.",
   },
 
   // Documents / jobs
-  job_not_found: { message: "We couldn't find that JD — it may have been deleted." },
+  job_not_found: { message: "We couldn't find that JD - it may have been deleted." },
   "Document not found": {
-    message: "We couldn't find that document — it may have been deleted.",
+    message: "We couldn't find that document - it may have been deleted.",
   },
-  "Job not found": { message: "We couldn't find that JD — it may have been deleted." },
+  "Job not found": { message: "We couldn't find that JD - it may have been deleted." },
   job_in_use: {
     message: "This JD has an active session.",
     hint: "End the session before deleting.",
@@ -100,9 +100,13 @@ export const ERRORS: Record<string, ErrorEntry> = {
     hint: "Wait for it to finish or close the other tab.",
   },
   // Streaming / auth
+  interview_failed: {
+    message: "The interviewer's turn failed.",
+    hint: "Nothing was lost. Send your answer again; if it keeps failing, check the api logs.",
+  },
   stream_interrupted: {
     message: "Connection dropped mid-response.",
-    hint: "Try again — your progress is saved.",
+    hint: "Try again - your progress is saved.",
   },
   auth_expired: { message: "Your session expired. Please log in again." },
 };
