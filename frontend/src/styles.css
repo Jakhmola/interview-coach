@@ -1950,19 +1950,25 @@ mark.warn,
   place-items: center;
   padding: 24px;
 }
+/* the slip keeps its title and its buttons in view; only the body scrolls */
 .mapping-modal {
   position: relative;
   width: min(720px, 100%);
   max-height: calc(100vh - 48px);
-  overflow: auto;
+  overflow: hidden;
   background: var(--paper);
   background-image: var(--grain);
   box-shadow: var(--slip-shadow);
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 16px;
   padding: 28px 32px 24px;
 }
+.mapping-modal.wide {
+  width: min(880px, 100%);
+}
 .mapping-modal-header {
+  flex: none;
   display: grid;
   gap: 6px;
   padding-right: 40px;
@@ -2010,8 +2016,79 @@ mark.warn,
   color: var(--paper);
 }
 .mapping-modal-body {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
+  min-height: 0;
+  overflow: auto;
+}
+/* the repo picker scrolls its list under a fixed filter */
+.repo-body {
+  overflow: hidden;
+}
+.repo-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-2) transparent;
+}
+/* a repo row: mark it and its name takes the highlighter */
+.repo-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: start;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+}
+.repo-row:hover {
+  background: var(--paper-2);
+}
+.repo-row input {
+  margin-top: 3px;
+}
+.repo-main {
+  min-width: 0;
+  font-size: 14.5px;
+}
+.repo-main strong {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  padding: 1px 4px;
+  margin: 0 -4px;
+  box-decoration-break: clone;
+  background: linear-gradient(var(--hl), var(--hl)) left / 0 100% no-repeat;
+  transition: background-size 380ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.repo-row.checked strong {
+  color: var(--hl-ink);
+  background-size: 100% 100%;
+}
+.repo-desc {
+  --lines: 2;
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+.repo-err {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--pen);
+}
+.repo-side {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+  padding-top: 2px;
+}
+.repo-pushed {
+  font-size: 12px;
+  color: var(--ink-3);
+  white-space: nowrap;
 }
 .mapping-modal-preview {
   border: 1px solid var(--rule-2);
@@ -2099,6 +2176,7 @@ mark.warn,
   margin-left: 4px;
 }
 .mapping-modal-footer {
+  flex: none;
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -3003,5 +3081,17 @@ html[data-vt="route"]::view-transition-new(sheet) {
   }
   .mapping-modal {
     padding: 22px 18px 18px;
+  }
+  .repo-side {
+    grid-column: 2;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    padding-top: 0;
+  }
+  .mapping-modal-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
   }
 }

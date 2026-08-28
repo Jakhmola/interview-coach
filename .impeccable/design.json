@@ -66,7 +66,7 @@
       "cabinet": { "columns": "minmax(260px, 340px) minmax(0, 1fr)", "gap": "0 36px", "left": ".index: four ink-ruled sections with 11px caps heads and a quiet Add; .entry button rows (14.5px name, 12.5px meta) named by what the file is, never its filename; the open one fills --hl", "right": ".box.pane labelled by kind: .pane-head (provenance + .pane-actions with a 12px consequence), .digest rows 104px minmax(0, 1fr) with 10px caps keys, or .pane-text (typed 13px, 560px max) after Read the full text", "tablet": "one column under 980px; pane head and digest rows stack under 720px" },
       "record": { "head": "auto minmax(0, 1fr) auto", "body": "minmax(0, 3fr) minmax(0, 2fr)", "gap": "12px 40px", "padding": "12px 0 14px" },
       "exchange": { "columns": "120px minmax(0, 1fr)", "gap": "16px", "phone": "one column, 2px gap under 720px" },
-      "modal": { "width": "min(720px, 100%)", "padding": "28px 32px 24px", "backdrop": "rgba(0, 0, 0, 0.55)" }
+      "modal": { "width": "min(720px, 100%)", "wideWidth": "min(880px, 100%) (repo picker)", "padding": "28px 32px 24px", "backdrop": "rgba(0, 0, 0, 0.55)", "scroll": "header and footer pinned, body scrolls (the repo picker scrolls only its list under a fixed filter)" }
     },
     "motion": [
       { "name": "ease-standard", "value": "150ms ease-out", "purpose": "Every hover / colour / border transition." },
