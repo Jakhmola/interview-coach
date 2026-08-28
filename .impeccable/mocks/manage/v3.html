@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>V3 · Reading pane</title>
+<script>if (location.hash === "#night") document.documentElement.dataset.theme = "dark";</script>
+<link rel="stylesheet" href="manage.css">
+<style>
+/* chrome shared by every variant */
+.manage-page { display: grid; gap: 22px; }
+.back { justify-self: start; height: 24px; padding: 0; margin-top: -8px; }
+.manage-section { display: grid; gap: 10px; border-top: 1px solid var(--ink); padding-top: 10px; }
+.manage-section h2 { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2); margin: 0; }
+.manage-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.actions { display: grid; gap: 4px; justify-items: end; flex: none; }
+.actions .row { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.actions .consequence { font-size: 12px; color: var(--ink-2); text-align: right; max-width: 30ch; }
+.meta { font-size: 12.5px; color: var(--ink-2); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.danger .about { max-width: 70ch; }
+
+.cabinet { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 0 36px; align-items: start; }
+.index { display: grid; gap: 16px; }
+.index .manage-section { gap: 4px; }
+.index .entry { display: grid; gap: 2px; padding: 8px 10px; margin: 0 -10px; border-bottom: 1px solid var(--rule); cursor: pointer; }
+.index .entry:hover { background: var(--paper-2); }
+.index .entry.on { background: var(--hl); color: #1b1b1f; }
+.index .entry.on .meta { color: #1b1b1f; opacity: 0.75; }
+.index .entry strong { font-weight: 500; font-size: 14.5px; }
+.index .entry .meta { font-size: 12px; }
+.index .head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.index .head .btn-quiet { height: 22px; padding: 0; }
+.pane { position: relative; border: 1px solid var(--ink); min-height: 420px; }
+.pane .lbl { position: absolute; top: -1px; left: -1px; padding: 3px 8px; background: var(--ink); color: var(--paper); font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; }
+.pane-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 26px 18px 12px; }
+.pane-head .about { display: grid; gap: 4px; }
+.pane-head strong { font-weight: 500; font-size: 15px; }
+.pane-text { margin: 0; padding: 4px 18px 20px; font-family: var(--font-typed); font-size: 13px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); max-height: 560px; overflow: auto; }
+.file.plain { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 22px; align-items: start; padding: 12px 0; }
+.file .about { display: grid; gap: 6px; }
+.file .about strong { font-weight: 500; font-size: 15px; }
+@media (max-width: 980px) { .cabinet { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+
+</style>
+</head>
+<body>
+<div class="desk">
+  <div class="desk-bar">
+    <nav class="tabs"><a class="tab active" href="#">Setup</a><a class="tab" href="#">Practice</a><a class="tab" href="#">History</a></nav>
+    <div class="desk-tools"><span class="who">packet-review@gmail.com</span><button class="desk-btn"><span>Night</span></button><button class="desk-btn"><span>Log out</span></button></div>
+  </div>
+  <main class="sheet">
+    <i class="staple a"></i><i class="staple b"></i>
+    <div class="manage-page">
+      <header class="sheet-head"><h1>On file</h1><span class="page">4 of 4 in the packet</span></header>
+      <div class="fields">
+        <div class="f"><span class="cap">Candidate</span><span class="v">packet-review@gmail.com</span></div>
+      </div>
+      <a class="btn-quiet back" href="#"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>Back to the packet</a>
+
+<div class="cabinet">
+  <nav class="index" aria-label="Files">
+    <section class="manage-section"><h2>CV</h2>
+      <div class="entry on"><strong>cv-synthetic.docx</strong><span class="meta">Priya Raman · 1,083 chars · 27 Aug</span></div>
+    </section>
+    <section class="manage-section"><h2>Job descriptions</h2>
+      <div class="entry"><strong>GenAI Engineer @ Northwind Labs</strong><span class="meta">Pasted 28 Aug · 1,088 chars <span class="status-pill status-good">Active</span></span></div>
+    </section>
+    <section class="manage-section"><h2>Supporting docs</h2>
+      <div class="entry"><strong>project-doc-synthetic.docx</strong><span class="meta">LLM-Powered Conversational Agent · 1,245 chars</span></div>
+    </section>
+    <section class="manage-section"><div class="head"><h2>GitHub repos</h2><a class="btn-quiet" href="#"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg> Add</a></div>
+      <div class="entry"><strong>keyboard-rag</strong><span class="meta">github.com/priyaraman/keyboard-rag</span></div>
+    </section>
+  </nav>
+  <div class="pane"><span class="lbl">CV</span>
+    <div class="pane-head">
+      <div class="about"><strong>cv-synthetic.docx</strong><span class="meta">Uploaded 27 Aug · 1,083 chars · the profile was built from this</span></div>
+      <div class="actions"><div class="row"><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M12 12v6"/><path d="m15 15-3-3-3 3"/></svg> Replace CV</button></div><span class="consequence">Rebuilds the profile and remaps 1 doc.</span></div>
+    </div>
+    <pre class="pane-text">Priya Raman
+GenAI Engineer · Bengaluru · priya.raman@example.com · github.com/priyaraman (synthetic CV for UI review)
+Experience
+Bobble AI - Senior Machine Learning Engineer (2022 - present)
+Designed a modular prompt system for a keyboard assistant: reusable tone, guideline and output-format blocks; 70% of prompt structure shared across features.
+Built an LLM-powered conversational agent with retrieval over product docs; cut escalation rate 30% and doubled campaign CTR during seasonal launches.
+Introduced parallel generation across three prompt variants per request, reducing perceived latency to a single LLM call; owned the evaluation harness (BLEU, human preference, guardrail checks).
+Aurora Analytics - Data Scientist (2019 - 2022)
+Shipped a churn model (XGBoost) feeding a retention dashboard used by 40 account managers.
+Migrated batch feature pipelines to Airflow; p95 pipeline latency down 55%.
+Skills
+Python, PyTorch, LangChain, FastAPI, Postgres, pgvector, Docker, prompt engineering, RAG, evaluation, Airflow, AWS
+Education
+M.Tech Computer Science, IIT Madras, 2019</pre>
+  </div>
+</div>
+
+<section class="manage-section danger">
+  <h2>Danger zone</h2>
+  <div class="file plain">
+    <div class="about"><strong>Reset account</strong><span class="meta">Deletes every file, job description, session and the profile. Your login stays.</span></div>
+    <div class="actions"><div class="row"><button class="btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg> Reset account…</button></div></div>
+  </div>
+</section>
+
+
+    </div>
+    <footer class="sheet-foot">Interview Coach · runs on your machine</footer>
+  </main>
+</div>
+</body>
+</html>
