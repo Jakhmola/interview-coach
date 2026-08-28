@@ -20,17 +20,25 @@ colors:
   hl-ink: "#1b1b1f"
   ok: "#2f7d4f"
   ok-soft: "rgba(47, 125, 79, 0.14)"
+  warn: "#a8650f"
   desk-1: "#3a3a3e"
   desk-2: "#1f1f22"
   on-desk: "#cfcdc7"
   on-desk-2: "#8e8d89"
+  on-desk-3: "#ffffff"
   night-paper: "#2b2d32"
   night-ink: "#ece9e2"
   night-pen: "#ef6a55"
   night-hl: "#ffd84a"
+  night-warn: "#ffb257"
   night-desk-1: "#1a1a1d"
   night-desk-2: "#0d0d10"
 typography:
+  hero:
+    fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif"
+    fontSize: "28px"
+    fontWeight: 700
+    lineHeight: 1.2
   display:
     fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif"
     fontSize: "24px"
@@ -237,16 +245,17 @@ Two neutral families (desk and paper), one ink ramp, and three pigments that eac
 
 ### Secondary
 - **Highlighter** (`--hl`): marks the live thing. "Your turn", the chosen round-type option, the current job in a menu, the active wizard step, the scored 1-10 cell, text selection, focus rings, the success banner. Always paired with `--hl-ink` (ink stays dark on yellow in both stocks).
-- **Orange Highlighter** (`--hl-2`): the warn variant of a mark, the degraded task dot, and the warn status pill on night stock.
+- **Orange Highlighter** (`--hl-2`): the warn variant of a mark and the degraded task dot.
 
 ### Tertiary
 - **Ok Green** (`--ok`): the good status pill and the checkmark icon in a wizard note. Nothing else.
+- **Warn Amber** (`--warn`): the warn status pill only. Day `#a8650f` (amber ink that holds 4.5:1 on paper); night stock lifts it to the orange highlighter `#ffb257`.
 
 ### Neutral
 - **Paper** (`--paper`, `-2`, `-3`): the sheet, resting index tabs (`paper-2`), hover fill on rows and menu items (`paper-2`). Day `#f5f2ea`, night `#2b2d32`.
 - **Ink** (`--ink`, `-2`, `-3`): text, every structural border (1px boxes, 2px title rule, 1.5px button outlines, 13px checkboxes), primary button fill, active tab fill, inverted labels. `ink-2` is secondary text and caps labels; `ink-3` is placeholders, locked tabs, the colophon. Day `#1b1b1f`, night `#ece9e2`.
 - **Rule** (`--rule`, `--rule-2`): the light lines. `rule` draws the 60px margin rule, the 26px typed rulings, list-row dividers, footer rules. `rule-2` is the dashed empty-state border, chips, and unselected wizard dots.
-- **Desk** (`--desk-1`, `--desk-2`, `--on-desk`, `--on-desk-2`): the surface under the sheet (radial gradient) and the muted lettering that sits on it (who is logged in, day/night, log out).
+- **Desk** (`--desk-1`, `--desk-2`, `--on-desk`, `--on-desk-2`, `--on-desk-3`): the surface under the sheet (radial gradient) and the muted lettering that sits on it (who is logged in, day/night, log out); `on-desk-3` is that lettering at full brightness on hover.
 
 ### Named Rules
 **The Red Is The Interviewer Rule.** `--pen` is reserved for the interviewer's voice and for the armed state of a destructive control. Errors use it because an error is the interviewer's note too. Never use red for emphasis, links, or decoration; a resting destructive control is ink, and turns red only once armed.
@@ -264,6 +273,7 @@ Two neutral families (desk and paper), one ink ramp, and three pigments that eac
 **Character:** A printed form and a typewriter. Archivo does the form's lettering in tight, tracked caps and the plain reading text; Courier Prime is only what the candidate typed; the interviewer writes in Archivo squeezed to 78% width so it reads as a narrower, faster hand. No italic display, no serif, no system UI face.
 
 ### Hierarchy
+- **Hero** (700, 28px, lh 1.2): the one place the role itself is the heading - "GenAI Engineer @ Northwind Labs" on the ready landing.
 - **Display** (700, 24px, caps, 0.02em; 20px under 720px): the form title under its 2px rule ("Interview Scorecard", the login brand).
 - **Headline** (500, 21px, lh 1.35, max 56ch; 17px under 720px): the question in its box. **Page title** (500, 20px): page titles on Setup, History, Manage, the completion title, the modal title (700 caps there).
 - **Title** (500, 14.5px): values in underlined header fields, list-row primary text.
@@ -317,7 +327,7 @@ Form lettering on a printed outline; the hover is an ink fill, not a colour chan
 - **Secondary:** paper fill, ink text; hover inverts to ink fill.
 - **Ghost:** transparent, no outline, 34px tall, `0 10px`; hover draws the ink outline.
 - **Quiet:** transparent, `--ink-2`, underlined, 0.1em tracking; hover to ink. Used for "back" and inline secondary actions.
-- **Destructive:** resting state is a ghost in `--ink-2` (hover: ink outline). Armed state (`.armed`) fills `--pen`, white text, 1s opacity pulse; a consequence span drops to 12px sentence case. The morph is the warning; there is no red at rest. The typed-confirmation button in Manage is pen-filled from the start because the confirmation input is the arming step.
+- **Destructive:** resting state is a ghost in `--ink-2` (hover: ink outline). Armed state (`.armed`) fills `--pen`, white text, 1s opacity pulse; a consequence span drops to 12px sentence case. The morph is the warning; there is no red at rest. The typed-confirmation button in Manage is pen-filled from the start because the confirmation input is the arming step; its hover mixes the pen 20% toward ink (`color-mix`), the same "toward ink" shift every filled button makes.
 - **Disabled:** 45% opacity, `not-allowed` cursor.
 
 ### Index Tabs

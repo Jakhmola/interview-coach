@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-28T00:00:00Z",
+  "generatedAt": "2026-08-28T12:00:00Z",
   "title": "Design System: Interview Coach",
   "extensions": {
     "stocks": {
@@ -24,20 +24,27 @@
       "hl-ink": { "role": "secondary", "displayName": "Ink on Highlighter", "canonical": "#1b1b1f", "night": "#1b1b1f" },
       "ok": { "role": "tertiary", "displayName": "Ok Green", "canonical": "#2f7d4f", "night": "#6cc48f", "tonalRamp": ["oklch(18% 0.05 155)", "oklch(28% 0.08 155)", "oklch(38% 0.10 155)", "oklch(50% 0.12 155)", "oklch(62% 0.13 155)", "oklch(74% 0.12 155)", "oklch(85% 0.09 155)", "oklch(95% 0.03 155)"] },
       "ok-soft": { "role": "tertiary", "displayName": "Ok Wash", "canonical": "rgba(47, 125, 79, 0.14)", "night": "rgba(108, 196, 143, 0.16)" },
+      "warn": { "role": "tertiary", "displayName": "Warn Amber", "canonical": "#a8650f", "night": "#ffb257", "purpose": "The warn status pill only; amber ink that holds 4.5:1 on day paper, lifts to the orange highlighter on night stock." },
       "desk-1": { "role": "neutral", "displayName": "Desk, lit", "canonical": "#3a3a3e", "night": "#1a1a1d" },
       "desk-2": { "role": "neutral", "displayName": "Desk, shadow", "canonical": "#1f1f22", "night": "#0d0d10" },
       "on-desk": { "role": "neutral", "displayName": "Lettering on desk", "canonical": "#cfcdc7", "night": "#9a9892" },
-      "on-desk-2": { "role": "neutral", "displayName": "Lettering on desk, faint", "canonical": "#8e8d89", "night": "#6f6e6a" }
+      "on-desk-2": { "role": "neutral", "displayName": "Lettering on desk, faint", "canonical": "#8e8d89", "night": "#6f6e6a" },
+      "on-desk-3": { "role": "neutral", "displayName": "Lettering on desk, full", "canonical": "#ffffff", "night": "#e6e4dd", "purpose": "Desk-tool lettering at full brightness on hover." }
     },
     "typographyMeta": {
-      "display": { "displayName": "Form Title", "purpose": "The sheet title under its 2px rule; the login brand." },
-      "headline": { "displayName": "Question", "purpose": "The question in its box; page titles on Setup, History, Manage; completion title." },
+      "hero": { "displayName": "Role Heading", "purpose": "The one place the role itself is the heading: the ready landing's title (.ready-title)." },
+      "display": { "displayName": "Form Title", "purpose": "The sheet title under its 2px rule; the login brand. 20px under 720px." },
+      "headline": { "displayName": "Question", "purpose": "The question in its box, max 56ch; 17px under 720px." },
+      "page-title": { "displayName": "Page Title", "purpose": "Page titles on Setup, History, Manage; the completion title; the modal title (700 caps there)." },
       "title": { "displayName": "Field Value", "purpose": "Values in underlined header fields; list-row primary text." },
-      "body": { "displayName": "Form Text", "purpose": "Reading text; 13-13.5px in ink-2 for meta and hints." },
-      "typed": { "displayName": "Candidate Typed", "purpose": "Only the candidate's words: responses, the reply textarea, model answers, typewriter status." },
-      "pen": { "displayName": "Red Pen", "purpose": "Only the interviewer: margin notes, inline remarks, agenda." },
-      "label": { "displayName": "Caps Label", "purpose": "Field and section labels; 9.5px inverted on box labels and status pills." },
-      "control": { "displayName": "Control Lettering", "purpose": "Buttons and index tabs." }
+      "body": { "displayName": "Form Text", "purpose": "Reading text; max 62-80ch on prose." },
+      "meta": { "displayName": "Meta", "purpose": "Row metadata, the \"Your turn\" line (13.5px), page meta (12.5px); in ink-2." },
+      "hint": { "displayName": "Hint", "purpose": "\"Ctrl + Enter submits\", \"scored when the topic closes\"; 12px tracked 0.06em in ink-2." },
+      "typed": { "displayName": "Candidate Typed", "purpose": "Only the candidate's words: responses, the reply textarea, model answers (14.5/24), typewriter status (14px), history transcripts (13.5/22)." },
+      "pen": { "displayName": "Red Pen", "purpose": "Only the interviewer: margin notes at 16px; 15.5px in inline remarks, the agenda and previous-topic exchanges." },
+      "label": { "displayName": "Caps Label", "purpose": "Field labels, section heads (11px), previous-topic keys, model-answer summary, the packet index keys; in ink-2." },
+      "label-inverted": { "displayName": "Inverted Label", "purpose": "10px caps on the box label (ink fill, paper text) and the status pill (currentColor outline)." },
+      "control": { "displayName": "Control Lettering", "purpose": "Buttons at 0.16em; index tabs 0.14em; quiet and desk buttons 0.1em." }
     },
     "shadows": [
       { "name": "sheet-shadow", "value": "0 22px 44px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.25)", "night": "0 22px 44px rgba(0, 0, 0, 0.6), 0 2px 4px rgba(0, 0, 0, 0.4)", "purpose": "The sheet and the login cover sheet on the desk." },
@@ -45,24 +52,54 @@
       { "name": "focus-ring", "value": "0 0 0 2px var(--hl)", "purpose": "Textarea, select, reply box focus. Underlined inputs use 0 2px 0 var(--hl)." }
     ],
     "materials": [
-      { "name": "grain", "value": "SVG feTurbulence fractalNoise baseFrequency 0.8, 2 octaves, 5% alpha, 200px tile (--grain); none on night stock", "purpose": "Photocopy texture on the sheet, cover sheet and modal slip." },
-      { "name": "ruling", "value": "repeating-linear-gradient(to bottom, transparent 0 25px, var(--rule) 25px 26px)", "purpose": "26px typed rulings under Courier Prime text and inside textareas." },
-      { "name": "margin-rule", "value": "1px var(--rule) at left 60px (34px under 980px, 22px under 720px)", "purpose": "The sheet's margin rule; content starts at 76px." }
+      { "name": "grain", "value": "SVG feTurbulence fractalNoise baseFrequency 0.8, 2 octaves, 5% alpha, 200px tile (--grain); none on night stock", "purpose": "Photocopy texture on the sheet, cover sheet, modal slip and the sticky composer." },
+      { "name": "ruling", "value": "repeating-linear-gradient(to bottom, transparent 0 25px, var(--rule) 25px 26px)", "purpose": "26px typed rulings under Courier Prime text, inside textareas and on a filed response (.box.r .typed)." },
+      { "name": "margin-rule", "value": "1px var(--rule) at left 60px (34px under 980px, 22px under 720px)", "purpose": "The sheet's margin rule; content starts at 76px." },
+      { "name": "composer-fade", "value": "12px linear-gradient(to top, var(--paper), transparent) above form.composer", "purpose": "Filed responses scroll under the sticky reply box through a paper fade." }
     ],
+    "layout": {
+      "sheet": { "width": "min(1600px, 100%)", "minHeight": "calc(100vh - 98px)", "padding": "30px 56px 36px 76px", "loginCover": "min(760px, 100%)" },
+      "desk": { "padding": "28px 32px 40px", "narrow": "36px 12px 40px under 980px" },
+      "scorecard": { "columns": "minmax(0, 1fr) minmax(340px, 400px)", "gap": "14px 40px", "rows": "auto 1fr" },
+      "ready-landing": { "columns": "minmax(0, 1fr) minmax(320px, 460px)", "gap": "22px 56px" },
+      "modal": { "width": "min(720px, 100%)", "padding": "28px 32px 24px", "backdrop": "rgba(0, 0, 0, 0.55)" }
+    },
     "motion": [
       { "name": "ease-standard", "value": "150ms ease-out", "purpose": "Every hover / colour / border transition." },
       { "name": "stamp", "value": "260ms cubic-bezier(0.16, 1, 0.3, 1) from scale(1.35) rotate(-6deg) opacity .4", "purpose": "The scored rating cell landing in highlighter." },
       { "name": "armed-pulse", "value": "1s ease-in-out infinite, opacity to .82 at 50%", "purpose": "Armed destructive control; the thinking pen dot (1s); running task dot (1.2s)." },
       { "name": "cursor-blink", "value": "1s steps(2, start) infinite", "purpose": "2px caret at the end of streaming text." },
-      { "name": "stream-in", "value": "220ms ease-out, opacity 0 -> 1, translateY(4px) -> 0", "purpose": "A remark or note arriving on the sheet." },
+      { "name": "stream-in", "value": "220ms ease-out, opacity 0 -> 1, translateY(4px) -> 0", "purpose": "A remark or note arriving on the sheet; the composer returning after a page turn." },
+      { "name": "hl-swipe", "value": "380ms cubic-bezier(0.16, 1, 0.3, 1) both, background-size 0 100% -> 100% 100% on .turn mark", "purpose": "The highlighter painted left-to-right across \"Your turn\" as the reply box opens." },
+      { "name": "draw", "value": "420ms cubic-bezier(0.16, 1, 0.3, 1) 60ms both, stroke-dashoffset 1 -> 0 (pathLength 1) on .note.stream-in .k svg path", "purpose": "The pen drawing the margin arrow while a note streams in." },
+      { "name": "view-transition-group", "value": "::view-transition-group(*) 320ms cubic-bezier(0.16, 1, 0.3, 1); old/new 200ms; root 140ms", "purpose": "The paper moving: named parts travel between states (see viewTransitions)." },
+      { "name": "vt-route", "value": "html[data-vt=\"route\"]: old(sheet) vt-out 120ms ease-out; new(sheet) vt-in 280ms cubic-bezier(0.16, 1, 0.3, 1) from opacity 0 translateY(10px)", "purpose": "Pulling the next sheet from the packet on an index-tab click." },
       { "name": "spin", "value": "900ms linear infinite", "purpose": "Spinner icon in loading states." },
       { "name": "typewriter-status", "value": "react-type-animation in Courier Prime 14px", "purpose": "Status line while the model thinks." },
       { "name": "confetti", "value": "react-confetti, colors #ffe94d #c8321f #f5f2ea #1b1b1f #ffb257, pieces scaled to score", "purpose": "Round completion." },
-      { "name": "reduced-motion", "value": "@media (prefers-reduced-motion: reduce) { animation-duration: .01ms; iteration-count: 1; transition-duration: .01ms }", "purpose": "Every animation and transition collapses." }
+      { "name": "reduced-motion", "value": "@media (prefers-reduced-motion: reduce) { animation-duration: .01ms; iteration-count: 1; transition-duration: .01ms; ::view-transition-* { animation: none } } and viewTransition() applies the update plainly", "purpose": "Every animation and transition collapses; view transitions are skipped entirely." }
     ],
+    "viewTransitions": {
+      "helper": "frontend/src/viewTransition.ts - viewTransition(update, kind?): startViewTransition(() => flushSync(update)) where supported and motion is not reduced, else a plain update; kind sits on <html data-vt> for the duration.",
+      "names": [
+        { "name": "sheet", "selector": ".sheet", "source": "styles.css", "purpose": "The sheet swapped on navigation; fades out 120ms, the new one rises 10px in 280ms under data-vt=\"route\"." },
+        { "name": "active-tab", "selector": ".tab.active", "source": "styles.css", "purpose": "The ink fill slides from tab to tab on navigation." },
+        { "name": "composer", "selector": ".box.reply (styles.css); the just-submitted response while filing (InterviewPage.tsx)", "purpose": "Filing a response: the reply box morphs into the response it becomes." },
+        { "name": "question", "selector": ".sc-question box (InterviewPage.tsx) when not turning the page", "purpose": "The question box holds its place between renders." },
+        { "name": "next-question", "selector": "the streamed next question; the question box takes this name during pageTurn (InterviewPage.tsx)", "purpose": "Turning the page: the streamed question moves up into the question box." },
+        { "name": "topic-<index>", "selector": "a closed topic's assessment box and its previous-topics row (InterviewPage.tsx, keyed by thread index)", "purpose": "A closed topic folds into the previous-topics index." }
+      ],
+      "invariant": "Names are unique per snapshot by construction; a duplicate aborts the transition (Chrome logs it), so a console warning is a defect."
+    },
+    "favicon": {
+      "source": "frontend/index.html, inline SVG data URI, viewBox 0 0 32 32",
+      "pigments": { "desk": "#1f1f22", "sheet": "#f5f2ea", "label-and-rulings": "#1b1b1f", "highlighter": "#ffe94d" },
+      "note": "Pigments are literal because a favicon cannot read custom properties; they equal the day-stock desk-2, paper, ink and hl tokens."
+    },
     "breakpoints": [
-      { "name": "tablet", "value": "980px", "purpose": "Scorecard drops to one column; margin note loses tilt; sheet padding tightens." },
+      { "name": "tablet", "value": "980px", "purpose": "Scorecard and ready landing drop to one column; margin note loses tilt; clipboard no longer sticky; sheet padding tightens." },
       { "name": "phone", "value": "720px", "purpose": "Desk bar stacks; header fields one column; cells 26px; title 20px; question 17px." },
+      { "name": "sticky-clipboard", "value": "(min-width: 981px) and (min-height: 780px)", "purpose": ".sc-margin is position: sticky; top: 24px only on a tall desktop." },
       { "name": "min", "value": "320px" }
     ],
     "icons": { "library": "lucide-react", "sizes": "12-16px (13px inside buttons, 14px desk tools, 12px summary chevrons)", "stroke": 1.8, "color": "currentColor" }
@@ -104,25 +141,25 @@
       "name": "Index Tabs",
       "kind": "nav",
       "refersTo": "tab",
-      "description": "Tabs cut from the sheet's top edge; active is ink-filled, locked is faint.",
+      "description": "Tabs cut from the sheet's top edge; active is ink-filled (view-transition-name: active-tab, so the ink slides on navigation), locked is faint.",
       "html": "<nav class=\"ds-tabs\"><a class=\"ds-tab\" href=\"#\">Setup</a><a class=\"ds-tab ds-active\" href=\"#\">Practice</a><a class=\"ds-tab ds-locked\">History</a></nav>",
-      "css": ".ds-tabs { display: flex; gap: 6px; align-items: flex-end; padding: 8px 0 0; } .ds-tab { height: 30px; padding: 0 22px; display: inline-grid; place-items: center; background: var(--paper-2, #ebe7dd); color: var(--ink, #1b1b1f); border: 1px solid var(--ink, #1b1b1f); border-bottom: 0; border-radius: 3px 3px 0 0; font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; text-decoration: none; white-space: nowrap; transition: background 150ms ease-out; } .ds-tab:hover { background: var(--paper, #f5f2ea); } .ds-tab.ds-active { background: var(--ink, #1b1b1f); color: var(--paper, #f5f2ea); } .ds-tab.ds-locked { color: var(--ink-3, #6a6a70); cursor: not-allowed; } .ds-tab.ds-locked:hover { background: var(--paper-2, #ebe7dd); } .ds-tab:focus-visible { outline: 2px solid var(--hl, #ffe94d); outline-offset: 2px; }"
+      "css": ".ds-tabs { display: flex; gap: 6px; align-items: flex-end; padding: 8px 0 0; } .ds-tab { height: 30px; padding: 0 22px; display: inline-grid; place-items: center; background: var(--paper-2, #ebe7dd); color: var(--ink, #1b1b1f); border: 1px solid var(--ink, #1b1b1f); border-bottom: 0; border-radius: 3px 3px 0 0; font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; font-weight: 700; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; text-decoration: none; white-space: nowrap; transition: background 150ms ease-out; } .ds-tab:hover { background: var(--paper, #f5f2ea); } .ds-tab.ds-active { background: var(--ink, #1b1b1f); color: var(--paper, #f5f2ea); view-transition-name: active-tab; } .ds-tab.ds-locked { color: var(--ink-3, #6a6a70); cursor: not-allowed; } .ds-tab.ds-locked:hover { background: var(--paper-2, #ebe7dd); } .ds-tab:focus-visible { outline: 2px solid var(--hl, #ffe94d); outline-offset: 2px; }"
     },
     {
       "name": "Boxed Field (Question)",
       "kind": "card",
       "refersTo": "box-label",
-      "description": "1px ink box with an inverted corner label; the question variant carries 20px text.",
+      "description": "1px ink box with an inverted corner label; the question variant carries 21px text.",
       "html": "<div class=\"ds-box ds-q\"><span class=\"ds-box-lbl\">3. Question</span><p>You mentioned owning the evaluation harness. How did you balance nuanced human preference against computational efficiency?</p></div>",
-      "css": ".ds-box { position: relative; border: 1px solid var(--ink, #1b1b1f); padding: 22px 20px 16px; background: var(--paper, #f5f2ea); font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; color: var(--ink, #1b1b1f); } .ds-box-lbl { position: absolute; top: -1px; left: -1px; padding: 3px 8px; background: var(--ink, #1b1b1f); color: var(--paper, #f5f2ea); font-size: 9.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; line-height: 1.3; white-space: nowrap; } .ds-q p { margin: 0; font-size: 20px; line-height: 1.35; font-weight: 500; max-width: 56ch; }"
+      "css": ".ds-box { position: relative; border: 1px solid var(--ink, #1b1b1f); padding: 22px 20px 16px; background: var(--paper, #f5f2ea); font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; color: var(--ink, #1b1b1f); } .ds-box-lbl { position: absolute; top: -1px; left: -1px; padding: 3px 8px; background: var(--ink, #1b1b1f); color: var(--paper, #f5f2ea); font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; line-height: 1.3; white-space: nowrap; } .ds-q p { margin: 0; font-size: 21px; line-height: 1.35; font-weight: 500; max-width: 56ch; }"
     },
     {
-      "name": "Candidate Response (typed on rulings)",
+      "name": "Sticky Composer (Candidate Response)",
       "kind": "input",
       "refersTo": "textarea-typed",
-      "description": "The reply box: Courier Prime on 26px rulings inside a boxed field; focus draws the highlighter ring around the box.",
-      "html": "<div class=\"ds-box ds-reply\"><span class=\"ds-box-lbl\">Candidate response</span><textarea class=\"ds-typed\" placeholder=\"Answer as you would in the interview...\"></textarea></div>",
-      "css": ".ds-box { position: relative; border: 1px solid var(--ink, #1b1b1f); background: var(--paper, #f5f2ea); } .ds-box-lbl { position: absolute; top: -1px; left: -1px; padding: 3px 8px; background: var(--ink, #1b1b1f); color: var(--paper, #f5f2ea); font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; font-size: 9.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; line-height: 1.3; } .ds-reply { padding: 0; transition: box-shadow 150ms ease-out; } .ds-reply:focus-within { box-shadow: 0 0 0 2px var(--hl, #ffe94d); } .ds-typed { display: block; width: 100%; min-height: 132px; border: 0; outline: none; resize: vertical; box-sizing: border-box; padding: 26px 20px 14px; background: transparent; background-image: repeating-linear-gradient(to bottom, transparent 0 25px, var(--rule, #c8c6bf) 25px 26px); background-origin: content-box; background-attachment: local; color: var(--ink, #1b1b1f); caret-color: var(--pen, #c8321f); font-family: 'Courier Prime', 'Courier New', Courier, monospace; font-size: 15.5px; line-height: 26px; } .ds-typed::placeholder { color: var(--ink-3, #6a6a70); }"
+      "description": "The reply box: form.composer is position: sticky; bottom: 0 on paper with a 12px paper fade above it, so it stays at hand while filed responses scroll under it. Inside, Courier Prime on 26px rulings in a boxed field (view-transition-name: composer); focus draws the highlighter ring around the box. The \"Your turn\" mark is swiped in over 380ms.",
+      "html": "<form class=\"ds-composer\"><p class=\"ds-turn\"><mark>Your turn</mark></p><div class=\"ds-box ds-reply\"><span class=\"ds-box-lbl\">Candidate response</span><textarea class=\"ds-typed\" placeholder=\"Answer as you would in the interview...\"></textarea></div><div class=\"ds-actions\"><button class=\"ds-btn ds-btn-primary\">Submit response</button><span class=\"ds-hint\">Ctrl + Enter submits</span></div></form>",
+      "css": ".ds-composer { position: sticky; bottom: 0; z-index: 2; background: var(--paper, #f5f2ea); padding-bottom: 10px; font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; } .ds-composer::before { content: ''; position: absolute; left: 0; right: 0; top: -12px; height: 12px; background: linear-gradient(to top, var(--paper, #f5f2ea), transparent); pointer-events: none; } .ds-turn { margin: 0 0 6px; font-size: 13.5px; color: var(--ink-2, #4a4a4f); } .ds-turn mark { color: var(--hl-ink, #1b1b1f); padding: 1px 4px; font-weight: 600; background: linear-gradient(var(--hl, #ffe94d), var(--hl, #ffe94d)) left / 100% 100% no-repeat; animation: ds-hl-swipe 380ms cubic-bezier(0.16, 1, 0.3, 1) both; } @keyframes ds-hl-swipe { from { background-size: 0 100%; } } .ds-box { position: relative; border: 1px solid var(--ink, #1b1b1f); background: var(--paper, #f5f2ea); } .ds-box-lbl { position: absolute; top: -1px; left: -1px; padding: 3px 8px; background: var(--ink, #1b1b1f); color: var(--paper, #f5f2ea); font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; line-height: 1.3; } .ds-reply { padding: 0; view-transition-name: composer; transition: box-shadow 150ms ease-out; } .ds-reply:focus-within { box-shadow: 0 0 0 2px var(--hl, #ffe94d); } .ds-typed { display: block; width: 100%; min-height: 132px; max-height: 44vh; field-sizing: content; border: 0; outline: none; resize: vertical; box-sizing: border-box; padding: 26px 20px 14px; background: transparent; background-image: repeating-linear-gradient(to bottom, transparent 0 25px, var(--rule, #c8c6bf) 25px 26px); background-origin: content-box; background-attachment: local; color: var(--ink, #1b1b1f); caret-color: var(--pen, #c8321f); font-family: 'Courier Prime', 'Courier New', Courier, monospace; font-size: 15.5px; line-height: 26px; } .ds-typed::placeholder { color: var(--ink-3, #6a6a70); } .ds-actions { display: flex; align-items: center; gap: 12px; margin-top: 10px; } .ds-hint { font-size: 12px; letter-spacing: 0.06em; color: var(--ink-2, #4a4a4f); } .ds-btn { height: 38px; padding: 0 18px; border: 1.5px solid var(--ink, #1b1b1f); background: var(--ink, #1b1b1f); color: var(--paper, #f5f2ea); font-weight: 700; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; border-radius: 0; cursor: pointer; }"
     },
     {
       "name": "Underlined Field",
@@ -144,29 +181,53 @@
       "name": "Red-Pen Margin Note",
       "kind": "custom",
       "refersTo": "pen",
-      "description": "The interviewer's note in the margin: caps key with a hand-drawn arrow, condensed Archivo in pen, tilted -1.2deg.",
-      "html": "<div class=\"ds-note\"><div class=\"ds-note-k\"><svg viewBox=\"0 0 34 18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M32 9c-8-4-18-4-29 1\"/><path d=\"M8 5l-5 5 6 3\"/></svg>Probe</div><p>You said the incremental embedding didn't affect quality. Did BLEU or guardrail compliance show any measurable degradation against the full corpus?</p></div>",
-      "css": ".ds-note { color: var(--pen, #c8321f); transform: rotate(-1.2deg); transform-origin: left top; max-width: 250px; font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; } .ds-note-k { font-weight: 700; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; display: flex; align-items: center; gap: 8px; } .ds-note-k svg { width: 34px; height: 18px; flex: none; } .ds-note p { margin: 6px 0 0; font-stretch: 78%; font-variation-settings: 'wdth' 78; font-size: 15.5px; line-height: 1.35; font-weight: 500; }"
+      "description": "The interviewer's note in the margin: caps key with a hand-drawn arrow that draws itself as the note streams in, condensed Archivo in pen at 16px, tilted -1.2deg.",
+      "html": "<div class=\"ds-note ds-stream-in\"><div class=\"ds-note-k\"><svg viewBox=\"0 0 34 18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path pathLength=\"1\" d=\"M32 9c-8-4-18-4-29 1\"/><path pathLength=\"1\" d=\"M8 5l-5 5 6 3\"/></svg>Probe</div><p>You said the incremental embedding didn't affect quality. Did BLEU or guardrail compliance show any measurable degradation against the full corpus?</p></div>",
+      "css": ".ds-note { color: var(--pen, #c8321f); transform: rotate(-1.2deg); transform-origin: left top; max-width: 250px; font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; } .ds-note-k { font-weight: 700; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; display: flex; align-items: center; gap: 8px; } .ds-note-k svg { width: 34px; height: 18px; flex: none; } .ds-note p { margin: 6px 0 0; font-stretch: 78%; font-variation-settings: 'wdth' 78; font-size: 16px; line-height: 1.35; font-weight: 500; } .ds-stream-in { animation: ds-stream-in 220ms ease-out; } @keyframes ds-stream-in { from { opacity: 0; transform: translateY(4px) rotate(-1.2deg); } } .ds-note.ds-stream-in .ds-note-k svg path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: ds-draw 420ms cubic-bezier(0.16, 1, 0.3, 1) 60ms both; } @keyframes ds-draw { to { stroke-dashoffset: 0; } }"
+    },
+    {
+      "name": "Sticky Clipboard (Scorecard Margin)",
+      "kind": "layout",
+      "refersTo": "pen",
+      "description": "The interviewer's clipboard (.sc-margin): the right column of the live scorecard holding the latest note, the agenda and the grounded-in sources. Spans both grid rows so it never pushes the form down; on a desktop at least 981px wide and 780px tall it is position: sticky; top: 24px so whose move it is survives a long transcript. Under 980px it drops below the main column and the note loses its tilt.",
+      "html": "<section class=\"ds-scorecard\"><div class=\"ds-sc-question\">question box</div><div class=\"ds-sc-main\">responses, remarks, composer, rating row</div><aside class=\"ds-sc-margin\"><div class=\"ds-note\">latest note</div><div class=\"ds-agenda\">agenda</div></aside></section>",
+      "css": ".ds-scorecard { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 400px); grid-template-rows: auto 1fr; gap: 14px 40px; align-items: start; } .ds-sc-question { grid-column: 1; grid-row: 1; } .ds-sc-main { grid-column: 1; grid-row: 2; } .ds-sc-margin { grid-column: 2; grid-row: 1 / span 2; min-width: 0; display: grid; gap: 16px; padding-top: 6px; align-content: start; } @media (min-width: 981px) and (min-height: 780px) { .ds-sc-margin { position: sticky; top: 24px; } } @media (max-width: 980px) { .ds-scorecard { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; } .ds-sc-question, .ds-sc-main, .ds-sc-margin { grid-column: 1; grid-row: auto; } .ds-sc-margin { padding-top: 0; } .ds-note { transform: none; } }"
+    },
+    {
+      "name": "Packet Index",
+      "kind": "list",
+      "refersTo": "label",
+      "description": "\"In the packet\" on the ready landing: a <dl> table of CV / job description / supporting docs / GitHub repos over a 1px ink rule, 118px caps key column, --rule dividers, empty rows in ink-3.",
+      "html": "<dl class=\"ds-packet-list\"><div><dt>CV</dt><dd>shubham-jakhmola-cv.pdf</dd></div><div><dt>Job description</dt><dd>GenAI Engineer @ Northwind Labs</dd></div><div><dt>Supporting docs</dt><dd>2 files <span class=\"ds-muted\">system-design-notes.md, portfolio.pdf</span></dd></div><div><dt>GitHub repos</dt><dd class=\"ds-empty\">None attached</dd></div></dl>",
+      "css": ".ds-packet-list { margin: 0; display: grid; border-top: 1px solid var(--ink, #1b1b1f); font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; color: var(--ink, #1b1b1f); } .ds-packet-list > div { display: grid; grid-template-columns: 118px minmax(0, 1fr); gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--rule, #c8c6bf); font-size: 14px; } .ds-packet-list dt { font-weight: 700; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-2, #4a4a4f); padding-top: 3px; } .ds-packet-list dd { margin: 0; min-width: 0; display: grid; gap: 3px; overflow-wrap: anywhere; } .ds-packet-list dd.ds-empty { color: var(--ink-3, #6a6a70); } .ds-packet-list .ds-muted { font-size: 12.5px; color: var(--ink-2, #4a4a4f); }"
     },
     {
       "name": "Status Pill",
       "kind": "chip",
       "refersTo": "status-pill",
-      "description": "Rubber-stamp status: outlined in currentColor, colour is the state.",
-      "html": "<span class=\"ds-pill ds-good\">Ready</span> <span class=\"ds-pill\">Queued</span> <span class=\"ds-pill ds-bad\">Failed</span>",
-      "css": ".ds-pill { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border: 1px solid currentColor; font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2, #4a4a4f); white-space: nowrap; } .ds-pill.ds-good { color: var(--ok, #2f7d4f); } .ds-pill.ds-bad { color: var(--pen, #c8321f); }"
+      "description": "Rubber-stamp status: outlined in currentColor, colour is the state (ok green, warn amber, pen bad, ink info).",
+      "html": "<span class=\"ds-pill ds-good\">Ready</span> <span class=\"ds-pill\">Queued</span> <span class=\"ds-pill ds-warn\">Degraded</span> <span class=\"ds-pill ds-bad\">Failed</span>",
+      "css": ".ds-pill { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border: 1px solid currentColor; font-family: Archivo, 'Helvetica Neue', Arial, sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-2, #4a4a4f); white-space: nowrap; } .ds-pill.ds-good { color: var(--ok, #2f7d4f); } .ds-pill.ds-warn { color: var(--warn, #a8650f); } .ds-pill.ds-bad { color: var(--pen, #c8321f); }"
+    },
+    {
+      "name": "Favicon",
+      "kind": "asset",
+      "refersTo": "paper",
+      "description": "The packet on the desk at 32px: a desk, a sheet with its inverted label, two rulings and a highlighter mark. Inline SVG data URI in index.html; pigments literal (day-stock desk-2, paper, ink, hl) because a favicon cannot read custom properties.",
+      "html": "<link rel=\"icon\" type=\"image/svg+xml\" href=\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%231f1f22'/%3E%3Crect x='5' y='3' width='22' height='26' fill='%23f5f2ea'/%3E%3Crect x='5' y='3' width='9' height='4' fill='%231b1b1f'/%3E%3Crect x='9' y='12' width='14' height='2' fill='%231b1b1f'/%3E%3Crect x='9' y='17' width='14' height='2' fill='%231b1b1f'/%3E%3Crect x='9' y='22' width='7' height='3' fill='%23ffe94d'/%3E%3C/svg%3E\">",
+      "css": ""
     }
   ],
   "narrative": {
     "northStar": "The Hiring Packet",
-    "overview": "The app is the document that decides the candidate's fate, being filled in live. Every screen is a photocopied form on a charcoal desk: index tabs cut from the sheet's top edge, a 1px margin rule, two staples, boxed fields with inverted corner labels, a form title under a 2px rule. Three voices share the sheet and never blur: the form speaks in Archivo caps, the candidate speaks in Courier Prime on 26px rulings, and the interviewer speaks in red ballpoint (Archivo condensed to 78% width, tilted -1.2deg in the margin). Yellow highlighter is the only other colour, and it always means \"this is what matters right now\": whose turn it is, which option is chosen, which cell got the score.\n\nThe world is flat and material. Depth exists once, between the desk and the sheet (and again for a slip laid on top of the packet); nothing on the paper itself floats. There are no rounded cards, no tinted panels, no gradients on the sheet. Structure is drawn with rules, boxes and inverted labels, the way a printed form does it. Density is that of a real scorecard: 15px body, 10px caps labels, 14px gaps, one sheet per screen.\n\nTwo paper stocks exist and the reader chooses: day (off-white on charcoal) and night (slate pages, light ink on a near-black desk). The night stock keeps every relationship, only the pigments change; the grain is dropped because dark paper does not photocopy.",
+    "overview": "The app is the document that decides the candidate's fate, being filled in live. Every screen is a photocopied form on a charcoal desk: index tabs cut from the sheet's top edge, a 1px margin rule, two staples, boxed fields with inverted corner labels, a form title under a 2px rule. Three voices share the sheet and never blur: the form speaks in Archivo caps, the candidate speaks in Courier Prime on 26px rulings, and the interviewer speaks in red ballpoint (Archivo condensed to 78% width, tilted -1.2deg in the margin). Yellow highlighter is the only other colour, and it always means \"this is what matters right now\": whose turn it is, which option is chosen, which cell got the score.\n\nThe world is flat and material. Depth exists once, between the desk and the sheet (and again for a slip laid on top of the packet); nothing on the paper itself floats. There are no rounded cards, no tinted panels, no gradients on the sheet. Structure is drawn with rules, boxes and inverted labels, the way a printed form does it. Density is that of a real scorecard: 15px body, 10.5px caps labels, 14px gaps, one sheet per screen - and the sheet takes most of the desk (`min(1600px, 100%)`), so on a 1920px display the paper covers five sixths of the width with a strip of desk either side.\n\nTwo paper stocks exist and the reader chooses: day (off-white on charcoal) and night (slate pages, light ink on a near-black desk). The night stock keeps every relationship, only the pigments change; the grain is dropped because dark paper does not photocopy.",
     "keyCharacteristics": [
       "Paper sheet on a desk: `--paper` with SVG grain and a two-layer shadow, on a radial charcoal gradient.",
       "Three voices, three faces: Archivo caps (form), Courier Prime (candidate), Archivo wdth 78 red (interviewer).",
       "Zero radius on the sheet; the only curves are the 3px top corners of the index tabs.",
       "Highlighter (`--hl`) is a state, not a decoration: current turn, selection, score.",
       "Red (`--pen`) belongs to the interviewer and to armed destructive controls; nothing else is red.",
-      "Motion is the hand at work: typewriter status, pulsing pen dot, blinking caret, the stamp, confetti in packet colours."
+      "Motion is the hand at work: typewriter status, pulsing pen dot, blinking caret, the stamp, the highlighter drawn across \"Your turn\", the pen drawing the margin arrow, confetti in packet colours - and the paper moving: the reply box files itself as a response, a closed topic folds into the index, the next sheet is pulled from the packet (view transitions)."
     ],
     "rules": [
       { "name": "The Red Is The Interviewer Rule", "body": "`--pen` is reserved for the interviewer's voice and for the armed state of a destructive control. Errors use it because an error is the interviewer's note too. Never use red for emphasis, links, or decoration; a resting destructive control is ink, and turns red only once armed.", "section": "colors" },
@@ -184,7 +245,8 @@
       "Do keep destructive controls ink at rest and morph them to `--pen` with a pulse only when armed.",
       "Do define any new colour on both stocks (`:root` and `:root[data-theme=\"dark\"]`) and pair `--hl` with `--hl-ink`.",
       "Do render icons from lucide at 12-16px (13px inside buttons, 14px in desk tools), stroke 1.8, in currentColor.",
-      "Do honour `prefers-reduced-motion`; motion is limited to the stamp, the pen dot, the caret, the 220ms stream-in, and completion confetti."
+      "Do honour `prefers-reduced-motion`; motion is limited to the stamp, the pen dot, the caret, the 220ms stream-in, the highlighter swipe, the arrow draw, the view transitions listed under Motion, and completion confetti. Reduced motion skips the view transitions entirely and collapses the rest.",
+      "Do keep the reply box and the interviewer's clipboard sticky on desktop; whose move it is must survive a long transcript."
     ],
     "donts": [
       "Don't round corners on the sheet. The only radius is `3px 3px 0 0` on index tabs and `3px` on desk buttons.",

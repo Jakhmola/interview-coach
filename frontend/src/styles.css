@@ -67,6 +67,8 @@
   --pen-soft: rgba(200, 50, 31, 0.12);
   --ok: #2f7d4f;
   --ok-soft: rgba(47, 125, 79, 0.14);
+  --warn: #a8650f;
+  --on-desk-3: #ffffff;
   --sheet-shadow: 0 22px 44px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.25);
   --slip-shadow: 0 18px 40px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.3);
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -95,6 +97,8 @@
   --pen-soft: rgba(239, 106, 85, 0.16);
   --ok: #6cc48f;
   --ok-soft: rgba(108, 196, 143, 0.16);
+  --warn: #ffb257;
+  --on-desk-3: #e6e4dd;
   --sheet-shadow: 0 22px 44px rgba(0, 0, 0, 0.6), 0 2px 4px rgba(0, 0, 0, 0.4);
   --slip-shadow: 0 18px 40px rgba(0, 0, 0, 0.7), 0 2px 4px rgba(0, 0, 0, 0.5);
   --grain: none;
@@ -455,7 +459,7 @@ details > summary::-webkit-details-marker {
 }
 .desk-btn:hover {
   border-color: var(--on-desk-2);
-  color: #fff;
+  color: var(--on-desk-3);
 }
 .desk-btn svg {
   width: 14px;
@@ -901,10 +905,7 @@ mark.warn,
   color: var(--ok);
 }
 .status-warn {
-  color: #a8650f;
-}
-:root[data-theme="dark"] .status-warn {
-  color: var(--hl-2);
+  color: var(--warn);
 }
 .status-bad {
   color: var(--pen);
@@ -1815,8 +1816,8 @@ mark.warn,
   color: #fff;
 }
 .danger-confirm-btn:hover {
-  background: #a5250f;
-  border-color: #a5250f;
+  background: color-mix(in oklab, var(--pen) 80%, var(--ink));
+  border-color: color-mix(in oklab, var(--pen) 80%, var(--ink));
 }
 .danger-confirm-btn:disabled:hover {
   background: var(--pen);
@@ -2031,7 +2032,7 @@ mark.warn,
   padding: 3px 8px;
   background: var(--ink);
   color: var(--paper);
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -2089,7 +2090,7 @@ mark.warn,
   color: var(--ink-2);
 }
 .practice-questions-row strong {
-  font-size: 18px;
+  font-size: 20px;
   color: var(--ink);
   letter-spacing: 0;
   margin-left: 8px;
@@ -2572,7 +2573,7 @@ mark.warn,
   height: 20px;
   padding: 0 7px;
   border: 1px solid currentColor;
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
