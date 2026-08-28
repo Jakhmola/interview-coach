@@ -23,6 +23,7 @@ import { topicLabel, topicTitle } from "../jobLabel";
 import { useStreamAbort } from "../hooks/useStreamAbort";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
+import { viewTransition } from "../viewTransition";
 
 const roundLabels: Record<RoundType, string> = {
   experience_deep_dive: "Experience deep-dive",
@@ -109,6 +110,9 @@ export function InterviewPage() {
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [celebrationPieces, setCelebrationPieces] = useState<number | null>(null);
+  // True only for the view transition that opens a new topic, so the
+  // streamed next question can travel up into the question box.
+  const [pageTurn, setPageTurn] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const celebratedSessionsRef = useRef<Set<string>>(new Set());
 
@@ -158,20 +162,38 @@ export function InterviewPage() {
   // the interviewer's next move(s) as an action envelope; we overlay them as
   // `liveItems`, then refetch the authoritative session detail and drop the
   // overlay (the persisted threads now carry everything).
-  const sendMessage = async (sessionId: string, message: string | null) => {
+  //
+  // Both ends of the round-trip are view transitions: `prepare` files the
+  // typed answer as a response (the reply box morphs into it), and the
+  // refetch turns the page (a closed topic folds into the index, the next
+  // question moves up). The composer comes back only once the turn has
+  // settled, so it never gets morphed into.
+  const sendMessage = async (sessionId: string, message: string | null, prepare?: () => void) => {
     if (!token) return;
-    setIsBusy(true);
+    const openIndex = detail?.threads.find((t) => t.status === "open")?.thread_index ?? -1;
     setError(null);
-    setLiveItems([]);
     const signal = messageAbort.fresh();
+    await viewTransition(() => {
+      prepare?.();
+      setIsBusy(true);
+      setLiveItems([]);
+    }).updateCallbackDone;
     try {
       await messageStream(token, sessionId, message, handleFrame, signal);
-      setDetail(await api.getSession(token, sessionId));
+      const next = await api.getSession(token, sessionId);
+      const nextOpen = next.threads.find((t) => t.status === "open")?.thread_index ?? -1;
+      await viewTransition(() => {
+        setPageTurn(nextOpen !== openIndex);
+        setDetail(next);
+        setLiveItems([]);
+        setPendingAnswer(null);
+      }).finished;
+      setPageTurn(false);
     } catch (err) {
       setError(codeFrom(err));
-    } finally {
       setLiveItems([]);
       setPendingAnswer(null);
+    } finally {
       setIsBusy(false);
     }
   };
@@ -309,9 +331,10 @@ export function InterviewPage() {
       setError("empty_message");
       return;
     }
-    setAnswer("");
-    setPendingAnswer(text);
-    await sendMessage(detail.id, text);
+    await sendMessage(detail.id, text, () => {
+      setAnswer("");
+      setPendingAnswer(text);
+    });
   };
 
   const onComposerKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -537,14 +560,12 @@ export function InterviewPage() {
     liveItems,
     docs,
     showThinking,
+    pageTurn,
   });
 
   return (
     <div className="practice-live">
-      <SheetHead
-        title="Interview scorecard"
-        page={`${roundLabels[detail.round_type]} · Page ${topicNum} of ${detail.n_questions}`}
-      >
+      <SheetHead title="Interview scorecard" page={roundLabels[detail.round_type]}>
         <Field label="Candidate" value={candidate} />
         <JobField />
         <Field label="Topic" value={topicTitle(openThread?.focus_label)} empty="(opening the topic)" wrap />
@@ -575,7 +596,7 @@ export function InterviewPage() {
           {main}
 
           {composerOpen ? (
-            <form className="composer" onSubmit={submitAnswer}>
+            <form className="composer stream-in" onSubmit={submitAnswer}>
               <p className="turn">
                 <mark>Your turn</mark>{" "}
                 {lastIsFollowUp
@@ -594,7 +615,7 @@ export function InterviewPage() {
                   autoFocus
                 />
               </div>
-              <div className="actions" style={{ marginTop: 10 }}>
+              <div className="actions">
                 <span className="hint">Ctrl + Enter submits</span>
                 <button className="btn" type="submit">
                   Submit response <ArrowRight />
@@ -662,12 +683,14 @@ function buildScorecard({
   liveItems,
   docs,
   showThinking,
+  pageTurn,
 }: {
   openThread: Thread | null;
   pendingAnswer: string | null;
   liveItems: LiveItem[];
   docs: DocumentItem[];
   showThinking: boolean;
+  pageTurn: boolean;
 }): { question: ReactNode; main: ReactNode[]; margin: ReactNode[] } {
   const main: ReactNode[] = [];
   const margin: ReactNode[] = [];
@@ -700,7 +723,11 @@ function buildScorecard({
   const q = utterances.find((u) => u.role === "interviewer" && u.kind === "question");
   const question =
     q && openThread ? (
-      <div className="box q sc-question" key={q.key}>
+      <div
+        className="box q sc-question"
+        key={q.key}
+        style={{ viewTransitionName: pageTurn ? "next-question" : "question" }}
+      >
         <span className="lbl">{openThread.thread_index + 1}. Question</span>
         <p>
           {q.text}
@@ -717,8 +744,15 @@ function buildScorecard({
   for (const u of rest) {
     if (u === latestNote) continue;
     if (u.role === "candidate") {
+      // The just-submitted answer carries the reply box's name while the
+      // interviewer is still thinking, so the box visibly files itself.
+      const filing = u.key === "pending" && showThinking;
       main.push(
-        <div key={u.key} className="box r">
+        <div
+          key={u.key}
+          className="box r"
+          style={filing ? { viewTransitionName: "composer" } : undefined}
+        >
           <span className="lbl">Candidate response</span>
           <p className="typed">{u.text}</p>
         </div>,
@@ -756,7 +790,11 @@ function buildScorecard({
       );
     }
     main.push(
-      <div key={nextQuestion.key} className="box q stream-in">
+      <div
+        key={nextQuestion.key}
+        className="box q stream-in"
+        style={{ viewTransitionName: "next-question" }}
+      >
         <span className="lbl">{nextQuestion.threadIndex + 1}. Question</span>
         <p>
           {nextQuestion.text}
@@ -832,8 +870,8 @@ function PenNote({ kind, text, typing }: { kind: MoveKind; text: string; typing?
     <div className={`note${typing ? " stream-in" : ""}`} aria-live={typing ? "polite" : undefined}>
       <div className="k">
         <svg viewBox="0 0 34 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M32 9C24 9 16 4 3 9" />
-          <path d="M8 5 3 9l5 4" />
+          <path d="M32 9C24 9 16 4 3 9" pathLength={1} />
+          <path d="M8 5 3 9l5 4" pathLength={1} />
         </svg>
         {moveLabels[kind]}
       </div>
@@ -848,7 +886,11 @@ function PenNote({ kind, text, typing }: { kind: MoveKind; text: string; typing?
 function Assessment({ item }: { item: LiveEval }) {
   const { score, feedback, modelAnswer, phase } = item;
   return (
-    <div className="box assessment stream-in" aria-live="polite">
+    <div
+      className="box assessment stream-in"
+      aria-live="polite"
+      style={{ viewTransitionName: `topic-${item.threadIndex}` }}
+    >
       <span className="lbl pen-lbl">Interviewer's assessment</span>
       <div className="rating-row">
         <span className="cap">Rating</span>
@@ -901,7 +943,7 @@ function PrevTopic({ thread, docs }: { thread: Thread; docs: DocumentItem[] }) {
   const ids = new Set(thread.focus_document_ids ?? []);
   const sources = docs.filter((d) => ids.has(d.id));
   return (
-    <details className="prev-row">
+    <details className="prev-row" style={{ viewTransitionName: `topic-${thread.thread_index}` }}>
       <summary>
         <span className="t">Topic {num}</span>
         <span className="focus">{topicLabel(thread.focus_label) ?? "Untitled topic"}</span>

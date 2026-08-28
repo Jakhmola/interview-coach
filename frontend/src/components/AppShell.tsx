@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError, api } from "../api";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
+import { viewTransition } from "../viewTransition";
 import { ErrorBanner, Staples, StockToggle } from "./ui";
 
 const navItems = [
@@ -89,6 +90,14 @@ export function AppShell() {
                 key={item.to}
                 to={item.to}
                 className={({ isActive }) => `tab${isActive ? " active" : ""}`}
+                onClick={(event) => {
+                  // Plain left click: pull the next sheet with a view
+                  // transition. Modified clicks keep the browser's behaviour.
+                  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  if (event.button !== 0 || location.pathname === item.to) return;
+                  event.preventDefault();
+                  viewTransition(() => navigate(item.to), "route");
+                }}
               >
                 {item.label}
               </NavLink>

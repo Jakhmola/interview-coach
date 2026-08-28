@@ -719,7 +719,9 @@ export function SetupPage() {
       <ReadyLanding
         cv={cv}
         job={selectedJob}
-        techDocCount={technicalDocs.length}
+        techDocs={technicalDocs}
+        repos={docs.filter((doc) => doc.kind === "github_repo")}
+        status={status}
         onStart={() => navigate("/interview")}
         onAddJob={() => navigate("/setup?new_job=1")}
         onAddDocs={() => navigate("/setup?add_doc=1")}
@@ -1153,7 +1155,9 @@ function StepPrep({
 function ReadyLanding({
   cv,
   job,
-  techDocCount,
+  techDocs,
+  repos,
+  status,
   onStart,
   onAddJob,
   onAddDocs,
@@ -1161,7 +1165,9 @@ function ReadyLanding({
 }: {
   cv: DocumentItem | undefined;
   job: JobItem | null;
-  techDocCount: number;
+  techDocs: DocumentItem[];
+  repos: DocumentItem[];
+  status: PrepStatus | null;
   onStart: () => void;
   onAddJob: () => void;
   onAddDocs: () => void;
@@ -1186,38 +1192,97 @@ function ReadyLanding({
         <Field label="CV on file" value={cv?.filename} empty="none yet" />
       </SheetHead>
     <div className="ready-landing">
-      <h1 className="ready-title">
-        {role || "Role"} <span className="ready-at">@</span> {company || "Company"}
-      </h1>
-      <div className="ready-meta">
-        {cv ? <span>CV · {cv.filename}</span> : null}
-        {job ? (
-          <span>
-            JD · {job.source_url || (job.preview ? `"${job.preview.slice(0, 80)}…"` : "Pasted")}
-          </span>
-        ) : null}
-        <span>
-          {techDocCount === 0
-            ? "No supporting docs"
-            : `${techDocCount} supporting doc${techDocCount === 1 ? "" : "s"}`}
-        </span>
-      </div>
-      <div className="ready-actions">
-        <button className="btn-primary" type="button" onClick={onStart}>
-          Start a practice round <ArrowRight size={14} />
-        </button>
-        <div className="ready-actions-row">
-          <button className="btn-ghost" type="button" onClick={onAddJob}>
-            Add another job
+      <div className="ready-main">
+        <h1 className="ready-title">
+          {role || "Role"} <span className="ready-at">@</span> {company || "Company"}
+        </h1>
+        <p className="ready-lede">Ready to practice. Start a round, or change what's on file.</p>
+        <div className="ready-actions">
+          <button className="btn-primary" type="button" onClick={onStart}>
+            Start a practice round <ArrowRight size={14} />
           </button>
-          <button className="btn-ghost" type="button" onClick={onAddDocs}>
-            Add supporting doc
+          <div className="ready-actions-row">
+            <button className="btn-ghost" type="button" onClick={onAddJob}>
+              Add another job
+            </button>
+            <button className="btn-ghost" type="button" onClick={onAddDocs}>
+              Add supporting doc
+            </button>
+          </div>
+          <button className="btn-quiet" type="button" onClick={onManage}>
+            Manage CV, JDs &amp; docs
           </button>
         </div>
-        <button className="btn-quiet" type="button" onClick={onManage}>
-          Manage CV, JDs &amp; docs
-        </button>
       </div>
+
+      <section className="section ready-packet" aria-label="What's in the packet">
+        <h2>In the packet</h2>
+        <dl className="packet-list">
+          <div>
+            <dt>CV</dt>
+            {cv ? (
+              <dd>
+                <span>{cv.filename}</span>
+                <span className="muted">{cv.char_count.toLocaleString()} chars</span>
+              </dd>
+            ) : (
+              <dd className="empty">none yet</dd>
+            )}
+          </div>
+          <div>
+            <dt>Job description</dt>
+            {job ? (
+              <dd>
+                <span>{job.source_url || "Pasted text"}</span>
+                {job.preview ? <span className="muted">"{job.preview.slice(0, 110)}…"</span> : null}
+              </dd>
+            ) : (
+              <dd className="empty">none yet</dd>
+            )}
+          </div>
+          <div>
+            <dt>Supporting docs</dt>
+            {techDocs.length > 0 ? (
+              <dd>
+                {techDocs.map((d) => (
+                  <span key={d.id}>
+                    {d.filename}
+                    {d.project_title ? <span className="muted"> · "{d.project_title}"</span> : null}
+                  </span>
+                ))}
+              </dd>
+            ) : (
+              <dd className="empty">none</dd>
+            )}
+          </div>
+          <div>
+            <dt>GitHub repos</dt>
+            {repos.length > 0 ? (
+              <dd>
+                {repos.map((d) => (
+                  <span key={d.id}>{d.project_title ?? d.filename}</span>
+                ))}
+              </dd>
+            ) : (
+              <dd className="empty">none</dd>
+            )}
+          </div>
+        </dl>
+        <ul className="checklist" aria-label="Prep">
+          <li className={status?.profile_ready ? "done" : ""}>
+            <i aria-hidden="true" />
+            Profile built from the CV
+          </li>
+          <li className={status?.job_analyzed ? "done" : ""}>
+            <i aria-hidden="true" />
+            Job description analyzed
+          </li>
+          <li className={status?.company_researched ? "done" : ""}>
+            <i aria-hidden="true" />
+            Company researched
+          </li>
+        </ul>
+      </section>
     </div>
     </div>
   );

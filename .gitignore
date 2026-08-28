@@ -58,3 +58,4 @@ graphify-out/
 .impeccable/review/
 .impeccable/questions/
 .impeccable/live/
+.impeccable/hook.cache.json

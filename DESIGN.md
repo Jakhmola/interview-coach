@@ -40,6 +40,11 @@ typography:
     textTransform: "uppercase"
   headline:
     fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif"
+    fontSize: "21px"
+    fontWeight: 500
+    lineHeight: 1.35
+  page-title:
+    fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif"
     fontSize: "20px"
     fontWeight: 500
     lineHeight: 1.35
@@ -53,6 +58,17 @@ typography:
     fontSize: "15px"
     fontWeight: 400
     lineHeight: 1.45
+  meta:
+    fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif"
+    fontSize: "13px"
+    fontWeight: 400
+    lineHeight: 1.45
+  hint:
+    fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif"
+    fontSize: "12px"
+    fontWeight: 400
+    lineHeight: 1.4
+    letterSpacing: "0.06em"
   typed:
     fontFamily: "Courier Prime, Courier New, Courier, monospace"
     fontSize: "15.5px"
@@ -60,11 +76,18 @@ typography:
     lineHeight: "26px"
   pen:
     fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif"
-    fontSize: "15.5px"
+    fontSize: "16px"
     fontWeight: 500
     lineHeight: 1.35
     fontVariation: "wdth 78"
   label:
+    fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif"
+    fontSize: "10.5px"
+    fontWeight: 700
+    lineHeight: 1.3
+    letterSpacing: "0.14em"
+    textTransform: "uppercase"
+  label-inverted:
     fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif"
     fontSize: "10px"
     fontWeight: 700
@@ -192,7 +215,7 @@ components:
 
 The app is the document that decides the candidate's fate, being filled in live. Every screen is a photocopied form on a charcoal desk: index tabs cut from the sheet's top edge, a 1px margin rule, two staples, boxed fields with inverted corner labels, a form title under a 2px rule. Three voices share the sheet and never blur: the form speaks in Archivo caps, the candidate speaks in Courier Prime on 26px rulings, and the interviewer speaks in red ballpoint (Archivo condensed to 78% width, tilted -1.2deg in the margin). Yellow highlighter is the only other colour, and it always means "this is what matters right now": whose turn it is, which option is chosen, which cell got the score.
 
-The world is flat and material. Depth exists once, between the desk and the sheet (and again for a slip laid on top of the packet); nothing on the paper itself floats. There are no rounded cards, no tinted panels, no gradients on the sheet. Structure is drawn with rules, boxes and inverted labels, the way a printed form does it. Density is that of a real scorecard: 15px body, 10px caps labels, 14px gaps, one sheet per screen.
+The world is flat and material. Depth exists once, between the desk and the sheet (and again for a slip laid on top of the packet); nothing on the paper itself floats. There are no rounded cards, no tinted panels, no gradients on the sheet. Structure is drawn with rules, boxes and inverted labels, the way a printed form does it. Density is that of a real scorecard: 15px body, 10.5px caps labels, 14px gaps, one sheet per screen - and the sheet takes most of the desk (`min(1600px, 100%)`), so on a 1920px display the paper covers five sixths of the width with a strip of desk either side.
 
 Two paper stocks exist and the reader chooses: day (off-white on charcoal) and night (slate pages, light ink on a near-black desk). The night stock keeps every relationship, only the pigments change; the grain is dropped because dark paper does not photocopy.
 
@@ -202,7 +225,7 @@ Two paper stocks exist and the reader chooses: day (off-white on charcoal) and n
 - Zero radius on the sheet; the only curves are the 3px top corners of the index tabs.
 - Highlighter (`--hl`) is a state, not a decoration: current turn, selection, score.
 - Red (`--pen`) belongs to the interviewer and to armed destructive controls; nothing else is red.
-- Motion is the hand at work: typewriter status, pulsing pen dot, blinking caret, the stamp, confetti in packet colours.
+- Motion is the hand at work: typewriter status, pulsing pen dot, blinking caret, the stamp, the highlighter drawn across "Your turn", the pen drawing the margin arrow, confetti in packet colours - and the paper moving: the reply box files itself as a response, a closed topic folds into the index, the next sheet is pulled from the packet (view transitions).
 
 ## Colors
 
@@ -242,12 +265,12 @@ Two neutral families (desk and paper), one ink ramp, and three pigments that eac
 
 ### Hierarchy
 - **Display** (700, 24px, caps, 0.02em; 20px under 720px): the form title under its 2px rule ("Interview Scorecard", the login brand).
-- **Headline** (500, 20px, lh 1.35, max 56ch; 17px under 720px): the question in its box; page titles on Setup, History, Manage, the completion title, the modal title (700 caps there).
+- **Headline** (500, 21px, lh 1.35, max 56ch; 17px under 720px): the question in its box. **Page title** (500, 20px): page titles on Setup, History, Manage, the completion title, the modal title (700 caps there).
 - **Title** (500, 14.5px): values in underlined header fields, list-row primary text.
-- **Body** (400, 15px, lh 1.45): reading text; 13-13.5px in `--ink-2` for meta and hints; max 62-80ch on prose.
+- **Body** (400, 15px, lh 1.45): reading text; max 62-80ch on prose. **Meta** (13-13.5px, `--ink-2`): row metadata, the "Your turn" line, page meta (12.5px). **Hint** (12px, 0.06em, `--ink-2`): "Ctrl + Enter submits", "scored when the topic closes".
 - **Typed** (Courier Prime 400, 15.5px on a 26px line): the candidate's responses, the textarea they type in, model answers (14.5/24), typewriter status lines (14px), history transcripts (13.5/22).
-- **Pen** (Archivo 500, wdth 78, 15.5px, lh 1.35, `--pen`): margin notes and inline remarks; 15px in remarks and previous-topic exchanges; keyed by an 11px/10px caps label ("PROBE", "NUDGE", "AGENDA").
-- **Label** (700, 10px, 0.14em, caps, `--ink-2`): field labels, section heads (11px), previous-topic keys, model-answer summary; 9.5px inverted on the box label and status pill.
+- **Pen** (Archivo 500, wdth 78, 16px, lh 1.35, `--pen`): margin notes; 15.5px in inline remarks, the agenda and previous-topic exchanges; keyed by an 11px/10px caps label ("PROBE", "NUDGE", "AGENDA").
+- **Label** (700, 10.5px, 0.14em, caps, `--ink-2`): field labels, section heads (11px), previous-topic keys, model-answer summary, the packet index keys; 10px inverted on the box label and status pill.
 - **Control** (700, 11px, 0.16em, caps): buttons; tabs use 0.14em; quiet buttons 0.1em; desk buttons 0.1em.
 
 ### Named Rules
@@ -257,11 +280,13 @@ Two neutral families (desk and paper), one ink ramp, and three pigments that eac
 
 ## Layout
 
-One sheet per screen, centred on the desk. The desk pads `44px 24px 56px` (36/12/40 under 980px), the desk bar (tabs left, tools right) is `min(1180px, 100%)` wide, and the sheet is the same width with `min-height: calc(100vh - 140px)`. Sheet padding is `34px 56px 40px 76px`: the 76px left keeps content right of the 60px margin rule (48/34 under 980px, 32/22 under 720px). Login uses a narrower `min(760px, 100%)` cover sheet with the same margin and tabs.
+One sheet per screen, centred on the desk and taking most of it. The desk pads `28px 32px 40px` (36/12/40 under 980px), the desk bar (tabs left, tools right) is `min(1600px, 100%)` wide, and the sheet is the same width with `min-height: calc(100vh - 98px)`, so on a laptop the sheet's foot lands at the bottom of the first screen. Sheet padding is `30px 56px 36px 76px`: the 76px left keeps content right of the 60px margin rule (48/34 under 980px, 32/22 under 720px). Login uses a narrower `min(760px, 100%)` cover sheet with the same margin and tabs, centred vertically on the desk.
 
-The sheet is a vertical flex column with an 18px gap; inside it, sections are grids with 12-14px gaps and open with a 1px ink top rule. The scorecard header is an auto-fit grid of underlined fields (`minmax(150px, 1fr)`, gap 14px 22px); on the live scorecard it becomes four fixed columns (candidate / role / topic / no.) and collapses to one under 720px.
+The sheet is a vertical flex column with a 16px gap; inside it, sections are grids with 12-14px gaps and open with a 1px ink top rule. The scorecard header is an auto-fit grid of underlined fields (`minmax(150px, 1fr)`, gap 14px 22px); on the live scorecard it becomes four fixed columns (candidate / role / topic / no.) and collapses to one under 720px. The topic number is stated once, in the NO. field; the title's meta line names only the round type.
 
-The live scorecard is two columns: `minmax(0, 1fr) 250px` with a `14px 28px` gap. The question box and the main column (responses, remarks, reply box, actions, rating row) occupy the left; the right margin (latest note, agenda, grounded-in) spans both rows and never pushes the form down. Under 980px the margin drops below the main column and the note loses its tilt.
+The live scorecard is two columns: `minmax(0, 1fr) minmax(340px, 400px)` with a `14px 40px` gap. The question box and the main column (responses, remarks, reply box, actions, rating row) occupy the left; the right margin (latest note, agenda, grounded-in) spans both rows and never pushes the form down. Two things stay at hand while a long transcript scrolls: the reply box (`form.composer`) is `position: sticky; bottom: 0` on paper with a 12px paper fade above it, and on desktops at least 981px wide and 780px tall the margin is `sticky; top: 24px`. Under 980px the margin drops below the main column and the note loses its tilt.
+
+The ready landing (Setup, once prep is complete) is two columns, `minmax(0, 1fr) minmax(320px, 460px)` with a `22px 56px` gap: the role and its actions on the left, the "In the packet" index on the right (a `<dl>` table of CV / job description / supporting docs / GitHub repos over a 1px ink rule, then the prep checklist). One column under 980px.
 
 Spacing rhythm: 4, 6, 8, 10, 12, 14, 16, 18, 22, 28. Row lists (jobs, docs, sessions, previous topics) use 10px vertical padding with a `--rule` divider and no side padding; hovered rows tint `--paper-2`. Modals are a `min(720px, 100%)` slip with `28px 32px 24px` padding over a 55% black backdrop.
 
@@ -305,7 +330,7 @@ Off-sheet controls (who, day/night, log out) in `--on-desk`, 11px 700 caps 0.1em
 Header field on the scorecard: 10px caps label in `--ink-2`, 3px gap, 14.5px 500 value with a 1px ink underline, single line with ellipsis (`.wrap` clamps to 3 lines). Empty value is `--ink-3` at 400. The active-job field is this shape as a button; its menu is a slip with `--paper-2` hover rows and a highlighter-filled current row.
 
 ### Boxed Field
-1px ink box, `22px 20px 16px` padding, with an inverted label (`--ink` fill, `--paper` text, 9.5px 700 caps 0.14em, `3px 8px`) overlapping the top-left corner at -1px. Variants: `.q` (question, 20px 500, max 56ch), `.r` (a filed response, typed text on `--rule` 26px rulings, max 80ch), `.reply` (padding 0, the textarea inside; `focus-within` draws the 2px highlighter ring). The round-type fieldset on the start screen is the same box with a `<legend>` as label.
+1px ink box, `22px 20px 16px` padding, with an inverted label (`--ink` fill, `--paper` text, 10px 700 caps 0.14em, `3px 8px`) overlapping the top-left corner at -1px. Variants: `.q` (question, 21px 500, max 56ch), `.r` (a filed response, typed text on `--rule` 26px rulings, filling the box ruling for ruling exactly as the reply box did), `.reply` (padding 0, the textarea inside grows with its content via `field-sizing: content` up to 44vh; `focus-within` draws the 2px highlighter ring). The round-type fieldset on the start screen is the same box with a `<legend>` as label.
 
 ### Inputs / Fields
 - **Text input:** bare 1px ink underline, transparent, `7px 0`, 15px; focus adds a 2px highlighter underline. Placeholder `--ink-3`.
@@ -321,9 +346,9 @@ Header field on the scorecard: 10px caps label in `--ink-2`, 3px gap, 14.5px 500
 Ten 30px squares (mini: 22px; 26px under 720px) with 1px ink borders, 4px apart, 12px 600 tabular numerals in `--ink-2`. The scored cell fills `--hl` with `--hl-ink` and lands with the stamp animation (260ms, `cubic-bezier(.16,1,.3,1)`, from `scale(1.35) rotate(-6deg)` at 40% opacity). Exposed as one `role="img"` with an aria-label.
 
 ### Red-Pen Note and Remark
-- **Margin note** (`.note`): `--pen`, rotated -1.2deg from its top-left (upright under 980px and for `.static` notes), 11px caps key with a 34x18 hand-drawn arrow SVG, then pen text at 15.5px. Agenda is a `.checklist.pen`: 12px hollow squares in currentColor, filled with an inset paper ring when done.
-- **Inline remark** (`.remark`): an earlier interviewer move written on the form between responses; `82px minmax(0,1fr)` grid, 10px caps key, 15px pen text max 64ch, indented 20px.
-- Both stream in with a 220ms 4px rise (`.stream-in`) and end with a 2px blinking caret while text is arriving.
+- **Margin note** (`.note`): `--pen`, rotated -1.2deg from its top-left (upright under 980px and for `.static` notes), 11px caps key with a 34x18 hand-drawn arrow SVG, then pen text at 16px. Agenda is a `.checklist.pen`: 12px hollow squares in currentColor, filled with an inset paper ring when done.
+- **Inline remark** (`.remark`): an earlier interviewer move written on the form between responses; `82px minmax(0,1fr)` grid, 10px caps key, 15.5px pen text max 64ch, indented 20px.
+- Both stream in with a 220ms 4px rise (`.stream-in`) and end with a 2px blinking caret while text is arriving; while the note streams, the arrow draws itself (`pathLength` 1, dash offset 1 to 0 over 420ms).
 
 ### Marks and Banners
 - **Mark** (`mark`, `.mark`): highlighter fill, `--hl-ink`, `1px 4px`, 600. `.warn` uses `--hl-2`. "Your turn" is a mark.
@@ -332,7 +357,7 @@ Ten 30px squares (mini: 22px; 26px under 720px) with 1px ink borders, 4px apart,
 - **Empty state:** 1px dashed `--rule-2`, `22px 20px`, `--ink-2` with a 16px ink strong line.
 
 ### Status Pill (rubber stamp)
-20px tall, `0 7px`, 1px border in currentColor, 9.5px 700 caps 0.12em. Colour is the state: `--ok` good, `--pen` bad, ink info, amber warn (`--hl-2` on night stock). Never filled.
+20px tall, `0 7px`, 1px border in currentColor, 10px 700 caps 0.12em. Colour is the state: `--ok` good, `--pen` bad, ink info, amber warn (`--hl-2` on night stock). Never filled.
 
 ### Chips
 1px `--rule-2` outline, `1px 6px`, 11px 600 0.04em in `--ink-2`, square. Used for repo languages and wizard tags; no selected state.
@@ -351,8 +376,19 @@ Job, document, session, previous-topic and manage rows: 10px vertical padding, `
 - **Completion:** react-confetti, fixed full-screen, `pointer-events: none`, in packet colours `#ffe94d #c8321f #f5f2ea #1b1b1f #ffb257`, piece count scaled to the score.
 - All animation collapses to 0.01ms under `prefers-reduced-motion: reduce`.
 
+### Motion: the paper moving
+The stream-in, stamp, caret and pen dot are the hand at work; the paper itself moves through document view transitions (`frontend/src/viewTransition.ts`, a `startViewTransition` + `flushSync` helper that applies the update plainly where the API is missing or reduced motion is on). Groups ease over 320ms on `cubic-bezier(.16,1,.3,1)`, old/new snapshots crossfade in 200ms, the root in 140ms.
+- **Filing a response:** the reply box (`view-transition-name: composer`) morphs into the just-submitted response, which carries the same name only while the interviewer is thinking.
+- **Turning the page:** the streamed next question (`next-question`) moves up into the question box, which takes that name for the one transition that opens a new topic (`pageTurn`); a closed topic's assessment box and its previous-topics row share `topic-<index>`, so the assessment folds into the index. The composer returns only after the turn has settled, rising in with `.stream-in`.
+- **Pulling the next sheet:** a plain click on an index tab runs the navigation inside a transition tagged `<html data-vt="route">`: the old sheet (`sheet`) fades out in 120ms, the new one rises 10px in 280ms, and the ink fill slides from tab to tab (`active-tab`).
+- **The highlighter swipe:** the "Your turn" mark is painted left-to-right over 380ms (`background-size` 0 to 100%) as the reply box opens.
+- Names are unique per snapshot by construction; a duplicate would abort the transition (Chrome logs it), so treat a console warning as a defect.
+
 ### Colophon
 The sheet ends with `.sheet-foot`: right-aligned 12px `--ink-3`, "Interview Coach · runs on your machine", pushed to the bottom by `margin-top: auto`.
+
+### Favicon
+An inline SVG data URI in `index.html`: the packet on the desk at 32px - a `#1f1f22` desk, a `#f5f2ea` sheet with its `#1b1b1f` inverted label, two rulings and a `#ffe94d` highlighter mark. Pigments are literal because a favicon cannot read custom properties.
 
 ## Do's and Don'ts
 
@@ -364,7 +400,8 @@ The sheet ends with `.sheet-foot`: right-aligned 12px `--ink-3`, "Interview Coac
 - **Do** keep destructive controls ink at rest and morph them to `--pen` with a pulse only when armed.
 - **Do** define any new colour on both stocks (`:root` and `:root[data-theme="dark"]`) and pair `--hl` with `--hl-ink`.
 - **Do** render icons from lucide at 12-16px (13px inside buttons, 14px in desk tools), stroke 1.8, in currentColor.
-- **Do** honour `prefers-reduced-motion`; motion is limited to the stamp, the pen dot, the caret, the 220ms stream-in, and completion confetti.
+- **Do** honour `prefers-reduced-motion`; motion is limited to the stamp, the pen dot, the caret, the 220ms stream-in, the highlighter swipe, the arrow draw, the view transitions listed under Motion, and completion confetti. Reduced motion skips the view transitions entirely and collapses the rest.
+- **Do** keep the reply box and the interviewer's clipboard sticky on desktop; whose move it is must survive a long transcript.
 
 ### Don't:
 - **Don't** round corners on the sheet. The only radius is `3px 3px 0 0` on index tabs and `3px` on desk buttons.
