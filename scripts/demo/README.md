@@ -74,10 +74,12 @@ watch. Each answer is recorded in two parts: `-a` stops a beat after the send,
 between is never recorded, so a cut of the two runs continuously without any
 frame being faked - what you see is the app's own output at its own pace.
 
-Scenes that are honest but long are handled in the cut instead: the interviewer
-takes twenty seconds or so to write an assessment, which is worth showing but
-not in full, so that scene carries a speed factor. The typing, the streaming and
-the page turn all play at the speed they really happen.
+Scenes that are honest but long are handled in the cut instead, with the speed
+factors in the command above: the interviewer takes twenty seconds or so to
+write an assessment, which is worth showing but not in full. Nothing is
+re-timed to flatter the app - the page turn and the closing marks, the two
+moments where the interface itself is doing the work, run near enough their own
+speed, and the model's own pace is only ever cut, never stretched.
 
 The opening is the exception to the two-part rule and is recorded unbroken: a
 round's first question streams in before any thinking note appears, so the wait
