@@ -12,5 +12,36 @@ a DB-level lock instead.
 from __future__ import annotations
 
 import asyncio
+import weakref
 
-ingest_sema: asyncio.Semaphore = asyncio.Semaphore(1)
+
+class _LoopLocalSemaphore:
+    """One ``asyncio.Semaphore`` per running event loop, made on first use.
+
+    A module-level ``asyncio.Semaphore`` binds to the first loop that touches
+    it and then raises "bound to a different event loop" from every other -
+    which, under pytest-asyncio's loop-per-test, is every test after the
+    first. The api runs one loop, so it sees one semaphore either way.
+    """
+
+    def __init__(self, value: int) -> None:
+        self._value = value
+        self._by_loop: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+            weakref.WeakKeyDictionary()
+        )
+
+    def _current(self) -> asyncio.Semaphore:
+        loop = asyncio.get_running_loop()
+        sema = self._by_loop.get(loop)
+        if sema is None:
+            sema = self._by_loop[loop] = asyncio.Semaphore(self._value)
+        return sema
+
+    async def __aenter__(self) -> None:
+        await self._current().acquire()
+
+    async def __aexit__(self, *exc: object) -> None:
+        self._current().release()
+
+
+ingest_sema = _LoopLocalSemaphore(1)
