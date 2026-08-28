@@ -515,6 +515,44 @@ async def test_message_resume_conducts_probe(
     assert msgs[2]["text"] == "What tradeoff did you make?"
 
 
+async def test_message_adopts_open_thread_when_checkpoint_is_lost(
+    client: AsyncClient,
+    auth_token: str,
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run cut off after the thread row was committed but before the graph
+    checkpointed it (client disconnect) leaves an open thread the checkpoint
+    doesn't know about. The next answer must adopt that thread - not replay
+    ``interviewer_open`` into ``uq_threads_session_thread`` - and persist."""
+    from interview_coach.api.main import app
+
+    sid = await _create_message_session(client, auth_token, db_session)
+    _patch_node_session_factory(monkeypatch, db_session)
+    _patch_streaming_llm(monkeypatch, ['{"question": "Q1?", "anchors": ["a", "b", "c"]}'])
+    await _read_message_sse(client, sid, auth_token, body={})
+
+    # Simulate the lost checkpoint: the DB keeps the open thread + question.
+    await app.state.checkpointer.adelete_thread(f"interview:{sid}")
+
+    _patch_streaming_llm(monkeypatch, ['{"action": "probe", "message": "Go one level deeper."}'])
+    events = await _read_message_sse(
+        client, sid, auth_token, body={"message": "I rewrote the stack."}
+    )
+
+    assert not any(ev == "error" for ev, _ in events)
+    move = next(d for ev, d in events if ev == "move")
+    assert move["kind"] == "probe"
+    assert move["thread_index"] == 0
+
+    detail = (await client.get(f"/sessions/{sid}", headers=_auth(auth_token))).json()
+    assert len(detail["threads"]) == 1
+    msgs = detail["threads"][0]["messages"]
+    assert [m["role"] for m in msgs] == ["interviewer", "candidate", "interviewer"]
+    assert msgs[1]["text"] == "I rewrote the stack."
+    assert msgs[2]["text"] == "Go one level deeper."
+
+
 async def test_message_resume_advances_evaluates_and_completes(
     client: AsyncClient,
     auth_token: str,
