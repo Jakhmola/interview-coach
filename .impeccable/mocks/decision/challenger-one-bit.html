@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>One-Bit Desktop - Practice (mock)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--k:#000;--w:#fff}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{width:1440px;height:900px;overflow:hidden;position:relative;color:var(--k);
+  font-family:"Pixelify Sans",monospace;font-size:16px;line-height:20px;
+  background:repeating-conic-gradient(var(--k) 0 25%,var(--w) 0 50%) 0 0/4px 4px;
+  -webkit-font-smoothing:none;caret-color:var(--k)}
+::selection{background:var(--k);color:var(--w)}
+.dither{background:repeating-conic-gradient(var(--k) 0 25%,var(--w) 0 50%) 0 0/4px 4px}
+
+.menubar{position:absolute;inset:0 0 auto 0;height:22px;background:var(--w);border-bottom:1px solid var(--k);display:flex;align-items:center;padding:0 12px;gap:22px;font-weight:600}
+.menubar .mark{font-weight:700}
+.menubar .on{background:var(--k);color:var(--w);padding:0 6px;margin:0 -6px}
+.menubar .right{margin-left:auto;font-weight:400}
+
+.win{position:absolute;background:var(--w);border:1px solid var(--k);box-shadow:2px 2px 0 var(--k)}
+.title{height:19px;border-bottom:1px solid var(--k);position:relative;
+  background:repeating-linear-gradient(to bottom,var(--w) 0 2px,var(--k) 2px 3px) 0 2px/100% 15px no-repeat,var(--w)}
+.title span{position:absolute;left:50%;top:0;transform:translateX(-50%);padding:0 8px;background:var(--w);font-weight:700;font-size:16px;line-height:18px;white-space:nowrap}
+.title .close{position:absolute;left:8px;top:3px;width:12px;height:12px;border:1px solid var(--k);background:var(--w)}
+.title .zoom{position:absolute;right:8px;top:3px;width:12px;height:12px;border:1px solid var(--k);background:var(--w)}
+.title .zoom::after{content:"";position:absolute;left:2px;top:2px;width:5px;height:5px;border:1px solid var(--k)}
+.inactive .title{background:var(--w)}
+.body{padding:12px 14px}
+.scroll{position:absolute;top:19px;right:0;bottom:0;width:16px;border-left:1px solid var(--k);background:repeating-conic-gradient(var(--k) 0 25%,var(--w) 0 50%) 0 0/4px 4px}
+.scroll::before,.scroll::after{content:"";position:absolute;left:-1px;width:16px;height:16px;background:var(--w);border:1px solid var(--k)}
+.scroll::before{top:0}.scroll::after{bottom:0}
+.thumb{position:absolute;left:-1px;top:20px;width:16px;height:40px;background:var(--w);border:1px solid var(--k)}
+
+.lead{font-weight:700;font-size:20px;line-height:24px;margin:0 0 6px}
+.rule{border:0;border-top:1px dotted var(--k);margin:8px 0}
+.msg{margin:0 0 12px;max-width:66ch}
+.msg b{font-weight:700}
+.status{position:absolute;left:0;right:16px;bottom:0;height:22px;border-top:1px solid var(--k);padding:0 12px;line-height:20px;font-size:15px;background:var(--w)}
+.caret::after{content:"";display:inline-block;width:8px;height:16px;background:var(--k);vertical-align:-3px;margin-left:2px}
+
+.fieldbox{border:1px solid var(--k);height:236px;padding:8px 10px;position:relative;outline:2px dashed var(--k);outline-offset:3px}
+.fieldbox .ph{color:var(--k);opacity:1;background:repeating-linear-gradient(90deg,var(--k) 0 1px,transparent 1px 2px);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.btns{display:flex;gap:14px;align-items:center;margin-top:14px}
+.btn{height:28px;padding:0 18px;border:1px solid var(--k);border-radius:6px;background:var(--w);font:inherit;font-weight:600;cursor:pointer;color:var(--k)}
+.btn.default{box-shadow:0 0 0 2px var(--w),0 0 0 4px var(--k);border-radius:7px}
+.btn:active{background:var(--k);color:var(--w)}
+.help{margin-left:auto;font-size:14px}
+
+table{border-collapse:collapse;width:100%}
+th{font-weight:700;text-align:left;border-bottom:1px solid var(--k);padding:2px 6px;font-size:15px}
+td{padding:3px 6px;font-size:15px;white-space:nowrap}
+tr.sel td{background:var(--k);color:var(--w)}
+tr.sel td .doc{border-color:var(--w);background:var(--k)}
+tr.dim td{background:repeating-linear-gradient(90deg,var(--k) 0 1px,transparent 1px 2px);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.doc{display:inline-block;width:11px;height:14px;border:1px solid var(--k);background:var(--w);vertical-align:-2px;margin-right:6px;position:relative;clip-path:polygon(0 0,7px 0,100% 4px,100% 100%,0 100%)}
+
+.check{list-style:none;margin:0;padding:0}
+.check li{display:flex;align-items:center;gap:8px;line-height:24px}
+.check i{width:12px;height:12px;border:1px solid var(--k);display:inline-block}
+.icons{display:flex;gap:28px;margin-top:10px}
+.icon{width:120px;text-align:center;font-size:13px;line-height:15px}
+.icon .pg{width:30px;height:38px;border:1px solid var(--k);margin:0 auto 4px;background:var(--w);clip-path:polygon(0 0,20px 0,100% 10px,100% 100%,0 100%);position:relative}
+.icon .pg::before{content:"";position:absolute;left:5px;right:5px;top:13px;height:1px;background:var(--k);box-shadow:0 5px 0 var(--k),0 10px 0 var(--k),0 15px 0 var(--k)}
+
+.trash{position:absolute;right:40px;bottom:30px;width:96px;text-align:center;font-size:14px;line-height:16px}
+.trash svg{display:block;margin:0 auto 4px;width:36px;height:40px;shape-rendering:crispEdges}
+</style>
+</head>
+<body>
+
+<div class="menubar">
+  <span class="mark">Interview Coach</span>
+  <span>File</span><span>Edit</span><span>Setup</span><span class="on">Practice</span><span>History</span>
+  <span class="right">shonty@g.com</span>
+</div>
+
+<!-- Interviewer -->
+<section class="win" style="left:40px;top:52px;width:790px;height:436px">
+  <div class="title"><i class="close"></i><span>Interviewer - Topic 3 of 5</span><i class="zoom"></i></div>
+  <div class="body" style="padding-right:30px">
+    <p class="lead">Parallel generation &amp; latency</p>
+    <hr class="rule">
+    <p class="msg"><b>Q3.</b> You mentioned parallel generation reduced latency to a single LLM call. How did you balance the number of parallel requests against resource constraints, and what was the impact on overall throughput?</p>
+    <p class="msg"><b>You:</b> Resources were not much constrained as the LLM was hosted on a vendor and they provided high availability.</p>
+    <p class="msg"><b>Probe:</b> Take it one level down: when three prompt variants fan out at once, what bounded the fan-out - a semaphore, a token budget, a cost ceiling? And what did p95 latency do before and after?</p>
+  </div>
+  <div class="scroll"><i class="thumb"></i></div>
+  <div class="status">Waiting for your answer<span class="caret"></span></div>
+</section>
+
+<!-- Topics -->
+<section class="win inactive" style="left:864px;top:52px;width:536px;height:296px">
+  <div class="title"><i class="close"></i><span>Topics</span><i class="zoom"></i></div>
+  <div class="body" style="padding:6px 22px 6px 8px">
+    <table>
+      <tr><th style="width:70px">Topic</th><th>Focus</th><th style="width:70px">Score</th></tr>
+      <tr><td><i class="doc"></i>1</td><td>Modular prompt system · Bobble AI</td><td>8/10</td></tr>
+      <tr><td><i class="doc"></i>2</td><td>LLM-powered conversational agent</td><td>6/10</td></tr>
+      <tr class="sel"><td><i class="doc"></i>3</td><td>Parallel generation &amp; latency</td><td>open</td></tr>
+      <tr class="dim"><td><i class="doc"></i>4</td><td>not started</td><td>-</td></tr>
+      <tr class="dim"><td><i class="doc"></i>5</td><td>not started</td><td>-</td></tr>
+    </table>
+  </div>
+  <div class="scroll"><i class="thumb"></i></div>
+</section>
+
+<!-- Agenda & sources -->
+<section class="win inactive" style="left:900px;top:380px;width:500px;height:262px">
+  <div class="title"><i class="close"></i><span>Topic 3 - Agenda &amp; sources</span><i class="zoom"></i></div>
+  <div class="body">
+    <b>Interviewer's agenda</b>
+    <ul class="check"><li><i></i>Fan-out bound</li><li><i></i>Throughput impact</li><li><i></i>Measured latency</li></ul>
+    <hr class="rule">
+    <b>Grounded in</b>
+    <div class="icons">
+      <div class="icon"><div class="pg"></div>CV.pdf</div>
+      <div class="icon"><div class="pg"></div>LLM-Powered Conversational Agent - Bobble AI.docx</div>
+    </div>
+  </div>
+</section>
+
+<!-- Your answer (active) -->
+<section class="win" style="left:120px;top:498px;width:790px;height:372px">
+  <div class="title"><i class="close"></i><span>Your Answer</span><i class="zoom"></i></div>
+  <div class="body">
+    <div class="fieldbox"><span class="ph">Answer as you would in the interview...</span></div>
+    <div class="btns">
+      <button class="btn default" type="button">Send</button>
+      <button class="btn" type="button">Clear</button>
+      <span class="help">Cmd-Return sends</span>
+    </div>
+  </div>
+</section>
+
+<div class="trash">
+  <svg viewBox="0 0 36 40" fill="#fff" stroke="#000" stroke-width="1">
+    <rect x="6.5" y="9.5" width="23" height="28"/>
+    <rect x="3.5" y="5.5" width="29" height="4"/>
+    <rect x="13.5" y="1.5" width="9" height="4"/>
+    <path d="M12.5 14v20M18.5 14v20M24.5 14v20"/>
+  </svg>
+  End session
+</div>
+</body>
+</html>

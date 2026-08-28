@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ArrowRight, ChevronDown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { jobLabel } from "../jobLabel";
@@ -17,8 +17,8 @@ import { useActiveJob } from "../state/activeJob";
 export function ActiveJobChip() {
   const navigate = useNavigate();
   // Jobs list + active detail both live on ActiveJobContext. Switching the
-  // active job only moves the id — the provider's effect pulls the matching
-  // detail and a switch can't change the list — so the chip needs no refetch.
+  // active job only moves the id - the provider's effect pulls the matching
+  // detail and a switch can't change the list - so the chip needs no refetch.
   const { activeJob, activeJobId, jobs, setActiveJobId } = useActiveJob();
 
   const [open, setOpen] = useState(false);
@@ -76,7 +76,13 @@ export function ActiveJobChip() {
       >
         {muted ? (
           <span className="active-job-value muted">
-            {jobs.length === 0 ? "Add a job →" : "No job selected"}
+            {jobs.length === 0 ? (
+              <>
+                Add a job <ArrowRight size={12} aria-hidden="true" />
+              </>
+            ) : (
+              "No job selected"
+            )}
           </span>
         ) : (
           <span className="active-job-value">

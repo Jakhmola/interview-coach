@@ -80,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * Multi-tab logout: when another tab clears the auth token in
    * localStorage (logout), the `storage` event fires here. We mirror the
    * logout in this tab so two-tab workflows can't silently diverge.
-   * Only triggers on a genuine clear (newValue === null) — transient
+   * Only triggers on a genuine clear (newValue === null) - transient
    * writes are ignored.
    */
   useEffect(() => {

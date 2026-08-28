@@ -1,9 +1,10 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Loader2, Play, RotateCcw } from "lucide-react";
+import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowRight, ChevronRight, Play, RotateCcw } from "lucide-react";
 import { Link } from "react-router-dom";
 import Confetti from "react-confetti";
 
 import {
+  DocumentItem,
   JobItem,
   MoveKind,
   RoundType,
@@ -16,8 +17,9 @@ import {
 } from "../api";
 import { ArmedDeleteButton } from "../components/ArmedDeleteButton";
 import { LoadingStatus } from "../components/LoadingStatus";
-import { ErrorBanner } from "../components/ui";
+import { ErrorBanner, Field, JobField, RatingCells, SheetHead } from "../components/ui";
 import { codeFrom } from "../errors";
+import { topicLabel, topicTitle } from "../jobLabel";
 import { useStreamAbort } from "../hooks/useStreamAbort";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
@@ -30,18 +32,18 @@ const roundLabels: Record<RoundType, string> = {
 
 const roundDescriptions: Record<RoundType, string> = {
   experience_deep_dive:
-    "Drill into what you've actually built — CV highlights, project docs, and your GitHub repos. Repo-backed projects get implementation-level questions.",
+    "Drill into what you've actually built: CV highlights, project docs, and your GitHub repos. Repo-backed projects get implementation-level questions.",
   technical_challenge:
-    "Forward-looking problems on the role's must-have skills, scaled to seniority — from fundamentals through system design. Tests whether you can do the work.",
+    "Forward-looking problems on the role's must-have skills, scaled to seniority, from fundamentals through system design. Tests whether you can do the work.",
   behavioral_star:
-    "STAR-format questions on how you work with people — conflict, ownership, ambiguity — grounded in the role's signals and the company's values.",
+    "STAR-format questions on how you work with people: conflict, ownership, ambiguity. Grounded in the role's signals and the company's values.",
 };
 
-// Phase 34: the interviewer no longer asks one fixed question per turn — it
-// works a topic (a Thread) one move at a time, deciding at runtime whether to
-// probe, clarify, nudge, or advance. So the page is a chat transcript, and
-// each `/message` round-trip streams the interviewer's next move(s) (and, when
-// a topic closes, its single evaluation + possibly the next topic's question).
+// Phase 34: the interviewer works a topic (a Thread) one move at a time,
+// deciding at runtime whether to probe, clarify, nudge, or advance. The page
+// renders the scorecard for the open topic; each `/message` round-trip
+// streams the interviewer's next move(s) (and, when a topic closes, its
+// evaluation + possibly the next topic's question).
 
 type LiveMove = {
   type: "move";
@@ -82,17 +84,20 @@ function updateLast<T extends LiveItem["type"]>(
 
 const moveLabels: Record<MoveKind, string> = {
   question: "Question",
-  probe: "Follow-up",
+  probe: "Probe",
   clarify: "Clarify",
   nudge: "Nudge",
 };
 
+const confettiColors = ["#ffe94d", "#c8321f", "#f5f2ea", "#1b1b1f", "#ffb257"];
+
 export function InterviewPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const { activeJobId, activeJob } = useActiveJob();
   const messageAbort = useStreamAbort();
   const windowSize = useWindowSize();
   const [jobs, setJobs] = useState<JobItem[]>([]);
+  const [docs, setDocs] = useState<DocumentItem[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
@@ -104,7 +109,7 @@ export function InterviewPage() {
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [celebrationPieces, setCelebrationPieces] = useState<number | null>(null);
-  const chatBottomRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   const celebratedSessionsRef = useRef<Set<string>>(new Set());
 
   const activeSessions = useMemo(
@@ -119,12 +124,14 @@ export function InterviewPage() {
 
   const refresh = async () => {
     if (!token) return;
-    const [nextJobs, nextSessions] = await Promise.all([
+    const [nextJobs, nextSessions, nextDocs] = await Promise.all([
       api.listJobs(token),
       api.listSessions(token),
+      api.listDocuments(token).catch(() => [] as DocumentItem[]),
     ]);
     setJobs(nextJobs);
     setSessions(nextSessions);
+    setDocs(nextDocs);
     if (activeId) {
       setDetail(await api.getSession(token, activeId));
     }
@@ -136,7 +143,7 @@ export function InterviewPage() {
   }, [token, activeId]);
 
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [detail?.threads, liveItems, pendingAnswer]);
 
   useEffect(() => {
@@ -175,13 +182,7 @@ export function InterviewPage() {
         const d = frame.data as { kind: MoveKind; thread_index: number };
         setLiveItems((items) => [
           ...items,
-          {
-            type: "move",
-            key: `m${items.length}`,
-            kind: d.kind,
-            threadIndex: d.thread_index,
-            text: "",
-          },
+          { type: "move", key: `m${items.length}`, kind: d.kind, threadIndex: d.thread_index, text: "" },
         ]);
         break;
       }
@@ -255,7 +256,7 @@ export function InterviewPage() {
       case "error":
         setError(codeFrom(frame.data));
         break;
-      // "move_done" / "wrap" need no transcript change — the refetch reflects them.
+      // "move_done" / "wrap" need no transcript change: the refetch reflects them.
       default:
         break;
     }
@@ -296,8 +297,7 @@ export function InterviewPage() {
   const lastMessage = openThread?.messages.at(-1) ?? null;
   const awaitingAnswer =
     detail?.status === "active" && !!openThread && lastMessage?.role === "interviewer";
-  const needsBegin =
-    detail?.status === "active" && (detail?.threads.length ?? 0) === 0;
+  const needsBegin = detail?.status === "active" && (detail?.threads.length ?? 0) === 0;
   const composerOpen =
     awaitingAnswer && !isBusy && liveItems.length === 0 && pendingAnswer === null;
 
@@ -314,6 +314,13 @@ export function InterviewPage() {
     await sendMessage(detail.id, text);
   };
 
+  const onComposerKey = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+      event.preventDefault();
+      void submitAnswer();
+    }
+  };
+
   // ───── Empty / setup states ─────
 
   const parsed = activeJob?.parsed_json as
@@ -323,26 +330,32 @@ export function InterviewPage() {
   const role = parsed?.title;
   const company = parsed?.company_name;
   const jobLabel = role && company ? `${role} @ ${company}` : role || company || "Active job";
+  const candidate = user?.email;
 
-  if (!activeJobId) {
+  if (!activeJobId || jobs.length === 0) {
     return (
-      <div className="practice-empty">
-        <h1 className="practice-empty-title">Pick a job to practice for</h1>
-        <p className="practice-empty-body">
-          Use the active-job pill in the sidebar to switch, or set one up in{" "}
-          <Link to="/setup">Setup</Link>.
-        </p>
-      </div>
-    );
-  }
-
-  if (jobs.length === 0) {
-    return (
-      <div className="practice-empty">
-        <h1 className="practice-empty-title">No jobs yet</h1>
-        <p className="practice-empty-body">
-          <Link to="/setup">Set one up</Link> to start practicing.
-        </p>
+      <div className="practice-empty-wrap">
+        <SheetHead title="Interview scorecard" page="No round open">
+          <Field label="Candidate" value={candidate} />
+          <JobField />
+        </SheetHead>
+        <div className="practice-empty">
+          <h1 className="practice-empty-title">
+            {jobs.length === 0 ? "No job description on file yet" : "Pick a job to practice for"}
+          </h1>
+          <p className="practice-empty-body">
+            {jobs.length === 0 ? (
+              <>
+                <Link to="/setup">Set one up</Link> to start practicing.
+              </>
+            ) : (
+              <>
+                Use the role / company field above to switch, or add one in{" "}
+                <Link to="/setup">Setup</Link>.
+              </>
+            )}
+          </p>
+        </div>
       </div>
     );
   }
@@ -352,10 +365,14 @@ export function InterviewPage() {
   if (!activeId || !detail) {
     return (
       <div className="practice-start">
-        <header className="practice-start-header">
-          <span className="practice-start-eyebrow">Ready when you are</span>
-          <h1 className="practice-start-title">{jobLabel}</h1>
-        </header>
+        <SheetHead title="Interview scorecard" page="New round">
+          <Field label="Candidate" value={candidate} />
+          <JobField />
+          <Field
+            label="Date"
+            value={new Date().toLocaleDateString(undefined, { dateStyle: "medium" })}
+          />
+        </SheetHead>
 
         <ErrorBanner code={error} />
 
@@ -394,14 +411,14 @@ export function InterviewPage() {
           </label>
 
           <button className="btn-primary practice-start-cta" type="submit" disabled={isBusy}>
-            {isBusy ? <Loader2 size={16} className="spin" /> : <Play size={16} />}
+            <Play />
             {isBusy ? "Opening the conversation…" : "Start round"}
           </button>
         </form>
 
         {activeSessions.length > 0 ? (
           <div className="practice-resume">
-            <span className="practice-resume-eyebrow">Resume in progress</span>
+            <span className="practice-resume-eyebrow">Rounds in progress</span>
             <div className="practice-resume-list">
               {activeSessions.map((s) => (
                 <button
@@ -410,7 +427,7 @@ export function InterviewPage() {
                   className="practice-resume-item"
                   onClick={() => setActiveId(s.id)}
                 >
-                  <span>{roundLabels[s.round_type]}</span>
+                  <span>Resume {roundLabels[s.round_type]}</span>
                   <span className="practice-resume-meta">
                     {new Date(s.created_at).toLocaleDateString(undefined, {
                       month: "short",
@@ -430,6 +447,7 @@ export function InterviewPage() {
   // ───── Completed / abandoned ─────
 
   if (detail.status !== "active") {
+    const scored = detail.threads.filter((t) => t.score !== null && t.score !== undefined);
     return (
       <div className="practice-live">
         {celebrationPieces !== null ? (
@@ -441,313 +459,431 @@ export function InterviewPage() {
             run
             gravity={0.18}
             tweenDuration={6500}
-            colors={["#C56B62", "#DEA785", "#6C739C", "#BFB9B5", "#f0ebe6"]}
+            colors={confettiColors}
             className="completion-confetti"
             onConfettiComplete={() => setCelebrationPieces(null)}
           />
         ) : null}
 
+        <SheetHead
+          title="Interview scorecard"
+          page={`${roundLabels[detail.round_type]} · ${detail.status === "complete" ? "Complete" : "Abandoned"}`}
+        >
+          <Field label="Candidate" value={candidate} />
+          <JobField />
+          <Field
+            label="Date"
+            value={new Date(detail.created_at).toLocaleDateString(undefined, { dateStyle: "medium" })}
+          />
+          <Field label="Topics" value={`${scored.length} of ${detail.n_questions} scored`} />
+        </SheetHead>
+
         <ErrorBanner code={error} />
 
         <div className="practice-done">
-          <h1 className="practice-done-title">Round {detail.status}</h1>
+          <h1 className="practice-done-title">
+            {detail.status === "complete" ? "Round complete." : "Round abandoned."}
+          </h1>
           {overallScore !== null ? (
-            <p className="practice-done-score">
-              <strong>{overallScore.toFixed(1)}</strong>
-              <span>/ 10 average</span>
-            </p>
+            <div className="practice-done-score">
+              <span className="cap">Average</span>
+              <RatingCells
+                score={Math.round(overallScore)}
+                label={`Average ${overallScore.toFixed(1)} out of 10`}
+              />
+              <span className="hint">
+                {overallScore.toFixed(1)} / 10 over {scored.length} topic{scored.length === 1 ? "" : "s"}
+              </span>
+            </div>
           ) : null}
           <p className="practice-done-hint">
-            Review it in <Link to="/history">History</Link>, or start another round.
+            Filed to <Link to="/history">History</Link>. Start another round whenever you're ready.
           </p>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => {
-              setActiveId(null);
-              setDetail(null);
-            }}
-          >
-            <RotateCcw size={14} /> Start another round
-          </button>
-          <details className="practice-done-review">
-            <summary>Show this round</summary>
-            <div className="practice-transcript">
+          <div>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => {
+                setActiveId(null);
+                setDetail(null);
+              }}
+            >
+              <RotateCcw /> Start another round
+            </button>
+          </div>
+          {detail.threads.length > 0 ? (
+            <section className="prev" aria-label="Topics in this round">
+              <span className="cap">Topics</span>
               {detail.threads.map((t) => (
-                <ThreadReview key={t.id} thread={t} />
+                <PrevTopic key={t.id} thread={t} docs={docs} />
               ))}
-            </div>
-          </details>
+            </section>
+          ) : null}
         </div>
       </div>
     );
   }
 
-  // ───── Live round (chat) ─────
+  // ───── Live round: the scorecard ─────
 
   const closedThreads = detail.threads.filter((t) => t.status === "closed");
   const topicNum = Math.min(Math.max(detail.threads.length, 1), detail.n_questions);
-  const activeNodes = buildActiveTopic(openThread, pendingAnswer, liveItems);
-  // Busy with nothing rendered yet → the interviewer is composing its move.
   const showThinking = isBusy && liveItems.length === 0;
+  const lastIsFollowUp = lastMessage?.role === "interviewer" && lastMessage.kind !== "question";
+
+  const { question, main, margin } = buildScorecard({
+    openThread,
+    pendingAnswer,
+    liveItems,
+    docs,
+    showThinking,
+  });
 
   return (
     <div className="practice-live">
-      <header className="practice-live-header">
-        <span className="practice-live-meta">
-          {roundLabels[detail.round_type]} · topic {topicNum}/{detail.n_questions}
-        </span>
-        <span className="practice-live-meta">{jobLabel}</span>
-      </header>
+      <SheetHead
+        title="Interview scorecard"
+        page={`${roundLabels[detail.round_type]} · Page ${topicNum} of ${detail.n_questions}`}
+      >
+        <Field label="Candidate" value={candidate} />
+        <JobField />
+        <Field label="Topic" value={topicTitle(openThread?.focus_label)} empty="(opening the topic)" wrap />
+        <Field label="No." value={`${topicNum} of ${detail.n_questions}`} />
+      </SheetHead>
 
       <ErrorBanner code={error} />
 
-      {/* The active topic lives in its own card; closed topics fall to the
-          collapsed history below (new topic = fresh card at the top). */}
-      {activeNodes.length > 0 || showThinking ? (
-        <div className="practice-chat">
-          {activeNodes}
-
-          {showThinking ? (
-            <div className="practice-loading">
-              <Loader2 size={16} className="spin" />
-              <LoadingStatus
-                active
-                messages={[
-                  "Reading your answer",
-                  "Deciding the sharpest next move",
-                  "Grounding it in your profile",
-                ]}
-                fallback="Thinking"
-              />
-            </div>
-          ) : null}
-
-          <div ref={chatBottomRef} />
+      {needsBegin && !isBusy ? (
+        <div>
+          <button className="btn-primary" type="button" onClick={() => sendMessage(detail.id, null)}>
+            <Play /> Begin
+          </button>
         </div>
       ) : null}
 
-      {needsBegin && !isBusy ? (
-        <button className="btn-primary" onClick={() => sendMessage(detail.id, null)}>
-          <Play size={14} /> Begin
-        </button>
-      ) : null}
+      <div className="scorecard">
+        {question}
 
-      {composerOpen ? (
-        <form className="practice-composer" onSubmit={submitAnswer}>
-          <textarea
-            rows={6}
-            value={answer}
-            onChange={(e) => setAnswer(e.target.value)}
-            placeholder="Answer as you would in the interview…"
-            autoFocus
-          />
-          <div className="practice-composer-actions">
-            <button className="btn-primary" type="submit">
-              Send <ArrowRight size={14} />
-            </button>
-          </div>
-        </form>
-      ) : null}
+        {/* DOM order is question -> margin -> main so the single-column
+            (mobile) flow reads note and agenda before the responses; the
+            desktop grid places the margin explicitly. */}
+        <aside className="sc-margin" aria-label="Interviewer's margin">
+          {margin}
+        </aside>
+
+        <div className="sc-main">
+          {main}
+
+          {composerOpen ? (
+            <form className="composer" onSubmit={submitAnswer}>
+              <p className="turn">
+                <mark>Your turn</mark>{" "}
+                {lastIsFollowUp
+                  ? "respond to the interviewer's note in the margin."
+                  : "answer the question above."}
+              </p>
+              <div className="box reply">
+                <textarea
+                  className="typed"
+                  rows={4}
+                  value={answer}
+                  onChange={(e) => setAnswer(e.target.value)}
+                  onKeyDown={onComposerKey}
+                  placeholder="Answer as you would in the interview…"
+                  aria-label="Your response"
+                  autoFocus
+                />
+              </div>
+              <div className="actions" style={{ marginTop: 10 }}>
+                <span className="hint">Ctrl + Enter submits</span>
+                <button className="btn" type="submit">
+                  Submit response <ArrowRight />
+                </button>
+              </div>
+            </form>
+          ) : null}
+
+          {openThread ? (
+            <div className="rating-row">
+              <span className="cap">Rating</span>
+              <RatingCells score={null} />
+              <span className="hint">scored when the topic closes</span>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div ref={bottomRef} />
 
       {closedThreads.length > 0 ? (
-        <section className="practice-history">
-          <h2 className="practice-history-title">Previous topics</h2>
+        <section className="prev" aria-label="Previous topics">
+          <span className="cap">Previous topics</span>
           {closedThreads.map((t) => (
-            <ClosedTopicRow key={t.id} thread={t} />
+            <PrevTopic key={t.id} thread={t} docs={docs} />
           ))}
         </section>
       ) : null}
 
       <footer className="practice-live-footer">
+        <span>Round in progress. Ending it now files what you have to History.</span>
         <ArmedDeleteButton
           label="End session"
+          armedLabel="Click again to end"
           onConfirm={() => abandon(detail.id)}
-          className="btn-quiet"
+          className="btn-ghost danger"
         />
-        <small className="practice-end-hint">You can still review it in History.</small>
       </footer>
     </div>
   );
 }
 
-// --- transcript rendering ---------------------------------------------------
+// --- scorecard rows ---------------------------------------------------------
 
-// Only the CURRENT topic renders in the active card: the open thread's
-// persisted messages, the candidate's just-sent answer (not yet persisted),
-// and the live stream overlay. Closed topics render in the history below.
-function buildActiveTopic(
-  openThread: Thread | null,
-  pendingAnswer: string | null,
-  liveItems: LiveItem[],
-): ReactNode[] {
-  const nodes: ReactNode[] = [];
+type Utterance = {
+  key: string;
+  role: "interviewer" | "candidate";
+  kind: MoveKind;
+  text: string;
+  typing?: boolean;
+};
+
+/**
+ * Lays the open topic out as the scorecard: the question box, then the main
+ * column (each typed response, the interviewer's earlier remarks written
+ * inline between them, the live evaluation, a streaming next question), and
+ * the margin (the interviewer's latest note in red pen, level with the
+ * question as on the comp, over the thread's agenda and sources). Live
+ * stream items overlay at the end; a move for the *next* topic opens a new
+ * page under a page-break rule.
+ */
+function buildScorecard({
+  openThread,
+  pendingAnswer,
+  liveItems,
+  docs,
+  showThinking,
+}: {
+  openThread: Thread | null;
+  pendingAnswer: string | null;
+  liveItems: LiveItem[];
+  docs: DocumentItem[];
+  showThinking: boolean;
+}): { question: ReactNode; main: ReactNode[]; margin: ReactNode[] } {
+  const main: ReactNode[] = [];
+  const margin: ReactNode[] = [];
+
+  const currentIndex = openThread?.thread_index ?? -1;
+  const utterances: Utterance[] = [];
   if (openThread) {
     for (const m of openThread.messages) {
-      if (m.role === "candidate") {
-        nodes.push(<AnswerBubble key={m.id} text={m.text} />);
-      } else {
-        nodes.push(
-          <MoveBubble
-            key={m.id}
-            kind={m.kind ?? "question"}
-            num={openThread.thread_index + 1}
-            text={m.text}
-          />,
-        );
-      }
+      utterances.push({ key: m.id, role: m.role, kind: m.kind ?? "question", text: m.text });
     }
   }
   if (pendingAnswer !== null) {
-    nodes.push(<AnswerBubble key="pending" text={pendingAnswer} />);
+    utterances.push({ key: "pending", role: "candidate", kind: "question", text: pendingAnswer });
   }
+  let evalItem: LiveEval | null = null;
+  let nextQuestion: LiveMove | null = null;
   for (const item of liveItems) {
     if (item.type === "move") {
-      nodes.push(
-        <MoveBubble key={item.key} kind={item.kind} num={item.threadIndex + 1} text={item.text} typing />,
-      );
+      if (item.threadIndex === currentIndex || (currentIndex === -1 && item.kind !== "question")) {
+        utterances.push({ key: item.key, role: "interviewer", kind: item.kind, text: item.text, typing: true });
+      } else {
+        nextQuestion = item;
+      }
     } else {
-      nodes.push(
-        <EvalCard
-          key={item.key}
-          score={item.score}
-          feedback={item.feedback}
-          modelAnswer={item.modelAnswer}
-          phase={item.phase}
-        />,
-      );
+      evalItem = item;
     }
   }
-  return nodes;
+
+  // The question box + the margin's agenda and sources.
+  const q = utterances.find((u) => u.role === "interviewer" && u.kind === "question");
+  const question =
+    q && openThread ? (
+      <div className="box q sc-question" key={q.key}>
+        <span className="lbl">{openThread.thread_index + 1}. Question</span>
+        <p>
+          {q.text}
+          {q.typing ? <span className="cursor-blink" /> : null}
+        </p>
+      </div>
+    ) : null;
+
+  // The interviewer's latest note lives in the margin; earlier ones are
+  // written inline on the form, between the responses they answered.
+  const rest = utterances.filter((u) => u !== q);
+  const last = rest.at(-1);
+  const latestNote = last && last.role === "interviewer" ? last : null;
+  for (const u of rest) {
+    if (u === latestNote) continue;
+    if (u.role === "candidate") {
+      main.push(
+        <div key={u.key} className="box r">
+          <span className="lbl">Candidate response</span>
+          <p className="typed">{u.text}</p>
+        </div>,
+      );
+    } else {
+      main.push(<Remark key={u.key} kind={u.kind} text={u.text} />);
+    }
+  }
+
+  if (evalItem) {
+    main.push(<Assessment key={evalItem.key} item={evalItem} />);
+  }
+
+  if (showThinking) {
+    main.push(
+      <div key="thinking" className="practice-loading">
+        <span className="pen-dot" aria-hidden="true" />
+        <LoadingStatus
+          active
+          messages={["Reading your answer", "Deciding the sharpest next move", "Grounding it in your profile"]}
+          fallback="Thinking"
+        />
+      </div>,
+    );
+  }
+
+  if (nextQuestion) {
+    // The round's very first question opens on a fresh page; only a topic
+    // that follows a closed one gets the page-break rule.
+    if (currentIndex >= 0) {
+      main.push(
+        <div key="break" className="page-break">
+          Next topic
+        </div>,
+      );
+    }
+    main.push(
+      <div key={nextQuestion.key} className="box q stream-in">
+        <span className="lbl">{nextQuestion.threadIndex + 1}. Question</span>
+        <p>
+          {nextQuestion.text}
+          <span className="cursor-blink" />
+        </p>
+      </div>,
+    );
+  }
+
+  if (latestNote) {
+    margin.push(
+      <PenNote key={latestNote.key} kind={latestNote.kind} text={latestNote.text} typing={latestNote.typing} />,
+    );
+  }
+  if (openThread) {
+    margin.push(<TopicMargin key="agenda" thread={openThread} docs={docs} />);
+  }
+
+  return { question, main, margin };
 }
 
-// A closed topic, collapsed into one row in the bottom "Previous topics" list.
-function ClosedTopicRow({ thread }: { thread: Thread }) {
-  const num = thread.thread_index + 1;
+/** An earlier interviewer move, written on the form between two responses. */
+function Remark({ kind, text }: { kind: MoveKind; text: string }) {
   return (
-    <details className="practice-history-item">
-      <summary className="practice-history-summary">
-        <span className="practice-history-topic">Topic {num}</span>
-        {thread.focus_label ? (
-          <span className="practice-history-focus">{thread.focus_label}</span>
-        ) : null}
-        {thread.score !== null && thread.score !== undefined ? (
-          <span className="practice-history-score">{thread.score}/10</span>
-        ) : null}
-      </summary>
-      <div className="practice-history-body">
-        {thread.messages.map((m) => (
-          <div key={m.id} className="practice-history-msg">
-            <span className="practice-history-role">
-              {m.role === "candidate"
-                ? "You"
-                : m.kind === "question"
-                  ? `Q${num}`
-                  : moveLabels[m.kind ?? "question"]}
-            </span>
-            <p>{m.text}</p>
-          </div>
-        ))}
-        {thread.feedback ? (
-          <div className="practice-history-eval">
-            <p>{thread.feedback}</p>
-            {thread.model_answer ? (
-              <details className="practice-history-model">
-                <summary>Model answer</summary>
-                <p>{thread.model_answer}</p>
-              </details>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    </details>
+    <div className="remark">
+      <span className="k">{moveLabels[kind]}</span>
+      <p>{text}</p>
+    </div>
   );
 }
 
-function MoveBubble({
-  kind,
-  num,
-  text,
-  typing,
-}: {
-  kind: MoveKind;
-  num: number;
-  text: string;
-  typing?: boolean;
-}) {
-  const label = kind === "question" ? `Q${num}` : moveLabels[kind];
+function docLabel(d: DocumentItem) {
+  return d.kind === "github_repo" ? (d.project_title ?? d.filename) : d.filename;
+}
+
+/** Agenda (the thread's anchors) and sources (its focus documents), in the margin. */
+function TopicMargin({ thread, docs }: { thread: Thread; docs: DocumentItem[] }) {
+  const anchors = thread.anchors_json ?? [];
+  const ids = new Set(thread.focus_document_ids ?? []);
+  const sources = docs.filter((d) => ids.has(d.id));
+  if (anchors.length === 0 && sources.length === 0) return null;
   return (
-    <article className={`practice-question${typing ? " stream-in" : ""}`} aria-live="polite">
-      <span className="practice-question-num">{label}</span>
+    <>
+      {anchors.length > 0 ? (
+        <div className="note static">
+          <div className="k">Agenda</div>
+          <ul className="checklist pen" style={{ marginTop: 6 }}>
+            {anchors.map((a) => (
+              <li key={a}>
+                <i aria-hidden="true" />
+                {a}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {sources.length > 0 ? (
+        <div className="sources">
+          <span className="k">Grounded in</span>
+          <ul>
+            {sources.map((d) => (
+              <li key={d.id}>{docLabel(d)}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function PenNote({ kind, text, typing }: { kind: MoveKind; text: string; typing?: boolean }) {
+  return (
+    <div className={`note${typing ? " stream-in" : ""}`} aria-live={typing ? "polite" : undefined}>
+      <div className="k">
+        <svg viewBox="0 0 34 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M32 9C24 9 16 4 3 9" />
+          <path d="M8 5 3 9l5 4" />
+        </svg>
+        {moveLabels[kind]}
+      </div>
       <p>
         {text}
         {typing ? <span className="cursor-blink" /> : null}
       </p>
-    </article>
+    </div>
   );
 }
 
-function AnswerBubble({ text }: { text: string }) {
+function Assessment({ item }: { item: LiveEval }) {
+  const { score, feedback, modelAnswer, phase } = item;
   return (
-    <article className="practice-your-answer">
-      <span className="practice-your-answer-label">Your answer</span>
-      <p>{text}</p>
-    </article>
-  );
-}
-
-function EvalCard({
-  score,
-  feedback,
-  modelAnswer,
-  phase,
-}: {
-  score: number | null;
-  feedback: string;
-  modelAnswer: string;
-  phase: EvalPhase;
-}) {
-  if (phase === "evaluating" && !feedback && score === null) {
-    return (
-      <div className="practice-loading">
-        <Loader2 size={16} className="spin" />
-        <LoadingStatus
-          active
-          messages={["Scoring your structure", "Checking evidence and specificity", "Drafting feedback"]}
-          fallback="Evaluating this topic"
-        />
+    <div className="box assessment stream-in" aria-live="polite">
+      <span className="lbl pen-lbl">Interviewer's assessment</span>
+      <div className="rating-row">
+        <span className="cap">Rating</span>
+        <RatingCells score={score} />
+        {score === null ? (
+          <span className="practice-loading subtle">
+            <span className="pen-dot" aria-hidden="true" />
+            <LoadingStatus
+              active
+              messages={["Scoring your structure", "Checking evidence and specificity", "Drafting feedback"]}
+              fallback="Scoring this topic"
+            />
+          </span>
+        ) : null}
       </div>
-    );
-  }
-  return (
-    <article className="practice-feedback stream-in" aria-live="polite">
-      <header>
-        {score !== null ? (
-          <span className="practice-feedback-score">
-            <strong>{score}</strong>
-            <span>/ 10</span>
-          </span>
-        ) : (
-          <span className="practice-feedback-score loading">
-            <Loader2 size={14} className="spin" /> Scoring…
-          </span>
-        )}
-      </header>
-      <p>
-        {feedback}
-        {phase === "feedback" ? <span className="cursor-blink" /> : null}
-      </p>
+      {feedback ? (
+        <p className="feedback">
+          {feedback}
+          {phase === "feedback" ? <span className="cursor-blink" /> : null}
+        </p>
+      ) : null}
       {phase === "model_answer" || modelAnswer ? (
-        <details open className="stream-in">
-          <summary>Model answer</summary>
+        <details open className="model-answer">
+          <summary>
+              <ChevronRight aria-hidden="true" />
+              Model answer
+            </summary>
           <p>
             {modelAnswer}
             {phase === "model_answer" ? <span className="cursor-blink" /> : null}
           </p>
         </details>
-      ) : phase === "feedback" ? (
+      ) : phase === "feedback" && score !== null ? (
         <div className="practice-loading subtle">
-          <Loader2 size={14} className="spin" />
+          <span className="pen-dot" aria-hidden="true" />
           <LoadingStatus
             active
             messages={["Preparing model answer", "Tuning it to the role", "Making the example sharper"]}
@@ -755,36 +891,65 @@ function EvalCard({
           />
         </div>
       ) : null}
-    </article>
+    </div>
   );
 }
 
-function ThreadReview({ thread }: { thread: Thread }) {
+/** A closed topic: one row of the packet index, expandable to the full exchange. */
+function PrevTopic({ thread, docs }: { thread: Thread; docs: DocumentItem[] }) {
+  const num = thread.thread_index + 1;
+  const ids = new Set(thread.focus_document_ids ?? []);
+  const sources = docs.filter((d) => ids.has(d.id));
   return (
-    <div className="practice-past-turn">
-      <strong>Topic {thread.thread_index + 1}</strong>
-      {thread.focus_label ? <p className="practice-past-focus">{thread.focus_label}</p> : null}
-      {thread.messages.map((m) => (
-        <div key={m.id}>
-          <span className="practice-past-label">
-            {m.role === "candidate" ? "You" : m.kind === "question" ? "Interviewer" : moveLabels[m.kind ?? "question"]}
-          </span>
-          <p className={m.role === "candidate" ? "" : "practice-past-q"}>{m.text}</p>
-        </div>
-      ))}
-      {thread.status === "closed" && thread.score !== null && thread.score !== undefined ? (
-        <>
-          <span className="practice-past-label">{thread.score}/10</span>
-          {thread.feedback ? <p>{thread.feedback}</p> : null}
-          {thread.model_answer ? (
-            <details>
-              <summary>Model answer</summary>
-              <p>{thread.model_answer}</p>
-            </details>
-          ) : null}
-        </>
-      ) : null}
-    </div>
+    <details className="prev-row">
+      <summary>
+        <span className="t">Topic {num}</span>
+        <span className="focus">{topicLabel(thread.focus_label) ?? "Untitled topic"}</span>
+        <RatingCells score={thread.score} mini />
+      </summary>
+      <div className="prev-body">
+        {thread.messages.map((m) => {
+          const isQ = m.role === "interviewer" && (m.kind ?? "question") === "question";
+          const isFollowUp = m.role === "interviewer" && !isQ;
+          return (
+            <div key={m.id} className="exchange">
+              <span className={`who${isFollowUp ? " pen" : ""}`}>
+                {m.role === "candidate" ? "You" : isQ ? `Q${num}` : moveLabels[m.kind ?? "question"]}
+              </span>
+              <p className={m.role === "candidate" ? "typed" : isFollowUp ? "pen" : ""}>{m.text}</p>
+            </div>
+          );
+        })}
+        {thread.score !== null && thread.score !== undefined ? (
+          <div className="exchange">
+            <span className="who pen">Rated {thread.score}/10</span>
+            <div>
+              {thread.feedback ? <p>{thread.feedback}</p> : null}
+              {thread.model_answer ? (
+                <details className="model-answer">
+                  <summary>
+              <ChevronRight aria-hidden="true" />
+              Model answer
+            </summary>
+                  <p>{thread.model_answer}</p>
+                </details>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <div className="exchange">
+            <span className="who">Rating</span>
+            <p className="muted">No evaluation recorded.</p>
+          </div>
+        )}
+        {sources.length > 0 ? (
+          <div className="exchange">
+            <span className="who">Grounded in</span>
+            <p className="muted">{sources.map(docLabel).join(" · ")}</p>
+          </div>
+        ) : null}
+      </div>
+    </details>
   );
 }
 

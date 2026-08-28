@@ -21,7 +21,7 @@ type ActiveJobContextValue = {
   /** All jobs for the current user, oldest-first per the backend.
    * Phase 22: lives on the context so a single ``refresh()`` call
    * keeps the sidebar dropdown, Setup wizard, Manage page, and
-   * ReadyLanding all reading from one snapshot — no more "I switched
+   * ReadyLanding all reading from one snapshot - no more "I switched
    * the active job but the dropdown still shows the old label". */
   jobs: JobItem[];
   /** Loading flag for the initial resolve + any refresh in flight. */
@@ -50,7 +50,7 @@ function writeStoredId(id: string | null) {
       localStorage.setItem(ACTIVE_JOB_KEY, id);
     }
   } catch {
-    // ignore — quota or disabled storage; in-memory state still works
+    // ignore - quota or disabled storage; in-memory state still works
   }
 }
 
@@ -97,7 +97,7 @@ export function ActiveJobProvider({ children }: { children: ReactNode }) {
     if (!token) return;
     setIsLoading(true);
     try {
-      // Always pull the list — it's cheap and it's the source of truth
+      // Always pull the list - it's cheap and it's the source of truth
       // every Phase 22 surface reads from.
       let nextJobs: JobItem[] = [];
       try {
@@ -118,10 +118,10 @@ export function ActiveJobProvider({ children }: { children: ReactNode }) {
           return;
         } catch (err) {
           if (err instanceof ApiError && err.status === 404) {
-            // Stale id — clear it silently and fall through to the fallback.
+            // Stale id - clear it silently and fall through to the fallback.
             writeStoredId(null);
           } else if (err instanceof ApiError && err.status === 401) {
-            // Auth expired — surface; AuthProvider's storage listener handles it.
+            // Auth expired - surface; AuthProvider's storage listener handles it.
             throw err;
           } else {
             // Network blip etc. Don't nuke the id; just skip the fetch.
@@ -158,7 +158,7 @@ export function ActiveJobProvider({ children }: { children: ReactNode }) {
 
   // Detail follows the id: when the active id moves ahead of the held detail
   // (e.g. a dropdown/Setup switch that only flips the id, no list refresh),
-  // pull the matching JobDetail. Best-effort and silent — resolve() owns
+  // pull the matching JobDetail. Best-effort and silent - resolve() owns
   // isLoading, so this never flashes a second spinner; the list snapshot keeps
   // the chip label if the fetch fails. The `cancelled` flag drops a stale
   // result on unmount or a rapid re-switch (A→B→A settles on A).

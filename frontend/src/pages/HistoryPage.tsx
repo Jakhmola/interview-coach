@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { JobItem, Session, SessionDetail, SessionStatus, Thread, api } from "../api";
-import { ErrorBanner } from "../components/ui";
+import { ErrorBanner, Field, RatingCells, SheetHead } from "../components/ui";
 import { codeFrom } from "../errors";
+import { topicLabel } from "../jobLabel";
 import { useAuth } from "../state/auth";
 
 const roundLabels = {
@@ -19,7 +20,7 @@ const statusTone: Record<SessionStatus, string> = {
 };
 
 export function HistoryPage() {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [jobDetails, setJobDetails] = useState<
@@ -96,9 +97,13 @@ export function HistoryPage() {
 
   return (
     <div className="history">
+      <SheetHead title="Session records" page={`${sessions.length} session${sessions.length === 1 ? "" : "s"} on file`}>
+        <Field label="Candidate" value={user?.email} />
+        <Field label="Rounds on file" value={sessions.length} />
+      </SheetHead>
       <header className="history-header">
-        <h1 className="history-title">History</h1>
-        <div className="history-filter">
+        <h1 className="history-title">Every round, filed by job.</h1>
+        <div className="history-filter" role="group" aria-label="Filter by status">
           {(["all", "complete", "active", "abandoned"] as const).map((f) => (
             <button
               key={f}
@@ -116,7 +121,11 @@ export function HistoryPage() {
 
       {filtered.length === 0 ? (
         <div className="history-empty">
-          <p>No sessions yet.</p>
+          <p>
+            {sessions.length === 0
+              ? "Nothing filed yet. Your first practice round will appear here with every topic, rating, and model answer."
+              : "No sessions match this filter."}
+          </p>
         </div>
       ) : (
         <div className="history-groups">
@@ -190,8 +199,8 @@ function HistorySession({ session, token }: { session: Session; token: string })
         <div className="history-card-main">
           <strong>{roundLabels[session.round_type]}</strong>
           <span className="history-card-meta">
-            {date} · {session.n_questions} q
-            {average !== null ? <> · {average.toFixed(1)}/10</> : null}
+            {date} · {session.n_questions} topic{session.n_questions === 1 ? "" : "s"}
+            {average !== null ? <> · {average.toFixed(1)}/10 average</> : null}
           </span>
         </div>
         <span className={`history-card-status status-${statusTone[session.status]}`}>
@@ -206,7 +215,7 @@ function HistorySession({ session, token }: { session: Session; token: string })
         <div className="history-card-body">
           <ErrorBanner code={error} />
           {!detail ? <p className="history-card-loading">Loading…</p> : null}
-          {detail?.threads.length === 0 ? <p>No topics recorded.</p> : null}
+          {detail?.threads.length === 0 ? <p className="history-turn-empty">No topics recorded.</p> : null}
           {detail?.threads.map((thread) => (
             <HistoryThread key={thread.id} thread={thread} />
           ))}
@@ -218,7 +227,7 @@ function HistorySession({ session, token }: { session: Session; token: string })
 
 const moveLabels: Record<string, string> = {
   question: "Interviewer",
-  probe: "Follow-up",
+  probe: "Probe",
   clarify: "Clarify",
   nudge: "Nudge",
 };
@@ -226,10 +235,13 @@ const moveLabels: Record<string, string> = {
 function HistoryThread({ thread }: { thread: Thread }) {
   return (
     <div className="history-turn">
-      <strong className="history-turn-q">
-        Topic {thread.thread_index + 1}
-        {thread.focus_label ? <span className="history-turn-focus"> · {thread.focus_label}</span> : null}
-      </strong>
+      <div className="history-turn-head">
+        <strong className="history-turn-q">
+          Topic {thread.thread_index + 1}
+          {topicLabel(thread.focus_label) ? <span className="history-turn-focus"> · {topicLabel(thread.focus_label)}</span> : null}
+        </strong>
+        <RatingCells score={thread.score} mini />
+      </div>
       {thread.messages.map((m) => (
         <p key={m.id} className={m.role === "candidate" ? "" : "history-turn-interviewer"}>
           <span className="history-turn-label">
@@ -240,12 +252,15 @@ function HistoryThread({ thread }: { thread: Thread }) {
       ))}
       {thread.status === "closed" && thread.score !== null && thread.score !== undefined ? (
         <>
-          <p>
-            <span className="history-turn-label">{thread.score}/10</span> {thread.feedback}
+          <p className="history-turn-interviewer">
+            <span className="history-turn-label">Rated {thread.score}/10</span> {thread.feedback}
           </p>
           {thread.model_answer ? (
-            <details>
-              <summary>Model answer</summary>
+            <details className="model-answer">
+              <summary>
+                <ChevronRight aria-hidden="true" />
+                Model answer
+              </summary>
               <p>{thread.model_answer}</p>
             </details>
           ) : null}

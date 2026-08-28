@@ -13,7 +13,7 @@ import { useAuth } from "./state/auth";
 function Protected({ children }: { children: ReactNode }) {
   const { token, isBooting } = useAuth();
   if (isBooting) {
-    return <div className="boot-screen">Opening the studio...</div>;
+    return <div className="boot-screen">Opening your packet…</div>;
   }
   if (!token) {
     return <Navigate to="/login" replace />;

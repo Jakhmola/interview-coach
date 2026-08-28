@@ -1,5 +1,5 @@
 /**
- * Phase 22 — single helper for the JD display label.
+ * Phase 22 - single helper for the JD display label.
  *
  * The wizard, Manage list, ActiveJobChip dropdown, and ReadyLanding
  * all need to render the same thing for a given job, otherwise the
@@ -7,12 +7,12 @@
  * with no way to tell them apart). One helper, one truth.
  *
  * Preference order:
- *   1. ``role @ company``  — both extracted by ``job_analyzer``.
- *   2. ``role``           — analyzer got a title but no company name.
- *   3. ``company``        — analyzer got a company but no title.
- *   4. ``source_url`` minus scheme — for URL-pulled JDs pre-analysis.
+ *   1. ``role @ company``  - both extracted by ``job_analyzer``.
+ *   2. ``role``           - analyzer got a title but no company name.
+ *   3. ``company``        - analyzer got a company but no title.
+ *   4. ``source_url`` minus scheme - for URL-pulled JDs pre-analysis.
  *   5. first ~80 chars of the text preview, in quotes.
- *   6. ``"Pasted JD"`` — last-resort fallback.
+ *   6. ``"Pasted JD"`` - last-resort fallback.
  *
  * ``parsed_json`` arrives as ``unknown`` because the backend is loose
  * about the shape on the wire; we read role/company defensively.
@@ -55,4 +55,23 @@ export function jobSubtitle(job: JobItem): string | null {
   if (!(role || company)) return null;
   if (job.source_url) return job.source_url.replace(/^https?:\/\//, "");
   return "pasted";
+}
+
+/** A thread's focus label as form copy: CV-highlight labels arrive wrapped in quotes. */
+export function topicLabel(label: string | null | undefined): string | undefined {
+  const t = (label ?? "").trim().replace(/^["\u201c]+|["\u201d]+$/g, "").trim();
+  return t || undefined;
+}
+
+/**
+ * The scorecard's TOPIC field: the highlight's headline clause, the way an
+ * interviewer would write the topic on the form ("Built an LLM-powered
+ * conversational agent with retrieval over product docs"), not the whole
+ * CV bullet with its metrics. Lists and History keep the full label.
+ */
+export function topicTitle(label: string | null | undefined): string | undefined {
+  const full = topicLabel(label);
+  if (!full) return undefined;
+  const clause = full.split(/[;:]|\s[-\u2013\u2014]\s/)[0].trim();
+  return clause || full;
 }

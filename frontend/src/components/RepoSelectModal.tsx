@@ -11,7 +11,7 @@ import { RepoListing } from "../api";
  * closing equals "select none" (the user's escape hatch), which deselects
  * everything previously ingested.
  *
- * The picker is deliberately coarse — name, description, language, stars,
+ * The picker is deliberately coarse - name, description, language, stars,
  * last-pushed, archived flag, CV-mention pre-check, and a search box. No
  * JD/tech ranking here: the rich signal doesn't exist pre-ingestion (focus
  * weighting handles relevance downstream).
@@ -22,7 +22,7 @@ export function RepoSelectModal({
   busy,
   onSubmit,
   onClose,
-  closeLabel = "Skip — no repos",
+  closeLabel = "Skip - no repos",
 }: {
   open: boolean;
   repos: RepoListing[] | null;
@@ -95,7 +95,7 @@ function RepoSelectBody({
   closeLabel: string;
 }) {
   // Pre-check CV-mentioned repos (setup), already-ingested ones (Manage / the
-  // user's prior selection), and any that failed to ingest — so a retry
+  // user's prior selection), and any that failed to ingest - so a retry
   // resubmits the same set; unchecking a failed repo skips it instead.
   const [selected, setSelected] = useState<Set<string>>(
     () =>
@@ -182,7 +182,7 @@ function RepoSelectBody({
                   {r.cv_mentioned ? <em className="wizard-suggested-tag"> on your CV</em> : null}
                   {r.archived ? <em className="wizard-suggested-tag"> archived</em> : null}
                   {r.description ? (
-                    <span className="wizard-doc-meta"> — {r.description}</span>
+                    <span className="wizard-doc-meta"> - {r.description}</span>
                   ) : null}
                   <span className="wizard-chip-row">
                     {r.language ? <span className="wizard-chip">{r.language}</span> : null}
@@ -194,7 +194,7 @@ function RepoSelectBody({
                   </span>
                   {r.ingest_error ? (
                     <span className="wizard-doc-meta danger">
-                      <AlertTriangle size={11} /> {r.ingest_error.step} step failed —{" "}
+                      <AlertTriangle size={11} /> {r.ingest_error.step} step failed -{" "}
                       {r.ingest_error.reason}
                     </span>
                   ) : null}

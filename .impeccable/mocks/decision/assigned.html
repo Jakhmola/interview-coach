@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Checkride - Practice (mock)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=B612:wght@400;700&family=B612+Mono:wght@400;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --panel:#cfc8bb; --panel-2:#c2bbad; --panel-3:#b5ae9f;
+  --bezel:#141416; --bezel-2:#1d1d21; --bezel-line:#2b2b31;
+  --placard:#f3f0e9; --ink:#141416; --engrave:#3b3834; --engrave-2:#6b665f;
+  --ghost:#4b4b54; --ghost-line:#303036;
+  --blue:#3a78c2; --green:#2e9e5b; --amber:#e8b422; --red:#d13b2b;
+  --white:#f6f4ee;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  width:1440px;height:900px;overflow:hidden;
+  font-family:Barlow,system-ui,sans-serif;font-size:16px;line-height:1.45;color:var(--ink);
+  background:var(--panel);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.07 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+  display:grid;grid-template-rows:56px 64px 1fr;
+  caret-color:var(--blue);
+}
+::selection{background:var(--blue);color:#fff}
+.eng{font-family:B612,system-ui,sans-serif;font-weight:700;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--engrave);text-shadow:0 1px 0 rgba(255,255,255,.55)}
+.mono{font-family:"B612 Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+
+/* ---------- header placard bar ---------- */
+.bar{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:32px;padding:0 28px;
+  background:var(--panel-2);box-shadow:0 1px 0 rgba(255,255,255,.45) inset,0 -1px 0 rgba(0,0,0,.22) inset}
+.brand{display:flex;align-items:center;gap:10px}
+.brand svg{width:22px;height:22px}
+.brand .eng{font-size:12px;letter-spacing:.16em}
+.tabs{display:flex;gap:8px;justify-self:center}
+.tab{padding:7px 16px;border-radius:3px;text-decoration:none}
+.tab.lit{background:var(--placard);color:var(--ink);text-shadow:none;box-shadow:0 1px 0 rgba(255,255,255,.8) inset,0 2px 4px rgba(0,0,0,.25)}
+.job{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.job .role{font-size:12px}
+.job .co{font-size:10px;color:var(--engrave-2);letter-spacing:.14em}
+.user{font-family:B612,sans-serif;font-size:11px;color:var(--engrave-2)}
+
+/* ---------- annunciators ---------- */
+.annunc{display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:28px;padding:0 28px;
+  background:var(--bezel);box-shadow:0 1px 0 rgba(255,255,255,.08) inset,0 -2px 0 #000 inset;position:relative}
+.readout{display:flex;align-items:baseline;gap:12px}
+.readout .lbl{font-family:B612;font-weight:700;font-size:10px;letter-spacing:.14em;color:#8b8b95}
+.readout .num{font-family:"B612 Mono";font-weight:700;font-size:26px;color:var(--white);line-height:1}
+.readout .num .dim{color:#66666f;font-size:18px}
+.readout .txt{font-family:B612;font-weight:700;font-size:12px;letter-spacing:.14em;color:#c9c9d0}
+.lamps{display:flex;gap:10px;justify-content:center}
+.lamp{min-width:150px;height:36px;display:grid;place-items:center;border-radius:3px;
+  font-family:B612;font-weight:700;font-size:11px;letter-spacing:.14em;
+  background:#1a1a1e;color:var(--ghost);border:1px solid var(--ghost-line);
+  box-shadow:0 2px 3px rgba(0,0,0,.6) inset}
+.lamp.lit-green{background:var(--green);color:#052614;border-color:#5ec48a;
+  box-shadow:0 0 0 1px rgba(255,255,255,.18) inset,0 2px 14px rgba(46,158,91,.55)}
+
+/* ---------- deck ---------- */
+.deck{display:grid;grid-template-columns:minmax(0,1fr) 392px;gap:24px;padding:24px 28px 20px}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.cluster{gap:12px}
+.cluster .placard{padding:13px 18px 14px}
+.cluster .placard .tag{margin-bottom:6px}
+
+.placard{background:var(--placard);border-radius:4px;padding:18px 22px;
+  box-shadow:0 1px 0 rgba(255,255,255,.85) inset,0 -1px 0 rgba(0,0,0,.08) inset,0 3px 7px rgba(0,0,0,.28)}
+.placard .tag{margin-bottom:8px}
+.q .qtext{margin:0;font-size:26px;line-height:1.3;font-weight:500;letter-spacing:-.005em;text-wrap:balance;max-width:34ch}
+.you{background:var(--panel-2);border-radius:4px;padding:14px 22px;
+  box-shadow:0 1px 3px rgba(0,0,0,.22) inset,0 1px 0 rgba(255,255,255,.35)}
+.you p{margin:6px 0 0;color:#2a2724;max-width:72ch}
+.stamp{display:inline-grid;place-items:center;height:22px;padding:0 10px;border-radius:3px;
+  background:var(--bezel);color:var(--amber);font-family:B612;font-weight:700;font-size:10px;letter-spacing:.16em;
+  box-shadow:0 1px 0 rgba(255,255,255,.1) inset}
+.follow p{margin:10px 0 0;font-size:19px;line-height:1.4;max-width:60ch}
+.follow .who{display:flex;align-items:center;gap:10px}
+.follow .who .eng{font-size:10px}
+
+.composer{margin-top:2px;display:flex;flex-direction:column;gap:12px}
+.field{padding:0;overflow:hidden}
+.field textarea{display:block;width:100%;min-height:132px;border:0;outline:0;resize:none;padding:16px 22px;background:transparent;
+  font:inherit;font-size:17px;line-height:1.5;color:var(--ink)}
+.field textarea::placeholder{color:#8f8a82}
+.field:focus-within{box-shadow:0 0 0 2px var(--blue),0 3px 7px rgba(0,0,0,.28)}
+.composer-row{display:flex;align-items:center;justify-content:space-between}
+.hint{font-family:B612;font-size:10px;letter-spacing:.14em;color:var(--engrave-2)}
+.key{height:44px;padding:0 28px;border:0;border-radius:4px;background:var(--bezel);color:var(--white);cursor:pointer;
+  font-family:B612;font-weight:700;font-size:12px;letter-spacing:.18em;
+  box-shadow:0 1px 0 rgba(255,255,255,.18) inset,0 2px 0 #000,0 5px 10px rgba(0,0,0,.3);display:inline-flex;align-items:center;gap:12px}
+.key svg{width:14px;height:14px}
+.key:hover{background:#222226}
+.key:active{transform:translateY(2px);box-shadow:0 1px 0 rgba(255,255,255,.18) inset,0 0 0 #000,0 2px 4px rgba(0,0,0,.3)}
+
+/* ---------- bezel cluster ---------- */
+.bezel{position:relative;background:var(--bezel);border-radius:6px;color:var(--white);
+  box-shadow:0 1px 0 rgba(255,255,255,.12) inset,0 -2px 0 #000 inset,0 3px 8px rgba(0,0,0,.35)}
+.screw{position:absolute;width:8px;height:8px;border-radius:50%;background:radial-gradient(circle at 35% 35%,#6a6a72,#232327 70%);box-shadow:0 0 0 1px #000}
+.screw::after{content:"";position:absolute;left:1px;right:1px;top:3.5px;height:1px;background:#0a0a0c;transform:rotate(-30deg)}
+.screw.tl{top:7px;left:7px}.screw.tr{top:7px;right:7px}.screw.bl{bottom:7px;left:7px}.screw.br{bottom:7px;right:7px}
+
+.gauge{padding:12px 18px 10px;text-align:center}
+.gauge svg{display:block;height:auto;margin:0 auto}
+.gauge .read{margin-top:-58px;display:flex;justify-content:center;align-items:baseline;gap:4px}
+.gauge .read .num{font-family:"B612 Mono";font-weight:700;font-size:40px;line-height:1;color:var(--ghost)}
+.gauge .read .den{font-family:"B612 Mono";font-size:13px;color:#77777f}
+.gauge .lbl{margin-top:4px;font-family:B612;font-weight:700;font-size:11px;letter-spacing:.16em;color:#c9c9d0}
+.gauge .note{font-family:B612;font-size:9px;letter-spacing:.12em;color:#6d6d75;margin-top:2px}
+
+.tape{padding:10px 16px 12px}
+.tape .lbl{font-family:B612;font-weight:700;font-size:10px;letter-spacing:.16em;color:#8b8b95;margin-bottom:8px}
+.tape ol{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.tape li{height:44px;border-radius:3px;display:grid;grid-template-rows:1fr auto;place-items:center;padding:4px 0;
+  border:1px solid var(--ghost-line);color:var(--ghost);font-family:"B612 Mono";font-weight:700;font-size:15px;line-height:1}
+.tape li small{font-family:B612;font-size:9px;letter-spacing:.1em;color:inherit;opacity:.85}
+.tape li.done{background:rgba(246,244,238,.12);color:#d9d6cf;border-color:transparent}
+.tape li.done small{color:var(--green)}
+.tape li.live{background:var(--white);color:var(--ink);border-color:var(--white);box-shadow:0 0 12px rgba(246,244,238,.25)}
+
+.agenda ul,.grounded ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px}
+.agenda li{display:flex;align-items:center;gap:10px;font-size:14.5px;line-height:1.35}
+.agenda .dot{width:10px;height:10px;border-radius:2px;background:#d9d4ca;box-shadow:0 1px 2px rgba(0,0,0,.25) inset}
+.grounded li{font-size:13.5px;color:#2a2724;display:flex;align-items:center;gap:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grounded li svg{flex:none;width:13px;height:13px}
+.logbook table{border-collapse:collapse;width:100%;font-size:14px}
+.logbook td{padding:4px 0;border-top:1px solid #dcd8cf}
+.logbook tr:first-child td{border-top:0}
+.logbook td.n{font-family:"B612 Mono";font-size:12px;color:var(--engrave-2);width:34px}
+.logbook td.s{text-align:right;font-family:"B612 Mono";font-weight:700;font-size:15px}
+.logbook td.s span{font-weight:400;font-size:11px;color:var(--engrave-2)}
+
+.guard{margin-top:2px;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.guard button{height:36px;padding:0 16px;border-radius:3px;background:transparent;border:1px solid var(--red);color:var(--red);cursor:pointer;
+  font-family:B612;font-weight:700;font-size:10px;letter-spacing:.16em}
+.guard button:hover{background:rgba(209,59,43,.1)}
+.guard .cap{font-family:B612;font-size:9px;letter-spacing:.12em;color:var(--engrave-2)}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="10.5" fill="#141416"/><path d="M4.5 13.5A8 8 0 0 1 19.5 13.5" stroke="#f6f4ee" stroke-width="1.6" stroke-linecap="round"/><path d="M12 14 16.2 8.2" stroke="#e8b422" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="14" r="1.6" fill="#f6f4ee"/></svg>
+    <span class="eng">Interview Coach</span>
+  </div>
+  <nav class="tabs">
+    <a class="tab eng" href="#">Setup</a>
+    <a class="tab eng lit" href="#">Practice</a>
+    <a class="tab eng" href="#">History</a>
+  </nav>
+  <div class="job"><span class="eng role">GenAI Engineer</span><span class="eng co">Accenture</span></div>
+  <div class="user">shonty@g.com</div>
+</header>
+
+<section class="annunc" aria-label="Round state">
+  <div class="readout"><span class="lbl">TOPIC</span><span class="num">3<span class="dim">/5</span></span></div>
+  <div class="lamps" role="status">
+    <div class="lamp">EXAMINER</div>
+    <div class="lamp lit-green">YOUR ANSWER</div>
+    <div class="lamp">SCORING</div>
+    <div class="lamp">HOLD</div>
+  </div>
+  <div class="readout"><span class="lbl">ROUND</span><span class="txt">EXPERIENCE DEEP-DIVE</span></div>
+</section>
+
+<main class="deck">
+  <div class="col">
+    <article class="placard q">
+      <div class="tag eng">Q3 · Question</div>
+      <p class="qtext">You mentioned parallel generation reduced latency to a single LLM call. How did you balance the number of parallel requests against resource constraints, and what was the impact on overall throughput?</p>
+    </article>
+
+    <div class="you">
+      <div class="eng">You</div>
+      <p>Resources were not much constrained as the LLM was hosted on a vendor and they provided high availability.</p>
+    </div>
+
+    <article class="placard follow">
+      <div class="who"><span class="stamp">PROBE</span><span class="eng">Examiner · follow-up</span></div>
+      <p>Take it one level down: when three prompt variants fan out at once, what bounded the fan-out - a semaphore, a token budget, a cost ceiling? And what did p95 latency do before and after?</p>
+    </article>
+
+    <form class="composer" onsubmit="return false">
+      <div class="placard field"><textarea placeholder="Answer as you would in the interview…" aria-label="Your answer"></textarea></div>
+      <div class="composer-row">
+        <span class="hint">CTRL + ENTER TO SEND</span>
+        <button class="key" type="submit">SEND <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h11M9 4l4 4-4 4"/></svg></button>
+      </div>
+    </form>
+  </div>
+
+  <aside class="col cluster">
+    <div class="bezel gauge">
+      <i class="screw tl"></i><i class="screw tr"></i><i class="screw bl"></i><i class="screw br"></i>
+      <svg viewBox="0 0 240 124" width="250" aria-hidden="true">
+        <path d="M30,112 A90,90 0 0,1 210,112" fill="none" stroke="#26262b" stroke-width="14"/>
+        <path d="M16,112 A104,104 0 0,1 87.9,13.1" fill="none" stroke="#d13b2b" stroke-width="4"/>
+        <path d="M87.9,13.1 A104,104 0 0,1 181.1,27.9" fill="none" stroke="#e8b422" stroke-width="4"/>
+        <path d="M181.1,27.9 A104,104 0 0,1 224,112" fill="none" stroke="#2e9e5b" stroke-width="4"/>
+        <g stroke="#f6f4ee" stroke-width="1.5"><path d="M24,112h16"/><path d="M120,12v16"/><path d="M200,112h16"/></g>
+        <g font-family="B612 Mono" font-size="10" fill="#c9c9d0" text-anchor="middle"><text x="30" y="123">0</text><text x="120" y="9">5</text><text x="210" y="123">10</text></g>
+        <text x="120" y="98" font-family="B612 Mono" font-weight="700" font-size="36" fill="#4b4b54" text-anchor="middle">—</text>
+        <text x="120" y="114" font-family="B612 Mono" font-size="10" fill="#77777f" text-anchor="middle">/10</text>
+      </svg>
+      <div class="lbl">TOPIC SCORE</div>
+      <div class="note">READS WHEN THE TOPIC CLOSES</div>
+    </div>
+
+    <div class="bezel tape">
+      <div class="lbl">TOPICS</div>
+      <ol>
+        <li class="done">1<small>8/10</small></li>
+        <li class="done">2<small>6/10</small></li>
+        <li class="live">3<small>LIVE</small></li>
+        <li>4<small>&nbsp;</small></li>
+        <li>5<small>&nbsp;</small></li>
+      </ol>
+    </div>
+
+    <div class="placard agenda">
+      <div class="tag eng">Examiner's agenda</div>
+      <ul>
+        <li><i class="dot"></i>Fan-out bound</li>
+        <li><i class="dot"></i>Throughput impact</li>
+        <li><i class="dot"></i>Measured latency</li>
+      </ul>
+    </div>
+
+    <div class="placard grounded">
+      <div class="tag eng">Grounded in</div>
+      <ul>
+        <li><svg viewBox="0 0 14 14" fill="none" stroke="#3b3834" stroke-width="1.3"><path d="M3 1.5h5l3 3v8H3z"/><path d="M8 1.5v3h3"/></svg>CV.pdf</li>
+        <li><svg viewBox="0 0 14 14" fill="none" stroke="#3b3834" stroke-width="1.3"><path d="M3 1.5h5l3 3v8H3z"/><path d="M8 1.5v3h3"/></svg>LLM-Powered Conversational Agent - Bobble AI.docx</li>
+      </ul>
+    </div>
+
+    <div class="placard logbook">
+      <div class="tag eng">Logbook</div>
+      <table>
+        <tr><td class="n">01</td><td>Modular prompt system</td><td class="s">8<span>/10</span></td></tr>
+        <tr><td class="n">02</td><td>LLM conversational agent</td><td class="s">6<span>/10</span></td></tr>
+      </table>
+    </div>
+
+    <div class="guard">
+      <span class="cap">TWO CLICKS · FILED TO LOGBOOK</span>
+      <button type="button">END SESSION</button>
+    </div>
+  </aside>
+</main>
+</body>
+</html>

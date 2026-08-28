@@ -1,6 +1,8 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { Moon, Sun } from "lucide-react";
 
 import { codeFrom, translate } from "../errors";
+import { ActiveJobChip } from "./ActiveJobChip";
 
 export function StatusPill({
   tone,
@@ -44,6 +46,126 @@ export function EmptyState({ title, body }: { title: string; body: string }) {
       <strong>{title}</strong>
       <p>{body}</p>
     </div>
+  );
+}
+
+/** The form's title rule plus its row of underlined fields. */
+export function SheetHead({
+  title,
+  page,
+  children,
+}: {
+  title: string;
+  page?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <>
+      <header className="sheet-head">
+        <h1>{title}</h1>
+        {page ? <span className="page">{page}</span> : null}
+      </header>
+      {children ? <div className="fields">{children}</div> : null}
+    </>
+  );
+}
+
+/** One underlined form field: caps label over a value. */
+export function Field({
+  label,
+  value,
+  empty = "-",
+  title,
+  wrap,
+}: {
+  label: string;
+  value?: ReactNode;
+  empty?: string;
+  title?: string;
+  /** Let a long value run to a second line instead of truncating. */
+  wrap?: boolean;
+}) {
+  const isEmpty = value === null || value === undefined || value === "";
+  return (
+    <div className="f">
+      <span className="cap">{label}</span>
+      <span className={`v${isEmpty ? " empty" : ""}${wrap ? " wrap" : ""}`} title={title}>
+        {isEmpty ? empty : value}
+      </span>
+    </div>
+  );
+}
+
+/** The active job as a form field with the switcher slip underneath. */
+export function JobField() {
+  return (
+    <div className="f wide">
+      <span className="cap">Role / company</span>
+      <ActiveJobChip />
+    </div>
+  );
+}
+
+/** 1-10 rating cells; the scored one is highlighter-filled. */
+export function RatingCells({
+  score,
+  mini,
+  label,
+}: {
+  score: number | null | undefined;
+  mini?: boolean;
+  label?: string;
+}) {
+  return (
+    <div
+      className={`cells${mini ? " mini" : ""}`}
+      role="img"
+      aria-label={label ?? (score === null || score === undefined ? "Not scored yet" : `Scored ${score} out of 10`)}
+    >
+      {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
+        <span key={n} className={`cell${score === n ? " on" : ""}`} aria-hidden="true">
+          {n}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Paper stock switch: light (off-white on charcoal) / dark (slate night). */
+export function StockToggle() {
+  const [stock, setStock] = useState<"light" | "dark">(() =>
+    document.documentElement.dataset.theme === "dark" ? "dark" : "light",
+  );
+  const next = stock === "dark" ? "light" : "dark";
+  const toggle = () => {
+    document.documentElement.dataset.theme = next;
+    try {
+      localStorage.setItem("stock", next);
+    } catch {
+      /* private mode: the choice just doesn't persist */
+    }
+    setStock(next);
+  };
+  return (
+    <button
+      type="button"
+      className="desk-btn"
+      onClick={toggle}
+      aria-label={`Switch to ${next === "dark" ? "night" : "day"} paper`}
+      title={`Switch to ${next === "dark" ? "night" : "day"} paper`}
+    >
+      {stock === "dark" ? <Sun /> : <Moon />}
+      <span>{stock === "dark" ? "Day" : "Night"}</span>
+    </button>
+  );
+}
+
+export function Staples() {
+  return (
+    <>
+      <i className="staple a" aria-hidden="true" />
+      <i className="staple b" aria-hidden="true" />
+    </>
   );
 }
 

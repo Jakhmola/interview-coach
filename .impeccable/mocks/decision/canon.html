@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Category standard - Practice (mock)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg0:#0b0b0f;--bg1:#111117;--bg2:#181820;--bg3:#1f1f29;--line:#262632;--t0:#f5f5f7;--t1:#a3a3b2;--t2:#6b6b7b;--acc:#7c5cff;--acc2:#a78bfa;--ok:#22c55e}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{width:1440px;height:900px;overflow:hidden;font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5;color:var(--t0);background:var(--bg1);display:grid;grid-template-columns:240px 1fr 300px}
+::selection{background:var(--acc);color:#fff}
+.side{background:var(--bg0);border-right:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:6px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;padding:6px 8px 18px}
+.brand i{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,var(--acc),#c084fc);display:grid;place-items:center}
+.brand svg{width:14px;height:14px}
+.nav a{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:var(--t1);text-decoration:none;font-weight:500}
+.nav a.on{background:rgba(124,92,255,.14);color:var(--t0)}
+.nav svg{width:16px;height:16px}
+.side .foot{margin-top:auto;display:grid;gap:8px}
+.jobcard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg2)}
+.jobcard b{display:block;font-size:13px}
+.jobcard span{font-size:12px;color:var(--t1)}
+.email{font-size:12px;color:var(--t2);padding:0 6px}
+
+.main{display:grid;grid-template-rows:auto 1fr auto;min-width:0}
+.top{display:flex;justify-content:space-between;align-items:center;padding:18px 32px;border-bottom:1px solid var(--line)}
+.top h1{margin:0;font-size:16px;font-weight:600}
+.top .meta{color:var(--t1);font-size:13px}
+.chat{padding:24px 32px;display:flex;flex-direction:column;gap:16px;overflow:hidden;max-width:840px;width:100%;justify-self:center}
+.bubble{max-width:72%;padding:14px 16px;border-radius:14px;border:1px solid var(--line);background:var(--bg2)}
+.bubble .k{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--acc2);margin-bottom:6px}
+.bubble p{margin:0;font-size:15px}
+.me{align-self:flex-end;background:rgba(124,92,255,.14);border-color:rgba(124,92,255,.35)}
+.me .k{color:var(--t1)}
+.typing{display:flex;align-items:center;gap:8px;color:var(--t2);font-size:13px}
+.typing i{width:6px;height:6px;border-radius:50%;background:var(--t2)}
+.composer{padding:16px 32px 22px;border-top:1px solid var(--line);display:flex;gap:12px;max-width:840px;width:100%;justify-self:center}
+.composer .in{flex:1;border:1px solid var(--line);border-radius:12px;background:var(--bg2);padding:12px 14px;color:var(--t2);font-size:15px;min-height:88px}
+.composer button{align-self:flex-end;height:42px;padding:0 18px;border:0;border-radius:10px;background:linear-gradient(135deg,var(--acc),#c084fc);color:#fff;font:inherit;font-weight:600;display:flex;align-items:center;gap:8px}
+.composer button svg{width:14px;height:14px}
+
+.rail{background:var(--bg0);border-left:1px solid var(--line);padding:22px 18px;display:flex;flex-direction:column;gap:16px}
+.card{border:1px solid var(--line);border-radius:12px;background:var(--bg2);padding:14px}
+.card h3{margin:0 0 10px;font-size:12px;font-weight:600;color:var(--t1);letter-spacing:.04em;text-transform:uppercase}
+.ring{display:grid;place-items:center;position:relative;width:110px;height:110px;margin:4px auto}
+.ring svg{position:absolute;inset:0;width:100%;height:100%}
+.ring b{font-size:26px;font-weight:700;color:var(--t2)}
+.ring small{font-size:11px;color:var(--t2)}
+.ring .c{display:grid;place-items:center;text-align:center;line-height:1.1}
+.pills{display:flex;gap:6px;flex-wrap:wrap}
+.pill{height:28px;padding:0 10px;border-radius:999px;border:1px solid var(--line);display:grid;place-items:center;font-size:12px;color:var(--t1)}
+.pill.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.pill.done{color:var(--t0);border-color:#3a3a4a}
+.chips{display:flex;flex-direction:column;gap:6px}
+.chip{font-size:12px;color:var(--t1);padding:6px 8px;border-radius:8px;background:var(--bg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.agenda{list-style:none;padding:0;margin:0;display:grid;gap:6px;font-size:13px;color:var(--t1)}
+.agenda li{display:flex;align-items:center;gap:8px}
+.agenda i{width:8px;height:8px;border-radius:50%;border:1px solid var(--t2)}
+.ghost{margin-top:auto;height:36px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--t1);font:inherit;font-weight:500}
+</style>
+</head>
+<body>
+<aside class="side">
+  <div class="brand"><i><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M12 8l1.2 2.8L16 12l-2.8 1.2L12 16l-1.2-2.8L8 12l2.8-1.2z"/></svg></i>Interview Coach</div>
+  <nav class="nav">
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.4.9a7 7 0 0 0-1.7-1L14.5 3h-5l-.3 2.9a7 7 0 0 0-1.7 1L5 6 3 9.5l2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-.9a7 7 0 0 0 1.7 1l.3 2.9h5l.3-2.9a7 7 0 0 0 1.7-1l2.4.9 2-3.5-2-1.5c.1-.3.1-.7.1-1z"/></svg>Setup</a>
+    <a href="#" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Practice</a>
+    <a href="#"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>History</a>
+  </nav>
+  <div class="foot">
+    <div class="jobcard"><b>GenAI Engineer</b><span>Accenture</span></div>
+    <div class="email">shonty@g.com</div>
+  </div>
+</aside>
+
+<main class="main">
+  <header class="top"><h1>Experience deep-dive</h1><span class="meta">Topic 3 of 5 · GenAI Engineer @ Accenture</span></header>
+  <section class="chat">
+    <div class="bubble"><div class="k">Q3</div><p>You mentioned parallel generation reduced latency to a single LLM call. How did you balance the number of parallel requests against resource constraints, and what was the impact on overall throughput?</p></div>
+    <div class="bubble me"><div class="k">You</div><p>Resources were not much constrained as the LLM was hosted on a vendor and they provided high availability.</p></div>
+    <div class="bubble"><div class="k">Follow-up</div><p>Take it one level down: when three prompt variants fan out at once, what bounded the fan-out - a semaphore, a token budget, a cost ceiling? And what did p95 latency do before and after?</p></div>
+  </section>
+  <form class="composer" onsubmit="return false">
+    <div class="in">Answer as you would in the interview…</div>
+    <button type="submit">Send <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h11M9 4l4 4-4 4"/></svg></button>
+  </form>
+</main>
+
+<aside class="rail">
+  <div class="card">
+    <h3>Topic score</h3>
+    <div class="ring">
+      <svg viewBox="0 0 110 110"><circle cx="55" cy="55" r="48" fill="none" stroke="#262632" stroke-width="8"/></svg>
+      <div class="c"><b>—</b><small>/ 10</small></div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Topics</h3>
+    <div class="pills"><span class="pill done">1 · 8</span><span class="pill done">2 · 6</span><span class="pill on">3</span><span class="pill">4</span><span class="pill">5</span></div>
+  </div>
+  <div class="card">
+    <h3>Agenda</h3>
+    <ul class="agenda"><li><i></i>Fan-out bound</li><li><i></i>Throughput impact</li><li><i></i>Measured latency</li></ul>
+  </div>
+  <div class="card">
+    <h3>Grounded in</h3>
+    <div class="chips"><span class="chip">CV.pdf</span><span class="chip">LLM-Powered Conversational Agent - Bobble AI.docx</span></div>
+  </div>
+  <button class="ghost" type="button">End session</button>
+</aside>
+</body>
+</html>

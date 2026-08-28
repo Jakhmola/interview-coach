@@ -23,23 +23,23 @@ import {
 import { ArmedDeleteButton } from "../components/ArmedDeleteButton";
 import { MappingModal, MappingDecision } from "../components/MappingModal";
 import { RepoSelectModal } from "../components/RepoSelectModal";
-import { ErrorBanner, StatusPill, formatDate } from "../components/ui";
+import { ErrorBanner, Field, SheetHead, StatusPill, formatDate } from "../components/ui";
 import { codeFrom } from "../errors";
 import { jobLabel, jobSubtitle } from "../jobLabel";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
 
 /**
- * Phase 22 — inventory editor for the user's CV, JDs, and supporting
+ * Phase 22 - inventory editor for the user's CV, JDs, and supporting
  * docs. The setup wizard handles "the next thing to do"; Manage owns
- * "I want to change something I already gave you" — replace CV,
+ * "I want to change something I already gave you" - replace CV,
  * re-analyze a JD, remap or retry-embed a supporting doc, and the
  * structured 409 blocking-sessions card so the user isn't stranded
  * when a delete is gated.
  */
 
 type BlockingState = {
-  /** Which JD triggered the 409 — used to scope the card to that card.
+  /** Which JD triggered the 409 - used to scope the card to that card.
    * (Phase 22 dropped Delete CV in favour of Reset account, so the only
    * delete that can return a structured 409 today is ``DELETE /jobs/{id}``.) */
   scope: { kind: "job"; id: string };
@@ -93,7 +93,7 @@ export function ManagePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  // Drop the blocking card whenever the underlying inventory changes —
+  // Drop the blocking card whenever the underlying inventory changes -
   // an abandon-and-retry sequence shouldn't leave a stale "still
   // blocked" card pinned after the second delete succeeds.
   useEffect(() => {
@@ -153,7 +153,7 @@ export function ManagePage() {
     try {
       await api.uploadDocument(token, "cv", event.target.files[0]);
       // The wizard's work-driven auto-prep picks the rebuild up once
-      // we land back there — surface the new CV via /setup so the user
+      // we land back there - surface the new CV via /setup so the user
       // sees prep stream live rather than a silent inventory refresh.
       navigate("/setup");
     } catch (err) {
@@ -238,7 +238,7 @@ export function ManagePage() {
         setBlocking({ ...blocking, sessionIds: remaining });
         return;
       }
-      // Last blocking session cleared — auto-retry the original delete.
+      // Last blocking session cleared - auto-retry the original delete.
       const scope = blocking.scope;
       setBlocking(null);
       await deleteJob(scope.id);
@@ -261,7 +261,7 @@ export function ManagePage() {
       // sees the empty account in one tick.
       await refreshActiveJob();
       await load();
-      setMessage("Account reset — everything is now empty.");
+      setMessage("Account reset - everything is now empty.");
       // Drop the user back onto Setup so the onboarding wizard takes over.
       navigate("/setup");
     } catch (err) {
@@ -276,12 +276,15 @@ export function ManagePage() {
 
   return (
     <div className="manage-page">
+      <SheetHead title="File inventory" page="CV · job descriptions · supporting docs · repos">
+        <Field label="Candidate" value={user?.email} />
+      </SheetHead>
       <header className="manage-header">
         <button className="btn-quiet" type="button" onClick={() => navigate("/setup")}>
           <ArrowLeft size={14} /> Back to setup
         </button>
-        <h1>Manage</h1>
-        <p>CV, job descriptions, supporting docs.</p>
+        <h1>Everything on file for this account.</h1>
+        <p>Replace, re-analyze, remap, or remove. Changes that rebuild your profile route back to Setup so prep streams live.</p>
       </header>
 
       {message ? <div className="success-banner">{message}</div> : null}
@@ -489,7 +492,7 @@ export function ManagePage() {
       <DangerZone onReset={resetAccount} busy={busy === "reset"} />
 
       {/* Phase 22: remap HITL is the same modal used by Setup. Backdrop /
-          ESC close the modal *without* mutating the mapping — on Manage,
+          ESC close the modal *without* mutating the mapping - on Manage,
           Remap is opt-in and the user can always re-open it. The dedicated
           Skip button still goes through ``confirmRemap`` with action=skip
           so the no-op API call clears the in-flight state. */}
@@ -591,7 +594,7 @@ function BlockingSessionsCard({
 }) {
   return (
     <div className="blocking-sessions-card">
-      <p>Can&apos;t delete this JD — these sessions are still active:</p>
+      <p>Can&apos;t delete this JD - these sessions are still active:</p>
       <ul>
         {sessionIds.map((id) => (
           <li key={id}>
@@ -617,7 +620,7 @@ function BlockingSessionsCard({
  * auth token stay intact, so the user remains logged in with an empty
  * account ready to re-onboard. Two-stage confirmation: click "Reveal"
  * to expose the input, then type the registered email to enable submit
- * — guards against fat-fingered clicks.
+ * - guards against fat-fingered clicks.
  */
 function DangerZone({
   onReset,
@@ -641,7 +644,7 @@ function DangerZone({
           <strong>Reset account</strong>
           <span className="muted">
             Permanently delete every document, job description, supporting doc, mapping,
-            interview session, and AI cache attached to your account. Your login stays — you
+            interview session, and AI cache attached to your account. Your login stays - you
             just start over with a blank slate.
           </span>
         </div>
@@ -710,7 +713,7 @@ function DangerZone({
 /**
  * Phase 32 follow-up: post-setup repo management. Lists the user's ingested
  * ``github_repo`` docs and exposes an "Add / manage repos" picker that calls
- * the out-of-graph ``/github/repos`` + ``/github/repos/select`` endpoints —
+ * the out-of-graph ``/github/repos`` + ``/github/repos/select`` endpoints -
  * the same ``fold_github_projects`` re-fold the prep graph uses, so the
  * Profile, docs and grounding chunks stay consistent. If no handle is stored
  * yet, the button first reveals an inline verify step.
@@ -876,7 +879,7 @@ function GithubReposSection({
  * Phase 32: a read-only Manage row for an ingested ``github_repo`` doc.
  * Tech chips, key features and the repo link come straight off the folded
  * ProjectItem on ``parsed_json`` (no extra fetch). Adding / re-selecting
- * repos stays in the setup wizard — Manage only surfaces and deletes them.
+ * repos stays in the setup wizard - Manage only surfaces and deletes them.
  */
 function GithubRepoCard({ doc, onDelete }: { doc: DocumentItem; onDelete: () => void }) {
   const pj = (doc.parsed_json ?? {}) as {
