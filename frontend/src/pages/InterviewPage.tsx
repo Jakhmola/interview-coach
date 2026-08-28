@@ -1,7 +1,6 @@
 import { FormEvent, KeyboardEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowRight, ChevronRight, Play, RotateCcw } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import Confetti from "react-confetti";
 
 import {
   DocumentItem,
@@ -19,7 +18,7 @@ import { ArmedDeleteButton } from "../components/ArmedDeleteButton";
 import { LoadingStatus } from "../components/LoadingStatus";
 import { ErrorBanner, Field, JobField, PenNote, RatingCells, SheetHead } from "../components/ui";
 import { codeFrom } from "../errors";
-import { moveLabels, roundLabels, topicLabel, topicTitle } from "../jobLabel";
+import { moveLabels, roundLabels, topicLabel, topicTitle, verdict } from "../jobLabel";
 import { useStreamAbort } from "../hooks/useStreamAbort";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
@@ -77,13 +76,10 @@ function updateLast<T extends LiveItem["type"]>(
   return items;
 }
 
-const confettiColors = ["#ffe94d", "#c8321f", "#f5f2ea", "#1b1b1f", "#ffb257"];
-
 export function InterviewPage() {
   const { token, user } = useAuth();
   const { activeJobId, activeJob } = useActiveJob();
   const messageAbort = useStreamAbort();
-  const windowSize = useWindowSize();
   const navigate = useNavigate();
   // The open round is the URL (`/interview/:sessionId`): starting or resuming
   // one pushes it, so Back is the start screen, where the round stays listed.
@@ -100,12 +96,14 @@ export function InterviewPage() {
   const [pendingAnswer, setPendingAnswer] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [celebrationPieces, setCelebrationPieces] = useState<number | null>(null);
+  // True while the round's closing marks (stamp, highlighter, verdict) are
+  // being made for the first time this visit; a revisit shows them still.
+  const [stamped, setStamped] = useState(false);
   // The thread the current round-trip was sent for; a streamed move for any
   // other thread is the next topic opening, which turns the page.
   const openIndexRef = useRef(-1);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const celebratedSessionsRef = useRef<Set<string>>(new Set());
+  const stampedSessionsRef = useRef<Set<string>>(new Set());
 
   const activeSessions = useMemo(
     () =>
@@ -116,6 +114,17 @@ export function InterviewPage() {
   );
 
   const overallScore = useMemo(() => scoreThreads(detail?.threads), [detail?.threads]);
+
+  // Settle the sheet on the persisted round. The first time a round arrives
+  // closed, its closing marks play - in the same render, so the stamp never
+  // shows still for a frame before it lands.
+  const settle = (next: SessionDetail) => {
+    setDetail(next);
+    if (next.status !== "active" && !stampedSessionsRef.current.has(next.id)) {
+      stampedSessionsRef.current.add(next.id);
+      setStamped(true);
+    }
+  };
 
   const refresh = async () => {
     if (!token) return;
@@ -128,7 +137,7 @@ export function InterviewPage() {
     setSessions(nextSessions);
     setDocs(nextDocs);
     if (activeId) {
-      setDetail(await api.getSession(token, activeId));
+      settle(await api.getSession(token, activeId));
     }
   };
 
@@ -137,6 +146,7 @@ export function InterviewPage() {
     // its overlay before the new one loads, so nothing stale shows.
     messageAbort.abort();
     setDetail(null);
+    setStamped(false);
     setLiveItems([]);
     setPendingAnswer(null);
     setIsBusy(false);
@@ -151,13 +161,6 @@ export function InterviewPage() {
     if (turned) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [detail?.threads, liveItems, pendingAnswer]);
-
-  useEffect(() => {
-    if (!detail || detail.status !== "complete" || overallScore === null) return;
-    if (celebratedSessionsRef.current.has(detail.id)) return;
-    celebratedSessionsRef.current.add(detail.id);
-    setCelebrationPieces(scoreToConfettiPieces(overallScore));
-  }, [detail, overallScore]);
 
   // The single conversational round-trip. `message === null` opens the session
   // (first thread); otherwise it's the candidate's answer. The response streams
@@ -185,7 +188,7 @@ export function InterviewPage() {
       await messageStream(token, sessionId, message, handleFrame, signal);
       const next = await api.getSession(token, sessionId);
       await viewTransition(() => {
-        setDetail(next);
+        settle(next);
         setLiveItems([]);
         setPendingAnswer(null);
       }).finished;
@@ -302,7 +305,7 @@ export function InterviewPage() {
     try {
       const session = await api.createSession(token, activeJobId, roundType, nQuestions);
       navigate(`/interview/${session.id}`);
-      setDetail(await api.getSession(token, session.id));
+      settle(await api.getSession(token, session.id));
       // Empty body opens the first thread + streams the opening question.
       await sendMessage(session.id, null);
     } catch (err) {
@@ -479,41 +482,30 @@ export function InterviewPage() {
 
   if (detail.status !== "active") {
     const scored = detail.threads.filter((t) => t.score !== null && t.score !== undefined);
+    const complete = detail.status === "complete";
+    const roundDate = new Date(detail.created_at).toLocaleDateString(undefined, { dateStyle: "medium" });
+    const closing = complete ? verdict(detail.threads) : null;
     return (
       <div className="practice-live">
-        {celebrationPieces !== null ? (
-          <Confetti
-            width={windowSize.width}
-            height={windowSize.height}
-            numberOfPieces={celebrationPieces}
-            recycle={false}
-            run
-            gravity={0.18}
-            tweenDuration={6500}
-            colors={confettiColors}
-            className="completion-confetti"
-            onConfettiComplete={() => setCelebrationPieces(null)}
-          />
-        ) : null}
-
         <SheetHead
           title="Interview scorecard"
           page={`${roundLabels[detail.round_type]} · ${detail.status === "complete" ? "Complete" : "Abandoned"}`}
         >
           <Field label="Candidate" value={candidate} />
           <JobField />
-          <Field
-            label="Date"
-            value={new Date(detail.created_at).toLocaleDateString(undefined, { dateStyle: "medium" })}
-          />
+          <Field label="Date" value={roundDate} />
           <Field label="Topics" value={`${scored.length} of ${detail.n_questions} scored`} />
         </SheetHead>
 
         <ErrorBanner code={error} />
 
-        <div className="practice-done">
+        <div className={stamped ? "practice-done play" : "practice-done"}>
           <h1 className="practice-done-title">
-            {detail.status === "complete" ? "Round complete." : "Round abandoned."}
+            {complete ? <mark>Round complete.</mark> : "Round abandoned."}
+            <span className={complete ? "stamp" : "stamp bad"} aria-hidden="true">
+              <span>{complete ? "Complete" : "Abandoned"}</span>
+              <small>{roundDate}</small>
+            </span>
           </h1>
           {overallScore !== null ? (
             <div className="practice-done-score">
@@ -525,6 +517,7 @@ export function InterviewPage() {
               <span className="hint">
                 {overallScore.toFixed(1)} / 10 over {scored.length} topic{scored.length === 1 ? "" : "s"}
               </span>
+              {closing ? <PenNote label="Verdict" text={closing} /> : null}
             </div>
           ) : null}
           <p className="practice-done-hint">
@@ -1001,21 +994,3 @@ function scoreThreads(threads: Thread[] | undefined): number | null {
   return scored.reduce((total, t) => total + (t.score ?? 0), 0) / scored.length;
 }
 
-function scoreToConfettiPieces(score: number) {
-  const clamped = Math.max(0, Math.min(10, score));
-  return Math.round(80 + clamped * 32);
-}
-
-function useWindowSize() {
-  const getSize = () => ({
-    width: typeof window === "undefined" ? 300 : window.innerWidth,
-    height: typeof window === "undefined" ? 200 : window.innerHeight,
-  });
-  const [size, setSize] = useState(getSize);
-  useEffect(() => {
-    const onResize = () => setSize(getSize());
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-  return size;
-}

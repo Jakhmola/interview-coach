@@ -35,7 +35,7 @@ Memorable moment: the rating cell stamping in highlighter when a topic closes, n
 | Buttons | 1.5px ink outline, caps 11px .16em; primary = ink fill; quiet = underlined text; armed = pen fill | CSS |
 | Icons | lucide-react, 13-16px, stroke 1.8 | icon library |
 | Loading | typewriter status (react-type-animation) + pulsing pen dot | existing lib + CSS |
-| Completion | react-confetti in packet colors (#ffe94d #c8321f #f5f2ea #1b1b1f #ffb257) | existing lib |
+| Completion | highlighter across the title, the panel's rubber stamp (double rule, --stamp-ink noise mask, -6deg slam) and a VERDICT pen note from the scores; owner's pick 2026-08-28 from `.impeccable/mocks/completion/decision.html` (stamp + verdict + highlight), replacing react-confetti | CSS + existing PenNote |
 | Type faces | Archivo variable (wght 100-900, wdth 62-125) roman + italic; Courier Prime 400/700/italic; `frontend/public/fonts/` | self-hosted woff2 |
 
 No raster assets are produced or shipped; every material is CSS/SVG. Nothing to embed provenance into.

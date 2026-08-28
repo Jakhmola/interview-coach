@@ -231,7 +231,7 @@ Two paper stocks exist and the reader chooses: day (off-white on charcoal) and n
 - Zero radius on the sheet; the only curves are the 3px top corners of the index tabs.
 - Highlighter (`--hl`) is a state, not a decoration: current turn, selection, score.
 - Red (`--pen`) belongs to the interviewer and to armed destructive controls; nothing else is red.
-- Motion is the hand at work: typewriter status, pulsing pen dot, blinking caret, the stamp, the highlighter drawn across "Your turn", the pen drawing the margin arrow, confetti in packet colours - and the paper moving: the reply box files itself as a response, a closed topic folds into the index, the next sheet is pulled from the packet (view transitions).
+- Motion is the hand at work: typewriter status, pulsing pen dot, blinking caret, the stamp, the highlighter drawn across "Your turn", the pen drawing the margin arrow, the round closed with the highlighter across "Round complete.", the panel's stamp and the interviewer's verdict - and the paper moving: the reply box files itself as a response, a closed topic folds into the index, the next sheet is pulled from the packet (view transitions).
 
 ## Colors
 
@@ -384,7 +384,7 @@ Job, document, session, previous-topic and manage rows: 10px vertical padding, `
 - **Streaming:** `.cursor-blink`, 2px x 1em in currentColor, `steps(2)` at 1s.
 - **Task rows:** 13px square dots: hollow pending, ink-filled done, pen-bordered pulsing running, pen-filled failed, `--hl-2` degraded.
 - **Wizard steps:** 26px outlined pills with a 9px square; done = ink, active = highlighter fill.
-- **Completion:** react-confetti, fixed full-screen, `pointer-events: none`, in packet colours `#ffe94d #c8321f #f5f2ea #1b1b1f #ffb257`, piece count scaled to the score.
+- **Completion:** the round is closed three ways, in order, the first time the closed sheet arrives (`.practice-done.play`; a revisit shows the marks still): the highlighter is drawn across "Round complete." (the 380ms swipe, 300ms in); the panel's **stamp** (`.stamp`: `3px double currentColor`, 17px 700 caps 0.18em with the round's date in 10px under it, rotated -6deg, multiply on day / screen on night, 92% opacity behind the `--stamp-ink` noise mask so the ink did not take everywhere) slams onto the title line at 420ms, 320ms from twice its size with a slight overshoot, and the block jolts 2px under it; COMPLETE in `--ok`, ABANDONED in `--pen` (`.bad`), the same fate the History stamp shows. At 1240ms the interviewer's **verdict** rises in the margin of the score row: a `PenNote` keyed VERDICT whose text comes from the scores alone (`verdict()` in `jobLabel.ts`: Strong / Solid / Keep at it for an average of 8 / 6 / below, then "Strongest on topic n, weakest on topic m" when the topics differ). Only a completed round gets the highlighter and the verdict; an abandoned one gets the red stamp. No particles, no library.
 - All animation collapses to 0.01ms under `prefers-reduced-motion: reduce`.
 
 ### Motion: the paper moving
@@ -412,7 +412,7 @@ An inline SVG data URI in `index.html`: the packet on the desk at 32px - a `#1f1
 - **Do** keep destructive controls ink at rest and morph them to `--pen` with a pulse only when armed.
 - **Do** define any new colour on both stocks (`:root` and `:root[data-theme="dark"]`) and pair `--hl` with `--hl-ink`.
 - **Do** render icons from lucide at 12-16px (13px inside buttons, 14px in desk tools), stroke 1.8, in currentColor.
-- **Do** honour `prefers-reduced-motion`; motion is limited to the stamp, the pen dot, the caret, the 220ms stream-in, the highlighter swipe, the arrow draw, the view transitions listed under Motion, and completion confetti. Reduced motion skips the view transitions entirely and collapses the rest.
+- **Do** honour `prefers-reduced-motion`; motion is limited to the stamp, the pen dot, the caret, the 220ms stream-in, the highlighter swipe, the arrow draw, the view transitions listed under Motion, and the round's closing (highlighter, stamp, verdict). Reduced motion skips the view transitions entirely and collapses the rest.
 - **Do** keep the reply box and the interviewer's clipboard sticky on desktop; whose move it is must survive a long transcript.
 
 ### Don't:

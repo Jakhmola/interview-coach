@@ -173,7 +173,18 @@ export function StockToggle() {
 
 /** The interviewer's note in red pen: a caps key behind a hand-drawn arrow,
  * then the words; `typing` blinks a caret while the text is still arriving. */
-export function PenNote({ kind, text, typing }: { kind: MoveKind; text: string; typing?: boolean }) {
+export function PenNote({
+  kind,
+  label,
+  text,
+  typing,
+}: {
+  kind?: MoveKind;
+  /** The key over the note when it is not one of the interviewer's moves ("Verdict"). */
+  label?: string;
+  text: string;
+  typing?: boolean;
+}) {
   return (
     <div className={`note${typing ? " stream-in" : ""}`} aria-live={typing ? "polite" : undefined}>
       <div className="k">
@@ -181,7 +192,7 @@ export function PenNote({ kind, text, typing }: { kind: MoveKind; text: string; 
           <path d="M32 9C24 9 16 4 3 9" pathLength={1} />
           <path d="M8 5 3 9l5 4" pathLength={1} />
         </svg>
-        {moveLabels[kind]}
+        {label ?? (kind ? moveLabels[kind] : null)}
       </div>
       <p>
         {text}

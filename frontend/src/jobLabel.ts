@@ -38,6 +38,20 @@ export const moveLabels: Record<MoveKind, string> = {
   nudge: "Nudge",
 };
 
+/** The interviewer's closing line on a completed round, from the scores alone:
+ * a band for the average, then where the round was strongest and weakest when
+ * the topics differ. Null until something is scored. */
+export function verdict(threads: { thread_index: number; score?: number | null }[]): string | null {
+  const scored = threads.filter((t) => t.score !== null && t.score !== undefined);
+  if (!scored.length) return null;
+  const avg = scored.reduce((sum, t) => sum + (t.score ?? 0), 0) / scored.length;
+  const band = avg >= 8 ? "Strong round." : avg >= 6 ? "Solid round." : "Keep at it.";
+  const best = scored.reduce((a, b) => ((b.score ?? 0) > (a.score ?? 0) ? b : a));
+  const worst = scored.reduce((a, b) => ((b.score ?? 0) < (a.score ?? 0) ? b : a));
+  if (scored.length < 2 || best.score === worst.score) return band;
+  return `${band} Strongest on topic ${best.thread_index + 1}, weakest on topic ${worst.thread_index + 1}.`;
+}
+
 /** A session's fate as a stamp colour: complete is ok green, abandoned is the
  * red pen, active is plain ink. */
 export const sessionTone: Record<SessionStatus, "info" | "good" | "bad"> = {

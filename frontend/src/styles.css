@@ -73,6 +73,8 @@
   --sheet-shadow: 0 22px 44px rgba(0, 0, 0, 0.4), 0 2px 4px rgba(0, 0, 0, 0.25);
   --slip-shadow: 0 18px 40px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.3);
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)'/%3E%3C/svg%3E");
+  /* rubber-stamp ink that did not take everywhere: an alpha mask with ~5% holes */
+  --stamp-ink: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' seed='11'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 7 0 0 0 -2.3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   --font-form: "Archivo", "Helvetica Neue", Arial, sans-serif;
   --font-typed: "Courier Prime", "Courier New", Courier, monospace;
 }
@@ -2623,11 +2625,97 @@ mark.warn,
 .practice-done-hint {
   color: var(--ink-2);
 }
-.completion-confetti {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  pointer-events: none;
+/* the round is closed three ways at once: the highlighter across the title,
+   the panel's stamp beside it, the interviewer's verdict in the margin.
+   `.play` runs them the moment the round closes; a revisit shows them still. */
+.practice-done-title {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+.practice-done-title mark {
+  background: linear-gradient(var(--hl), var(--hl)) left / 100% 100% no-repeat;
+  font-weight: inherit;
+}
+.play .practice-done-title mark {
+  animation: hl-swipe 380ms cubic-bezier(0.16, 1, 0.3, 1) 300ms both;
+}
+.stamp {
+  display: inline-grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 8px 16px 7px;
+  border: 3px double currentColor;
+  color: var(--ok);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: 1.1;
+  transform: rotate(-6deg);
+  opacity: 0.92;
+  mix-blend-mode: multiply;
+  -webkit-mask-image: var(--stamp-ink);
+  mask-image: var(--stamp-ink);
+}
+.stamp.bad {
+  color: var(--pen);
+}
+.stamp small {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+}
+:root[data-theme="dark"] .stamp {
+  mix-blend-mode: screen;
+}
+.play .stamp {
+  animation: slam 320ms cubic-bezier(0.16, 1, 0.3, 1) 420ms backwards;
+}
+.play.practice-done {
+  animation: jolt 180ms ease-out 640ms;
+}
+.practice-done-score .note {
+  margin-left: 14px;
+}
+.play .practice-done-score .note {
+  animation: note-in 220ms ease-out 1240ms backwards;
+}
+.play .practice-done-score .note .k svg path {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: draw 420ms cubic-bezier(0.16, 1, 0.3, 1) 1300ms both;
+}
+/* the stamp's own scale and the note's rise ride the individual transform
+   properties, so the stamp keeps its tilt and the note its lean */
+@keyframes slam {
+  from {
+    scale: 2;
+    opacity: 0;
+  }
+  55% {
+    scale: 0.96;
+    opacity: 0.96;
+  }
+  to {
+    scale: 1;
+    opacity: 0.92;
+  }
+}
+@keyframes jolt {
+  35% {
+    translate: 0 2px;
+  }
+}
+@keyframes note-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
 }
 
 /* ═══════════════ history: session records ═══════════════ */

@@ -81,7 +81,7 @@
       { "name": "vt-route", "value": "html[data-vt=\"route\"]: old(sheet) vt-out 120ms ease-out; new(sheet) vt-in 280ms cubic-bezier(0.16, 1, 0.3, 1) from opacity 0 translateY(10px)", "purpose": "Pulling the next sheet from the packet on an index-tab click." },
       { "name": "spin", "value": "900ms linear infinite", "purpose": "Spinner icon in loading states." },
       { "name": "typewriter-status", "value": "react-type-animation in Courier Prime 14px", "purpose": "Status line while the model thinks." },
-      { "name": "confetti", "value": "react-confetti, colors #ffe94d #c8321f #f5f2ea #1b1b1f #ffb257, pieces scaled to score", "purpose": "Round completion." },
+      { "name": "closing", "value": "highlighter swipe across the title at 300ms; .stamp (3px double currentColor, 17px 700 caps .18em + 10px date, rotate -6deg, --stamp-ink mask, multiply/screen) slams at 420ms over 320ms with a 2px jolt; VERDICT pen note rises at 1240ms; all gated on .practice-done.play, still on revisit", "purpose": "Round completion (COMPLETE in --ok) and abandonment (ABANDONED in --pen, stamp only). Replaced react-confetti 2026-08-28." },
       { "name": "reduced-motion", "value": "@media (prefers-reduced-motion: reduce) { animation-duration: .01ms; iteration-count: 1; transition-duration: .01ms; ::view-transition-* { animation: none } } and viewTransition() applies the update plainly", "purpose": "Every animation and transition collapses; view transitions are skipped entirely." }
     ],
     "viewTransitions": {
@@ -247,7 +247,7 @@
       "Zero radius on the sheet; the only curves are the 3px top corners of the index tabs.",
       "Highlighter (`--hl`) is a state, not a decoration: current turn, selection, score.",
       "Red (`--pen`) belongs to the interviewer and to armed destructive controls; nothing else is red.",
-      "Motion is the hand at work: typewriter status, pulsing pen dot, blinking caret, the stamp, the highlighter drawn across \"Your turn\", the pen drawing the margin arrow, the pen running along the rating row while a topic is scored, confetti in packet colours - and the paper moving: the reply box files itself as a response, a closed topic folds into the index, the next sheet is pulled from the packet (view transitions)."
+      "Motion is the hand at work: typewriter status, pulsing pen dot, blinking caret, the stamp, the highlighter drawn across \"Your turn\", the pen drawing the margin arrow, the pen running along the rating row while a topic is scored, the round closed with the highlighter across \"Round complete.\", the panel's stamp and the interviewer's verdict - and the paper moving: the reply box files itself as a response, a closed topic folds into the index, the next sheet is pulled from the packet (view transitions)."
     ],
     "rules": [
       { "name": "The Red Is The Interviewer Rule", "body": "`--pen` is reserved for the interviewer's voice and for the armed state of a destructive control. Errors use it because an error is the interviewer's note too. Never use red for emphasis, links, or decoration; a resting destructive control is ink, and turns red only once armed.", "section": "colors" },
@@ -265,7 +265,7 @@
       "Do keep destructive controls ink at rest and morph them to `--pen` with a pulse only when armed.",
       "Do define any new colour on both stocks (`:root` and `:root[data-theme=\"dark\"]`) and pair `--hl` with `--hl-ink`.",
       "Do render icons from lucide at 12-16px (13px inside buttons, 14px in desk tools), stroke 1.8, in currentColor.",
-      "Do honour `prefers-reduced-motion`; motion is limited to the stamp, the scoring sweep, the pen dot, the caret, the 220ms stream-in, the highlighter swipe, the arrow draw, the view transitions listed under Motion, and completion confetti. Reduced motion skips the view transitions entirely and collapses the rest.",
+      "Do honour `prefers-reduced-motion`; motion is limited to the stamp, the scoring sweep, the pen dot, the caret, the 220ms stream-in, the highlighter swipe, the arrow draw, the view transitions listed under Motion, and the round's closing (highlighter, stamp, verdict). Reduced motion skips the view transitions entirely and collapses the rest.",
       "Do keep the reply box and the interviewer's clipboard sticky on desktop; whose move it is must survive a long transcript."
     ],
     "donts": [
