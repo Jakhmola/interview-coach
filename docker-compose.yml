@@ -17,6 +17,13 @@ services:
   llama:
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: interview_coach_llama
+    # The nvidia runtime injects /dev/nvidia* but on some hosts (cgroup v2 +
+    # recent kernels) the UVM node ends up unusable inside the container and
+    # llama.cpp logs "ggml_cuda_init: failed to initialize CUDA: unknown error",
+    # silently falling back to CPU. Passing the UVM nodes explicitly fixes it.
+    devices:
+      - /dev/nvidia-uvm:/dev/nvidia-uvm
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools
     # Bind-mount the host's models dir; override with MODELS_DIR if it lives elsewhere.
     volumes:
       - ${MODELS_DIR:-${HOME}/models}:/models:ro
