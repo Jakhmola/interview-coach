@@ -2610,7 +2610,22 @@ mark.warn,
 .practice-done {
   display: grid;
   gap: 18px;
-  max-width: 820px;
+}
+/* the closing lines on the left, the stamp slapped on the free paper beside them */
+.done-head {
+  display: flex;
+  align-items: center;
+  gap: 18px 56px;
+  flex-wrap: wrap;
+}
+.done-main {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+}
+/* the stamp keeps to the right, on the row or on its own line when the sheet is narrow */
+.done-head .stamp {
+  margin-left: auto;
 }
 .practice-done-title {
   font-size: 20px;
@@ -2626,14 +2641,9 @@ mark.warn,
   color: var(--ink-2);
 }
 /* the round is closed three ways at once: the highlighter across the title,
-   the panel's stamp beside it, the interviewer's verdict in the margin.
-   `.play` runs them the moment the round closes; a revisit shows them still. */
-.practice-done-title {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  flex-wrap: wrap;
-}
+   the panel's stamp beside it, the interviewer's verdict on the score row,
+   its arrow at the scale. `.play` runs them the moment the round closes; a
+   revisit shows them still. */
 .practice-done-title mark {
   background: linear-gradient(var(--hl), var(--hl)) left / 100% 100% no-repeat;
   font-weight: inherit;
@@ -2644,11 +2654,11 @@ mark.warn,
 .stamp {
   display: inline-grid;
   justify-items: center;
-  gap: 2px;
-  padding: 8px 16px 7px;
-  border: 3px double currentColor;
+  gap: 3px;
+  padding: 12px 26px 10px;
+  border: 4px double currentColor;
   color: var(--ok);
-  font-size: 17px;
+  font-size: 28px;
   font-weight: 700;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -2663,7 +2673,7 @@ mark.warn,
   color: var(--pen);
 }
 .stamp small {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.16em;
 }
 :root[data-theme="dark"] .stamp {
@@ -2677,6 +2687,7 @@ mark.warn,
 }
 .practice-done-score .note {
   margin-left: 14px;
+  max-width: 36ch;
 }
 .play .practice-done-score .note {
   animation: note-in 220ms ease-out 1240ms backwards;

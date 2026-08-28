@@ -500,33 +500,37 @@ export function InterviewPage() {
         <ErrorBanner code={error} />
 
         <div className={stamped ? "practice-done play" : "practice-done"}>
-          <h1 className="practice-done-title">
-            {complete ? <mark>Round complete.</mark> : "Round abandoned."}
+          <div className="done-head">
+            <div className="done-main">
+              <h1 className="practice-done-title">
+                {complete ? <mark>Round complete.</mark> : "Round abandoned."}
+              </h1>
+              {overallScore !== null ? (
+                <div className="practice-done-score">
+                  <span className="cap">Average</span>
+                  <RatingCells
+                    score={Math.round(overallScore)}
+                    label={`Average ${overallScore.toFixed(1)} out of 10`}
+                  />
+                  <span className="hint">
+                    {overallScore.toFixed(1)} / 10 over {scored.length} topic{scored.length === 1 ? "" : "s"}
+                  </span>
+                  {closing ? <PenNote label="Verdict" text={closing} /> : null}
+                </div>
+              ) : null}
+              <p className="practice-done-hint">
+                Filed to <Link to="/history">History</Link>. Start another round whenever you're ready.
+              </p>
+              <div>
+                <button type="button" className="btn-primary" onClick={() => navigate("/interview")}>
+                  <RotateCcw /> Start another round
+                </button>
+              </div>
+            </div>
             <span className={complete ? "stamp" : "stamp bad"} aria-hidden="true">
               <span>{complete ? "Complete" : "Abandoned"}</span>
               <small>{roundDate}</small>
             </span>
-          </h1>
-          {overallScore !== null ? (
-            <div className="practice-done-score">
-              <span className="cap">Average</span>
-              <RatingCells
-                score={Math.round(overallScore)}
-                label={`Average ${overallScore.toFixed(1)} out of 10`}
-              />
-              <span className="hint">
-                {overallScore.toFixed(1)} / 10 over {scored.length} topic{scored.length === 1 ? "" : "s"}
-              </span>
-              {closing ? <PenNote label="Verdict" text={closing} /> : null}
-            </div>
-          ) : null}
-          <p className="practice-done-hint">
-            Filed to <Link to="/history">History</Link>. Start another round whenever you're ready.
-          </p>
-          <div>
-            <button type="button" className="btn-primary" onClick={() => navigate("/interview")}>
-              <RotateCcw /> Start another round
-            </button>
           </div>
           {detail.threads.length > 0 ? (
             <section className="prev" aria-label="Topics in this round">
