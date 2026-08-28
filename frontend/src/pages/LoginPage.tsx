@@ -42,12 +42,12 @@ export function LoginPage() {
     <main className="auth-screen">
       <div className="auth-card">
         <Staples />
-        <div className="auth-tabs" role="tablist" aria-label="Sign in or register">
+        <div className="auth-tabs tabs" role="tablist" aria-label="Sign in or register">
           <button
             type="button"
             role="tab"
             aria-selected={mode === "login"}
-            className={`auth-tab${mode === "login" ? " active" : ""}`}
+            className={`tab${mode === "login" ? " active" : ""}`}
             onClick={() => setMode("login")}
           >
             Log in
@@ -56,7 +56,7 @@ export function LoginPage() {
             type="button"
             role="tab"
             aria-selected={mode === "register"}
-            className={`auth-tab${mode === "register" ? " active" : ""}`}
+            className={`tab${mode === "register" ? " active" : ""}`}
             onClick={() => setMode("register")}
           >
             Register
@@ -68,38 +68,13 @@ export function LoginPage() {
           <span className="auth-brand-mark">Personalized interview practice · runs on your machine</span>
         </div>
 
-        <h1 className="auth-title">
-          {mode === "login" ? (
-            <>
-              Welcome back.
-              <br />
-              Your packet is where you left it.
-            </>
-          ) : (
-            "Practice the role in front of you: your CV, the job description, one topic at a time."
-          )}
-        </h1>
-        <p className="auth-sub">
-          Upload your CV and project docs, paste a job description, and a local model runs a real
-          back-and-forth interview. It asks, probes, clarifies, then scores each topic and shows a
-          model answer.
-        </p>
-
-        <ul className="auth-proof" aria-label="What makes it different">
-          <li>
-            <i aria-hidden="true" />
-            Questions grounded in your CV, your project docs, and your own GitHub code.
-          </li>
-          <li>
-            <i aria-hidden="true" />
-            A real interviewer: one topic at a time, with follow-ups, then a score and a model answer.
-          </li>
-          <li>
-            <i aria-hidden="true" />
-            Private by construction: a local model on your GPU. Nothing leaves the box except optional
-            web search.
-          </li>
-        </ul>
+        <div className="auth-pitch">
+          <h1 className="auth-title">Practice for the role in front of you.</h1>
+          <p className="auth-sub">
+            Add your CV, docs and repos. A local interviewer asks, probes, then scores each topic and
+            shows a model answer.
+          </p>
+        </div>
 
         <form onSubmit={onSubmit} className="auth-form">
           <div className="auth-fields">
@@ -137,10 +112,13 @@ export function LoginPage() {
         </form>
 
         <div className="auth-foot">
-          <span>Local, self-hosted. Your documents stay on this machine.</span>
-          <span>
-            {mode === "login" ? "New here? Use the Register tab." : "Already registered? Use the Log in tab."}
-          </span>
+          <button
+            type="button"
+            className="btn-quiet"
+            onClick={() => setMode(mode === "login" ? "register" : "login")}
+          >
+            {mode === "login" ? "New here? Create an account" : "Already registered? Log in"}
+          </button>
         </div>
       </div>
     </main>

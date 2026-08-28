@@ -8,6 +8,7 @@ colors:
   paper: "#f5f2ea"
   paper-2: "#ebe7dd"
   paper-3: "#e2ded3"
+  paper-under: "#d8d4c9"
   ink: "#1b1b1f"
   ink-2: "#4a4a4f"
   ink-3: "#6a6a70"
@@ -27,6 +28,7 @@ colors:
   on-desk-2: "#8e8d89"
   on-desk-3: "#ffffff"
   night-paper: "#2b2d32"
+  night-paper-under: "#1f2125"
   night-ink: "#ece9e2"
   night-pen: "#ef6a55"
   night-hl: "#ffd84a"
@@ -34,11 +36,6 @@ colors:
   night-desk-1: "#1a1a1d"
   night-desk-2: "#0d0d10"
 typography:
-  hero:
-    fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif"
-    fontSize: "28px"
-    fontWeight: 700
-    lineHeight: 1.2
   display:
     fontFamily: "Archivo, Helvetica Neue, Arial, sans-serif"
     fontSize: "24px"
@@ -165,15 +162,16 @@ components:
     padding: "0 18px"
     height: "38px"
   tab:
-    backgroundColor: "{colors.paper-2}"
-    textColor: "{colors.ink}"
+    backgroundColor: "{colors.paper-under}"
+    textColor: "{colors.ink-2}"
     typography: "{typography.control}"
     rounded: "{rounded.tab}"
     padding: "0 22px"
-    height: "30px"
+    height: "28px"
   tab-active:
-    backgroundColor: "{colors.ink}"
-    textColor: "{colors.paper}"
+    backgroundColor: "{colors.paper}"
+    textColor: "{colors.ink}"
+    height: "32px"
   box-label:
     backgroundColor: "{colors.ink}"
     textColor: "{colors.paper}"
@@ -273,11 +271,10 @@ Two neutral families (desk and paper), one ink ramp, and three pigments that eac
 **Character:** A printed form and a typewriter. Archivo does the form's lettering in tight, tracked caps and the plain reading text; Courier Prime is only what the candidate typed; the interviewer writes in Archivo squeezed to 78% width so it reads as a narrower, faster hand. No italic display, no serif, no system UI face.
 
 ### Hierarchy
-- **Hero** (700, 28px, lh 1.2): the one place the role itself is the heading - "GenAI Engineer @ Northwind Labs" on the ready landing.
 - **Display** (700, 24px, caps, 0.02em; 20px under 720px): the form title under its 2px rule ("Interview Scorecard", the login brand).
 - **Headline** (500, 21px, lh 1.35; 17px under 720px): the question in its box, filling the box's width. **Page title** (500, 20px): page titles on Setup, History, Manage, the completion title, the modal title (700 caps there).
 - **Title** (500, 14.5px): values in underlined header fields, list-row primary text.
-- **Body** (400, 15px, lh 1.45): reading text. Standalone prose (login pitch, wizard blurbs, the ready lede) keeps a 52-66ch measure; anything inside a box, a record or a row fills its container - a boxed field with an empty right half reads as wasted paper. **Meta** (13-13.5px, `--ink-2`): row metadata, the "Your turn" line, page meta (12.5px). **Hint** (12px, 0.06em, `--ink-2`): "Ctrl + Enter submits", "scored when the topic closes".
+- **Body** (400, 15px, lh 1.45): reading text. Standalone prose (login pitch, wizard blurbs) keeps a 52-66ch measure; anything inside a box, a record or a row fills its container - a boxed field with an empty right half reads as wasted paper. **Meta** (13-13.5px, `--ink-2`): row metadata, the "Your turn" line, page meta (12.5px). **Hint** (12px, 0.06em, `--ink-2`): "Ctrl + Enter submits", "scored when the topic closes".
 - **Typed** (Courier Prime 400, 15.5px on a 26px line): the candidate's responses, the textarea they type in, model answers (14.5/24), typewriter status lines (14px), exchange transcripts (14/22), the History model answer (13.5/22).
 - **Pen** (Archivo 500, wdth 78, 16px, lh 1.35, `--pen`): margin notes; 15.5px in inline remarks and the agenda, 15px in exchange turns; keyed by an 11px/10px caps label ("PROBE", "NUDGE", "AGENDA").
 - **Label** (700, 10.5px, 0.14em, caps, `--ink-2`): field labels, section heads (11px), previous-topic keys, model-answer summary, the packet index keys; 10px inverted on the box label and status pill.
@@ -290,13 +287,13 @@ Two neutral families (desk and paper), one ink ramp, and three pigments that eac
 
 ## Layout
 
-One sheet per screen, centred on the desk and taking most of it. The desk pads `28px 32px 40px` (36/12/40 under 980px), the desk bar (tabs left, tools right) is `min(1600px, 100%)` wide, and the sheet is the same width with `min-height: calc(100vh - 98px)`, so on a laptop the sheet's foot lands at the bottom of the first screen. Sheet padding is `30px 56px 36px 76px`: the 76px left keeps content right of the 60px margin rule (48/34 under 980px, 32/22 under 720px). Login uses a narrower `min(760px, 100%)` cover sheet with the same margin and tabs, centred vertically on the desk.
+One sheet per screen, centred on the desk and taking most of it. The desk pads `28px 32px 40px` (36/12/40 under 980px), the desk bar (tabs left, tools right) is `min(1600px, 100%)` wide, and the sheet is the same width with `min-height: calc(100vh - 98px)`, so on a laptop the sheet's foot lands at the bottom of the first screen. Sheet padding is `30px 56px 36px 76px`: the 76px left keeps content right of the 60px margin rule (48/34 under 980px, 32/22 under 720px). Login uses a narrower `min(760px, 100%)` cover sheet with the same margin and tabs, centred vertically on the desk; it says what this is once - the brand rule with its mark, one headline (21px 500) and one sentence in `--ink-2` - then the form, then a single quiet button that switches to the other tab ("New here? Create an account" / "Already registered? Log in"). No proof list, no second privacy line: the mark already says "runs on your machine".
 
 The sheet is a vertical flex column with a 16px gap; inside it, sections are grids with 12-14px gaps and open with a 1px ink top rule. The scorecard header is an auto-fit grid of underlined fields (`minmax(150px, 1fr)`, gap 14px 22px); on the live scorecard it becomes four fixed columns (candidate / role / topic / no.) and collapses to one under 720px. The topic number is stated once, in the NO. field; the title's meta line names only the round type.
 
 The live scorecard is two columns: `minmax(0, 1fr) minmax(340px, 400px)` with a `14px 40px` gap. The question box and the main column (responses, remarks, reply box, actions, rating row) occupy the left; the right margin (latest note, agenda, grounded-in) spans both rows and never pushes the form down. Two things stay at hand while a long transcript scrolls: the reply box (`form.composer`) is `position: sticky; bottom: 0` on paper with a 12px paper fade above it, and on desktops at least 981px wide and 780px tall the margin is `sticky; top: 24px`. Under 980px the margin drops below the main column and the note loses its tilt.
 
-The ready landing (Setup, once prep is complete) is two columns, `minmax(0, 1fr) minmax(320px, 460px)` with a `22px 56px` gap: the role, a one-line lede and the start button on the left, the "In the packet" checklist on the right (`.packet-check`: CV / job description / supporting docs / GitHub repos, each row a 12px square that is filled when the item is on file, a caps key, the value or a one-line "none yet" nudge in `--ink-3`, and a quiet action - Replace / Add another / Add more / Add repos). It tells the candidate what is in the packet, what is not, and where to add it; nothing else. The landing is one column under 980px; under 720px each row reflows (square, key and action on the first line, value below).
+The ready landing (Setup, once prep is complete) is one column and says each thing once: the header names the candidate and the role (the ROLE / COMPANY field is the job switcher; there is no second role heading and no CV field, the CV is in the list below), then the packet checklist fills the sheet's width (`.packet-check`: CV / job description / supporting docs / GitHub repos, each row `12px 150px minmax(0, 1fr) auto` - a 12px square that is filled when the item is on file, a caps key, what is on file, and a quiet action - Replace / Add another / Add more / Add repos), then the one action (Start a practice round, with Manage as a quiet link beside it). What is on file is an `.item`: the name at 14.5px 500 with a 13px `--ink-2` meta after it (chars; the date for a JD; `filed under "project"` for a doc; the tech for a repo) and, under it, the document's first line - the API's 200-char `preview` with its line breaks quoted as " / ", in quotes, clamped to 2 lines - so the candidate can tell a file by what it says, not by its name. A missing item reads "none yet" in `--ink-3` with a one-line reason only where one helps (docs, repos). Under 720px each row reflows (square, key and action on the first line, value below).
 
 History records (`.record`) use the same width: a head row with the topic number, the full topic label (wrapping, never truncated by the UI) and mini rating cells; then `minmax(0, 3fr) minmax(0, 2fr)` with the exchange on the left and the interviewer's verdict on the right. Collapsed, the exchange shows the question and the candidate's first answer (`.clamp`, 3 lines) and the verdict its first 4 lines; "Full exchange · n turns" opens every turn and the model answer, "Show less" folds it back. One column under 980px.
 
@@ -333,13 +330,13 @@ Form lettering on a printed outline; the hover is an ink fill, not a colour chan
 - **Disabled:** 45% opacity, `not-allowed` cursor.
 
 ### Index Tabs
-Cut from the sheet's top edge. 30px tall, `0 22px`, `--paper-2` fill, 1px ink border with no bottom, `3px 3px 0 0`, 11px 700 caps 0.14em. Active: ink fill, paper text. Locked: `--ink-3` text, `not-allowed`. Hover: `--paper`. The row is indented 76px to align with the sheet's content edge; under 720px it scrolls horizontally.
+Cut from the sheets' top edges, and where you are is the tab that is cut from the top sheet: the active tab is `--paper` with the sheet's grain, `--ink` text, 32px tall, and meets the sheet with no seam. The other tabs belong to the sheets underneath - `--paper-under` fill (a shade darker than the sheet on both stocks), `--ink-2` text, 28px tall, so they sit lower and read as behind. All: `0 22px`, 1px ink border with no bottom, `3px 3px 0 0`, 11px 700 caps 0.14em. Locked: `--ink-3` text, `not-allowed`. Hover: `--paper-2` and ink text. The row is `align-items: flex-end`, indented 76px to align with the sheet's content edge; under 720px it scrolls horizontally. The login cover sheet's Log in / Register tabs are the same `.tab`s, positioned above the card (`.auth-card .tabs`).
 
 ### Desk Tools
 Off-sheet controls (who, day/night, log out) in `--on-desk`, 11px 700 caps 0.1em, 26px tall, 3px radius, transparent 1px border that shows in `--on-desk-2` on hover. 14px lucide icon.
 
 ### Underlined Field
-Header field on the scorecard: 10px caps label in `--ink-2`, 3px gap, 14.5px 500 value with a 1px ink underline, single line with ellipsis (`.wrap` clamps to 3 lines). Empty value is `--ink-3` at 400. The active-job field is this shape as a button; its menu is a slip with `--paper-2` hover rows and a highlighter-filled current row.
+Header field on the scorecard: 10px caps label in `--ink-2`, 3px gap, 14.5px 500 value with a 1px ink underline, single line with ellipsis (`.wrap` clamps to 3 lines). Empty value is `--ink-3` at 400. The active-job field is this shape as a button; its menu is a slip with `--paper-2` hover rows, a highlighter-filled current row and, under a `--rule`, a "New job description" row (12.5px `--ink-2`, lucide plus) that opens the intake at the JD step - so a new role is one click from wherever the field is.
 
 ### Boxed Field
 1px ink box, `22px 20px 16px` padding, with an inverted label (`--ink` fill, `--paper` text, 10px 700 caps 0.14em, `3px 8px`) overlapping the top-left corner at -1px. Whatever is in a box fills it: no measure caps on the question, a response, the assessment or the model answer. Variants: `.q` (question, 21px 500), `.r` (a filed response, typed text on `--rule` 26px rulings, filling the box ruling for ruling exactly as the reply box did), `.reply` (padding 0, the textarea inside grows with its content via `field-sizing: content` up to 44vh; `focus-within` draws the 2px highlighter ring), `.assessment` (pen-labelled; rating row, feedback, model answer). The round-type fieldset on the start screen is the same box with a `<legend>` as label.
@@ -369,7 +366,7 @@ Ten 30px squares (mini: 22px; 26px under 720px) with 1px ink borders, 4px apart,
 - **Empty state:** 1px dashed `--rule-2`, `22px 20px`, `--ink-2` with a 16px ink strong line.
 
 ### Status Pill (rubber stamp)
-20px tall, `0 7px`, 1px border in currentColor, 10px 700 caps 0.12em. Colour is the state: `--ok` good, `--pen` bad, ink info, amber warn (`--hl-2` on night stock). Never filled.
+20px tall, `0 7px`, 1px border in currentColor, 10px 700 caps 0.12em. Colour is the state: `--ok` good, `--pen` bad, ink info, amber warn (`--hl-2` on night stock). Never filled. On a History row the stamp is the session's fate: COMPLETE in `--ok`, ABANDONED in `--pen`, ACTIVE in ink.
 
 ### Chips
 1px `--rule-2` outline, `1px 6px`, 11px 600 0.04em in `--ink-2`, square. Used for repo languages and wizard tags; no selected state.

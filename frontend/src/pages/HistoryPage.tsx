@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 import { JobItem, Session, SessionDetail, SessionStatus, Thread, api } from "../api";
-import { ErrorBanner, Field, RatingCells, SheetHead } from "../components/ui";
+import { ErrorBanner, RatingCells, SheetHead } from "../components/ui";
 import { codeFrom } from "../errors";
 import { topicLabel } from "../jobLabel";
 import { useAuth } from "../state/auth";
@@ -13,14 +13,16 @@ const roundLabels = {
   behavioral_star: "Behavioral / STAR",
 };
 
+// The stamp's colour is the state: complete is ok green, abandoned is the red
+// pen, active is plain ink.
 const statusTone: Record<SessionStatus, string> = {
   active: "info",
   complete: "good",
-  abandoned: "neutral",
+  abandoned: "bad",
 };
 
 export function HistoryPage() {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [jobs, setJobs] = useState<JobItem[]>([]);
   const [jobDetails, setJobDetails] = useState<
@@ -97,12 +99,8 @@ export function HistoryPage() {
 
   return (
     <div className="history">
-      <SheetHead title="Session records" page={`${sessions.length} session${sessions.length === 1 ? "" : "s"} on file`}>
-        <Field label="Candidate" value={user?.email} />
-        <Field label="Rounds on file" value={sessions.length} />
-      </SheetHead>
+      <SheetHead title="Session records" page={`${sessions.length} session${sessions.length === 1 ? "" : "s"} on file`} />
       <header className="history-header">
-        <h1 className="history-title">Every round, filed by job.</h1>
         <div className="history-filter" role="group" aria-label="Filter by status">
           {(["all", "complete", "active", "abandoned"] as const).map((f) => (
             <button

@@ -1,4 +1,13 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { ArrowLeft, ArrowRight, CheckCircle2, FileUp, GitBranch, LinkIcon } from "lucide-react";
 import { Link, useNavigate, useOutletContext, useSearchParams } from "react-router-dom";
 
@@ -1170,89 +1179,171 @@ function ReadyLanding({
   onAddDocs: () => void;
   onManage: () => void;
 }) {
-  // Phase 22: parsed_json now arrives on the list endpoint too, so
-  // ReadyLanding can derive role/company straight from the active
-  // JobItem instead of taking a separate ``activeJobParsed`` prop
-  // that could drift from what Manage/dropdown render.
-  const parsed = (job?.parsed_json as
-    | { title?: string; company_name?: string }
-    | null
-    | undefined) ?? null;
-  const role = parsed?.title;
-  const company = parsed?.company_name;
   const { user } = useAuth();
+  // The role is named once, in the ROLE / COMPANY field (which is also the
+  // switcher); the packet rows below say what each file on record *is*.
   return (
     <div className="wizard">
       <SheetHead title="Candidate intake" page="Complete · ready to practice">
         <Field label="Candidate" value={user?.email} />
         <JobField />
-        <Field label="CV on file" value={cv?.filename} empty="none yet" />
       </SheetHead>
-    <div className="ready-landing">
-      <div className="ready-main">
-        <h1 className="ready-title">
-          {role || "Role"} <span className="ready-at">@</span> {company || "Company"}
-        </h1>
-        <p className="ready-lede">Ready to practice. Start a round, or add to the packet first.</p>
-        <div className="ready-actions">
-          <button className="btn-primary" type="button" onClick={onStart}>
-            Start a practice round <ArrowRight size={14} />
-          </button>
-          <button className="btn-quiet" type="button" onClick={onManage}>
-            Manage CV, JDs &amp; docs
-          </button>
-        </div>
-      </div>
 
-      {/* What is in the packet and what is not; each row carries its own way in. */}
-      <section className="section ready-packet" aria-label="What's in the packet">
-        <h2>In the packet</h2>
-        <ul className="packet-check">
-          <li className={cv ? "done" : ""}>
-            <i aria-hidden="true" />
-            <span className="k">CV</span>
-            <span className="v">{cv ? cv.filename : "none yet"}</span>
-            <button type="button" className="btn-quiet" onClick={onManage}>
-              {cv ? "Replace" : "Upload"}
-            </button>
-          </li>
-          <li className={job ? "done" : ""}>
-            <i aria-hidden="true" />
-            <span className="k">Job description</span>
-            <span className="v">{job ? job.source_url || "Pasted text" : "none yet"}</span>
-            <button type="button" className="btn-quiet" onClick={onAddJob}>
-              {job ? "Add another" : "Add"}
-            </button>
-          </li>
-          <li className={techDocs.length > 0 ? "done" : ""}>
-            <i aria-hidden="true" />
-            <span className="k">Supporting docs</span>
-            <span className="v">
-              {techDocs.length > 0
-                ? techDocs.map((d) => d.filename).join(" · ")
-                : "none yet - architecture notes, take-homes, project write-ups"}
-            </span>
-            <button type="button" className="btn-quiet" onClick={onAddDocs}>
-              {techDocs.length > 0 ? "Add more" : "Add"}
-            </button>
-          </li>
-          <li className={repos.length > 0 ? "done" : ""}>
-            <i aria-hidden="true" />
-            <span className="k">GitHub repos</span>
-            <span className="v">
-              {repos.length > 0
-                ? repos.map((d) => d.project_title ?? d.filename).join(" · ")
-                : "none yet - public repos ground the deep-dive questions in your code"}
-            </span>
-            <button type="button" className="btn-quiet" onClick={onManage}>
-              {repos.length > 0 ? "Manage" : "Add repos"}
-            </button>
-          </li>
-        </ul>
-      </section>
-    </div>
+      <ul className="packet-check" aria-label="What's in the packet">
+        <PacketRow k="CV" done={!!cv} action={cv ? "Replace" : "Upload"} onAction={onManage}>
+          {cv ? (
+            <PacketItem
+              title={cv.filename}
+              meta={chars(cv.char_count)}
+              excerpt={excerptOf(cv.preview, cv.char_count)}
+            />
+          ) : null}
+        </PacketRow>
+        <PacketRow
+          k="Job description"
+          done={!!job}
+          action={job ? "Add another" : "Add"}
+          onAction={onAddJob}
+        >
+          {job ? (
+            <PacketItem
+              title={job.source_url ? job.source_url.replace(/^https?:\/\//, "") : "Pasted text"}
+              meta={`${shortDate(job.created_at)} · ${chars(job.char_count)}`}
+              excerpt={excerptOf(job.preview, job.char_count)}
+            />
+          ) : null}
+        </PacketRow>
+        <PacketRow
+          k="Supporting docs"
+          done={techDocs.length > 0}
+          hint="Architecture notes, take-homes, project write-ups."
+          action={techDocs.length > 0 ? "Add more" : "Add"}
+          onAction={onAddDocs}
+        >
+          {techDocs.map((d) => (
+            <PacketItem
+              key={d.id}
+              title={d.filename}
+              meta={
+                d.project_title
+                  ? `filed under "${d.project_title}" · ${chars(d.char_count)}`
+                  : chars(d.char_count)
+              }
+              excerpt={excerptOf(d.preview, d.char_count)}
+            />
+          ))}
+        </PacketRow>
+        <PacketRow
+          k="GitHub repos"
+          done={repos.length > 0}
+          hint="Public repos let the deep-dive ask about your own code."
+          action={repos.length > 0 ? "Manage" : "Add repos"}
+          onAction={onManage}
+        >
+          {repos.map((d) => {
+            const pj = (d.parsed_json ?? {}) as { description?: unknown; tech?: unknown };
+            const tech = Array.isArray(pj.tech)
+              ? pj.tech.filter((t): t is string => typeof t === "string").slice(0, 4)
+              : [];
+            return (
+              <PacketItem
+                key={d.id}
+                title={d.project_title ?? d.filename}
+                meta={tech.join(" · ")}
+                excerpt={typeof pj.description === "string" ? pj.description : ""}
+              />
+            );
+          })}
+        </PacketRow>
+      </ul>
+
+      <div className="ready-actions">
+        <button className="btn-primary" type="button" onClick={onStart}>
+          Start a practice round <ArrowRight size={14} />
+        </button>
+        <button className="btn-quiet" type="button" onClick={onManage}>
+          Manage CV, JDs &amp; docs
+        </button>
+      </div>
     </div>
   );
+}
+
+/** One line of the packet checklist: a square that is filled when the item is
+ * on file, its key, what is on file (or "none yet" and why it would matter),
+ * and the way to add or change it. */
+function PacketRow({
+  k,
+  done,
+  hint,
+  action,
+  onAction,
+  children,
+}: {
+  k: string;
+  done: boolean;
+  hint?: string;
+  action: string;
+  onAction: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <li className={done ? "done" : ""}>
+      <i aria-hidden="true" />
+      <span className="k">{k}</span>
+      <div className="v">
+        {done ? (
+          children
+        ) : (
+          <div className="item">
+            <span className="t">none yet</span>
+            {hint ? <span className="x">{hint}</span> : null}
+          </div>
+        )}
+      </div>
+      <button type="button" className="btn-quiet" onClick={onAction}>
+        {action}
+      </button>
+    </li>
+  );
+}
+
+/** A file on record: its name, a short meta, and its first line so the
+ * candidate can tell what it is without opening it. */
+function PacketItem({ title, meta, excerpt }: { title: string; meta?: string; excerpt: string }) {
+  return (
+    <div className="item">
+      <span className="t">
+        {title}
+        {meta ? <em> · {meta}</em> : null}
+      </span>
+      {excerpt ? (
+        <span className="x clamp" style={{ "--lines": 2 } as CSSProperties}>
+          {excerpt}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function chars(n: number) {
+  return `${n.toLocaleString()} chars`;
+}
+
+function shortDate(iso: string) {
+  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** The head of a document's text as one quoted line - its line breaks quoted
+ * as " / " so a name, a headline and a heading stay apart - and an ellipsis
+ * when the text goes on. */
+function excerptOf(preview: string, total: number) {
+  const head = preview
+    .trim()
+    .replace(/\s*\n+\s*/g, " / ")
+    .replace(/\s+/g, " ");
+  if (!head) return "";
+  return `“${head}${total > preview.length ? "…" : ""}”`;
 }
 
 function Check({ label, ok }: { label: string; ok?: boolean }) {

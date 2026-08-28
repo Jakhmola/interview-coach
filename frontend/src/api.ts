@@ -49,6 +49,8 @@ export type DocumentItem = {
   content_type: string;
   byte_size: number;
   char_count: number;
+  /** The first ~200 chars of the extracted text: what the file is, not just its name. */
+  preview: string;
   created_at: string;
   project_title?: string | null;
   // Phase 32: the folded github ProjectItem (tech / key_features / urls) so the

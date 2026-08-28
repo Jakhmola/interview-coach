@@ -38,6 +38,9 @@ class _DocumentBase(BaseModel):
 
 class DocumentListItem(_DocumentBase):
     char_count: int = Field(description="Length of extracted text")
+    # The head of the extracted text, so the Setup landing can show what a
+    # file *is* without a per-row GET /documents/{id}. Same length as a job's.
+    preview: str
     project_title: str | None = None
     # Phase 32 follow-up: the Manage "GitHub repos" section reads tech chips +
     # key_features + repo link off the folded ProjectItem here, so it doesn't

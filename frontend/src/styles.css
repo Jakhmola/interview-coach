@@ -55,6 +55,7 @@
   --paper: #f5f2ea;
   --paper-2: #ebe7dd;
   --paper-3: #e2ded3;
+  --paper-under: #d8d4c9; /* the sheets behind the top one (resting index tabs) */
   --ink: #1b1b1f;
   --ink-2: #4a4a4f;
   --ink-3: #6a6a70;
@@ -85,6 +86,7 @@
   --paper: #2b2d32;
   --paper-2: #35373d;
   --paper-3: #3d3f46;
+  --paper-under: #1f2125;
   --ink: #ece9e2;
   --ink-2: #b3b0a8;
   --ink-3: #8f8d87;
@@ -391,17 +393,21 @@ details > summary::-webkit-details-marker {
 }
 .tabs {
   display: flex;
+  align-items: flex-end;
   gap: 6px;
   padding-left: 76px;
   min-width: 0;
 }
+/* index tabs: where you are is the tab cut from the top sheet itself - same
+   stock, same grain, taller, no seam with the page below. The other tabs
+   belong to the sheets underneath: a shade darker, a little lower, dimmer. */
 .tab {
-  height: 30px;
+  height: 28px;
   padding: 0 22px;
   display: inline-grid;
   place-items: center;
-  background: var(--paper-2);
-  color: var(--ink);
+  background: var(--paper-under);
+  color: var(--ink-2);
   border: 1px solid var(--ink);
   border-bottom: 0;
   border-radius: 3px 3px 0 0;
@@ -411,21 +417,24 @@ details > summary::-webkit-details-marker {
   text-transform: uppercase;
   text-decoration: none;
   white-space: nowrap;
-  transition: background 150ms ease-out, transform 150ms ease-out;
+  transition: background 150ms ease-out, color 150ms ease-out;
 }
 .tab:hover {
-  background: var(--paper);
+  background: var(--paper-2);
+  color: var(--ink);
 }
 .tab.active {
-  background: var(--ink);
-  color: var(--paper);
+  height: 32px;
+  background: var(--paper);
+  background-image: var(--grain);
+  color: var(--ink);
 }
 .tab.locked {
   color: var(--ink-3);
   cursor: not-allowed;
 }
 .tab.locked:hover {
-  background: var(--paper-2);
+  background: var(--paper-under);
 }
 .desk-tools {
   display: flex;
@@ -1020,29 +1029,12 @@ mark.warn,
   width: 1px;
   background: var(--rule);
 }
-.auth-tabs {
+/* the cover sheet's index tabs: the same tabs as the desk bar's, cut from
+   the sheet's top edge */
+.auth-card .tabs {
   position: absolute;
-  top: -30px;
-  left: 76px;
-  display: flex;
-  gap: 6px;
-}
-.auth-tab {
-  height: 30px;
-  padding: 0 22px;
-  background: var(--paper-2);
-  color: var(--ink);
-  border: 1px solid var(--ink);
-  border-bottom: 0;
-  border-radius: 3px 3px 0 0;
-  font-weight: 700;
-  font-size: 11px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-.auth-tab.active {
-  background: var(--ink);
-  color: var(--paper);
+  bottom: 100%;
+  left: 0;
 }
 .auth-brand {
   display: flex;
@@ -1063,39 +1055,20 @@ mark.warn,
   color: var(--ink-2);
   font-weight: 500;
 }
+.auth-pitch {
+  display: grid;
+  gap: 8px;
+}
 .auth-title {
-  font-size: 20px;
+  font-size: 21px;
   font-weight: 500;
   line-height: 1.35;
-  max-width: 34ch;
   text-wrap: balance;
 }
 .auth-sub {
   color: var(--ink-2);
   max-width: 62ch;
   text-wrap: pretty;
-}
-.auth-proof {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  gap: 6px;
-}
-.auth-proof li {
-  display: flex;
-  gap: 10px;
-  align-items: baseline;
-  font-size: 14px;
-}
-.auth-proof li i {
-  width: 12px;
-  height: 12px;
-  border: 1.5px solid var(--ink);
-  background: var(--ink);
-  box-shadow: inset 0 0 0 2px var(--paper);
-  flex: none;
-  transform: translateY(1px);
 }
 .auth-form {
   display: grid;
@@ -1124,12 +1097,13 @@ mark.warn,
 }
 .auth-foot {
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--ink-2);
+  justify-content: flex-end;
   border-top: 1px solid var(--rule);
-  padding-top: 10px;
+  padding-top: 6px;
+}
+.auth-foot .btn-quiet {
+  height: 28px;
+  padding: 0;
 }
 
 /* ═══════════════ active job: a form field with a slip ═══════════════ */
@@ -1225,10 +1199,18 @@ mark.warn,
 .active-job-menu-item.current .active-job-menu-item-date {
   color: var(--hl-ink);
 }
-.active-job-menu-item.clear {
+.active-job-menu-item.add {
   border-top: 1px solid var(--rule);
   color: var(--ink-2);
-  font-size: 12px;
+  font-size: 12.5px;
+}
+.active-job-menu-item.add .active-job-menu-item-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.active-job-menu-item.add:hover {
+  color: var(--ink);
 }
 
 /* ═══════════════ setup: candidate intake ═══════════════ */
@@ -1580,39 +1562,10 @@ mark.warn,
   color: var(--ink-3);
 }
 
-/* ready landing: the role on the left, what's in the packet on the right */
-.ready-landing {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 460px);
-  gap: 22px 56px;
-  align-items: start;
-}
-.ready-main {
-  display: grid;
-  gap: 18px;
-  align-content: start;
-}
-.ready-title {
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1.2;
-  text-wrap: balance;
-}
-.ready-at {
-  color: var(--ink-3);
-  font-weight: 400;
-}
-.ready-lede {
-  color: var(--ink-2);
-  max-width: 52ch;
-  text-wrap: pretty;
-}
-/* the index sits level with the title; its own rule opens the checklist:
-   what is in the packet, what is not, and where to add it */
-.ready-packet {
-  border-top: 0;
-  padding-top: 0;
-}
+/* ready landing: the packet's contents, one full-width row per item - a
+   square filled when it is on file, the key, what it is (name, a short
+   meta, its first line), and the way to add or change it - then the one
+   action. The role is named once, in the header's ROLE / COMPANY field. */
 .packet-check {
   list-style: none;
   margin: 0;
@@ -1622,16 +1575,18 @@ mark.warn,
 }
 .packet-check li {
   display: grid;
-  grid-template-columns: 12px 128px minmax(0, 1fr) auto;
-  gap: 14px;
-  align-items: center;
-  padding: 10px 0;
+  grid-template-columns: 12px 150px minmax(0, 1fr) auto;
+  gap: 10px 18px;
+  align-items: start;
+  padding: 12px 0;
   border-bottom: 1px solid var(--rule);
-  font-size: 14px;
+  font-size: 14.5px;
+  line-height: 1.45;
 }
 .packet-check li i {
   width: 12px;
   height: 12px;
+  margin-top: 4px;
   border: 1.5px solid var(--ink);
   display: inline-block;
 }
@@ -1640,6 +1595,7 @@ mark.warn,
   box-shadow: inset 0 0 0 2px var(--paper);
 }
 .packet-check .k {
+  padding-top: 4px;
   font-weight: 700;
   font-size: 10.5px;
   letter-spacing: 0.14em;
@@ -1648,19 +1604,41 @@ mark.warn,
 }
 .packet-check .v {
   min-width: 0;
+  display: grid;
+  gap: 10px;
+}
+.packet-check .item {
+  display: grid;
+  gap: 1px;
+}
+.packet-check .t {
+  font-weight: 500;
   overflow-wrap: anywhere;
 }
-.packet-check li:not(.done) .v {
+.packet-check .t em {
+  font-style: normal;
+  font-weight: 400;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.packet-check .x {
+  font-size: 13px;
+  color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+.packet-check li:not(.done) .t {
+  font-weight: 400;
   color: var(--ink-3);
 }
 .packet-check .btn-quiet {
-  height: 28px;
+  height: 21px;
   padding: 0;
 }
 .ready-actions {
-  display: grid;
-  gap: 12px;
-  justify-items: start;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-top: 2px;
 }
 
 /* ═══════════════ manage: file inventory ═══════════════ */
@@ -2484,10 +2462,6 @@ mark.warn,
   gap: 16px;
   flex-wrap: wrap;
 }
-.history-title {
-  font-size: 20px;
-  font-weight: 500;
-}
 .history-filter {
   display: flex;
   gap: 4px;
@@ -2806,7 +2780,6 @@ html[data-vt="route"]::view-transition-new(sheet) {
   .note {
     transform: none;
   }
-  .ready-landing,
   .record-body {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2846,8 +2819,8 @@ html[data-vt="route"]::view-transition-new(sheet) {
   .auth-card::before {
     left: 24px;
   }
-  .auth-tabs {
-    left: 36px;
+  .auth-card .tabs {
+    padding-left: 36px;
   }
   .auth-fields {
     grid-template-columns: 1fr;
@@ -2891,6 +2864,7 @@ html[data-vt="route"]::view-transition-new(sheet) {
     grid-template-areas:
       "i k b"
       "v v v";
+    gap: 6px 12px;
   }
   .packet-check li i {
     grid-area: i;
@@ -2903,6 +2877,10 @@ html[data-vt="route"]::view-transition-new(sheet) {
   }
   .packet-check .btn-quiet {
     grid-area: b;
+  }
+  .ready-actions {
+    flex-wrap: wrap;
+    gap: 12px;
   }
   .manage-card {
     flex-direction: column;

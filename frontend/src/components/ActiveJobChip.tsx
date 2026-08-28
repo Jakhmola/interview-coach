@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, ChevronDown } from "lucide-react";
+import { ArrowRight, ChevronDown, Plus } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { jobLabel } from "../jobLabel";
@@ -47,10 +47,10 @@ export function ActiveJobChip() {
   const company = parsed?.company_name;
 
   const muted = !activeJobId;
-  const hasOtherJobs = jobs.some((j) => j.id !== activeJobId);
-  // Dropdown is only useful if there's something to switch to OR an
-  // active job to clear. Otherwise click should route to Setup.
-  const dropdownUseful = hasOtherJobs || !!activeJobId;
+  // The slip lists every saved job plus "New job description", so it is
+  // worth opening as soon as one job exists. With none, the chip itself is
+  // the way into Setup.
+  const dropdownUseful = jobs.length > 0;
 
   const onPillClick = () => {
     if (dropdownUseful) {
@@ -121,18 +121,18 @@ export function ActiveJobChip() {
               </button>
             );
           })}
-          {activeJobId ? (
-            <button
-              type="button"
-              className="active-job-menu-item clear"
-              onClick={() => {
-                setActiveJobId(null);
-                setOpen(false);
-              }}
-            >
-              Clear active job
-            </button>
-          ) : null}
+          <button
+            type="button"
+            className="active-job-menu-item add"
+            onClick={() => {
+              setOpen(false);
+              navigate("/setup?new_job=1");
+            }}
+          >
+            <span className="active-job-menu-item-label">
+              <Plus size={12} aria-hidden="true" /> New job description
+            </span>
+          </button>
         </div>
       ) : null}
     </div>
