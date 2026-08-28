@@ -1562,97 +1562,119 @@ mark.warn,
   color: var(--ink-3);
 }
 
-/* ready landing: the packet's cover - the one action with what is on file
-   in a line beside it (Manage owns the inventory), then the brief the
-   interviewer works from in three columns (the role as analysed, the
-   company notes, the candidate as extracted) and the rounds filed for this
-   role. The role itself is named once, in the header's ROLE / COMPANY field. */
-.ready-actions {
+/* ready landing: the packet's cover. The NEXT box holds one line on what a
+   round is and the one action; under it the role brief (a boxed field) with,
+   in a margin beside it, the packet tally and the interviewer's red-pen nudge
+   for whatever is missing. The role is named once, in the header field. */
+.box.next {
   display: flex;
   align-items: center;
-  gap: 18px;
-  flex-wrap: wrap;
-  padding-top: 2px;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 26px 20px 20px;
 }
-.ready-onfile {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 13px;
-  color: var(--ink-2);
+.box.next p {
+  font-size: 21px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-wrap: pretty;
 }
-.ready-onfile .btn-quiet {
-  height: 24px;
-  padding: 0;
+.box.next .btn-primary {
+  flex: none;
 }
-.brief {
+.spread {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 22px 40px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+  gap: 14px 40px;
   align-items: start;
 }
-.brief-lede {
-  font-size: 14.5px;
-  line-height: 1.5;
-  --lines: 4;
+.box.brief {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
 }
-.brief-row {
+.box.brief .lede {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.box.brief .company {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  margin-top: -6px;
+}
+.box.brief .row {
   display: grid;
   grid-template-columns: 104px minmax(0, 1fr);
-  gap: 4px 12px;
+  gap: 12px;
   align-items: baseline;
-  font-size: 13.5px;
-  line-height: 1.45;
+  font-size: 14px;
+  line-height: 1.5;
 }
-.brief-row .k {
+.box.brief .k,
+.tally .k {
   font-weight: 700;
   font-size: 10px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink-2);
 }
-.brief-row .checklist {
-  gap: 4px;
-}
-.brief-row .checklist li {
-  align-items: baseline;
-  font-size: 13.5px;
-}
-.brief-row .checklist li i {
-  transform: translateY(1px);
-}
 .lines {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
+  gap: 3px;
+}
+.margin {
+  display: grid;
+  gap: 16px;
+  padding-top: 6px;
+}
+.tally {
+  display: grid;
+  gap: 6px;
+}
+.tally .k {
+  font-size: 11px;
+}
+.tally .cells4 {
+  display: flex;
   gap: 4px;
 }
-.round-list {
-  display: grid;
+.tally .cells4 i {
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  box-shadow: inset 0 0 0 3px var(--paper);
 }
-.round-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--rule);
-  font-size: 14px;
+.tally .cells4 i.empty {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--rule-2);
+  box-shadow: none;
 }
-.round-row strong {
-  font-weight: 500;
-}
-.round-row-meta {
-  color: var(--ink-2);
+.tally .hint {
   font-size: 12.5px;
 }
-.round-row .status-pill {
-  margin-left: auto;
-}
-.round-row .btn-quiet {
-  height: 24px;
+.tally .btn-quiet {
+  display: inline;
+  height: auto;
   padding: 0;
+  font-size: 11px;
+  vertical-align: baseline;
+}
+.nudge {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+.nudge .btn-quiet {
+  height: 22px;
+  padding: 0;
+  color: var(--pen);
+  margin-left: 2px;
 }
 
 /* ═══════════════ manage: file inventory ═══════════════ */
@@ -2787,6 +2809,7 @@ html[data-vt="route"]::view-transition-new(sheet) {
   .note {
     transform: none;
   }
+  .spread,
   .record-body {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2866,14 +2889,17 @@ html[data-vt="route"]::view-transition-new(sheet) {
   .record-head .cells {
     grid-column: 1 / -1;
   }
-  .ready-actions {
-    gap: 12px;
+  .box.next {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 14px;
   }
-  .ready-onfile {
-    margin-left: 0;
+  .box.next p {
+    font-size: 17px;
   }
-  .brief {
+  .box.brief .row {
     grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
   }
   .manage-card {
     flex-direction: column;

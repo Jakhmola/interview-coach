@@ -17,9 +17,9 @@ import {
 } from "../api";
 import { ArmedDeleteButton } from "../components/ArmedDeleteButton";
 import { LoadingStatus } from "../components/LoadingStatus";
-import { ErrorBanner, Field, JobField, RatingCells, SheetHead } from "../components/ui";
+import { ErrorBanner, Field, JobField, PenNote, RatingCells, SheetHead } from "../components/ui";
 import { codeFrom } from "../errors";
-import { roundLabels, topicLabel, topicTitle } from "../jobLabel";
+import { moveLabels, roundLabels, topicLabel, topicTitle } from "../jobLabel";
 import { useStreamAbort } from "../hooks/useStreamAbort";
 import { useActiveJob } from "../state/activeJob";
 import { useAuth } from "../state/auth";
@@ -76,13 +76,6 @@ function updateLast<T extends LiveItem["type"]>(
   }
   return items;
 }
-
-const moveLabels: Record<MoveKind, string> = {
-  question: "Question",
-  probe: "Probe",
-  clarify: "Clarify",
-  nudge: "Nudge",
-};
 
 const confettiColors = ["#ffe94d", "#c8321f", "#f5f2ea", "#1b1b1f", "#ffb257"];
 
@@ -885,24 +878,6 @@ function TopicMargin({ thread, docs }: { thread: Thread; docs: DocumentItem[] })
         </div>
       ) : null}
     </>
-  );
-}
-
-function PenNote({ kind, text, typing }: { kind: MoveKind; text: string; typing?: boolean }) {
-  return (
-    <div className={`note${typing ? " stream-in" : ""}`} aria-live={typing ? "polite" : undefined}>
-      <div className="k">
-        <svg viewBox="0 0 34 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M32 9C24 9 16 4 3 9" pathLength={1} />
-          <path d="M8 5 3 9l5 4" pathLength={1} />
-        </svg>
-        {moveLabels[kind]}
-      </div>
-      <p>
-        {text}
-        {typing ? <span className="cursor-blink" /> : null}
-      </p>
-    </div>
   );
 }
 

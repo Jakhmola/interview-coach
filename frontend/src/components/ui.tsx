@@ -1,7 +1,9 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { Moon, Sun } from "lucide-react";
 
+import { MoveKind } from "../api";
 import { codeFrom, translate } from "../errors";
+import { moveLabels } from "../jobLabel";
 import { ActiveJobChip } from "./ActiveJobChip";
 
 export function StatusPill({
@@ -166,6 +168,26 @@ export function StockToggle() {
       {stock === "dark" ? <Sun /> : <Moon />}
       <span>{stock === "dark" ? "Day" : "Night"}</span>
     </button>
+  );
+}
+
+/** The interviewer's note in red pen: a caps key behind a hand-drawn arrow,
+ * then the words; `typing` blinks a caret while the text is still arriving. */
+export function PenNote({ kind, text, typing }: { kind: MoveKind; text: string; typing?: boolean }) {
+  return (
+    <div className={`note${typing ? " stream-in" : ""}`} aria-live={typing ? "polite" : undefined}>
+      <div className="k">
+        <svg viewBox="0 0 34 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M32 9C24 9 16 4 3 9" pathLength={1} />
+          <path d="M8 5 3 9l5 4" pathLength={1} />
+        </svg>
+        {moveLabels[kind]}
+      </div>
+      <p>
+        {text}
+        {typing ? <span className="cursor-blink" /> : null}
+      </p>
+    </div>
   );
 }
 

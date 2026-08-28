@@ -1,17 +1,17 @@
-import { type ReactNode } from "react";
 import { ArrowRight } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 import { DocumentItem, JobItem, PrepStatus } from "../api";
-import { Field, JobField, SheetHead } from "../components/ui";
+import { Field, JobField, PenNote, SheetHead } from "../components/ui";
 import { useAuth } from "../state/auth";
 
 /**
- * The packet's cover, shown on Setup once prep is complete: the one action,
- * what is on file in a line (Manage owns the inventory), then the brief the
- * interviewer works from - the role as the JD analysis read it, the company
- * notes from research, the candidate as the profile builder read the CV.
- * Interim: the owner has asked for something far more concise here; the
- * replacement is being chosen from .impeccable/mocks/landing/decision.html.
+ * The packet's cover, shown on Setup once prep is complete. Three things and
+ * nothing else: the NEXT box (one line on what a round is, and the one
+ * action), the role brief as the JD analysis read it, and - in a margin
+ * beside the brief - how full the packet is (a four-cell tally: CV, job
+ * description, supporting docs, repos) with the interviewer's own red-pen
+ * nudge for whatever is missing. Manage owns the inventory itself.
  */
 export function ReadyLanding({
   status,
@@ -31,169 +31,144 @@ export function ReadyLanding({
   onManage: () => void;
 }) {
   const { user } = useAuth();
+  const navigate = useNavigate();
 
-  // The payloads arrive loosely typed; read what the schemas promise and skip
-  // the rest (agents/schemas.py: JobAnalysis, CompanySnapshot, Profile).
+  // The payloads arrive loosely typed; read what agents/schemas.py promises
+  // (JobAnalysis, CompanySnapshot) and skip the rest.
   const brief = (status?.job ?? job.parsed_json ?? {}) as {
+    title?: unknown;
     seniority?: unknown;
+    company_name?: unknown;
     must_have_skills?: unknown;
     nice_to_have_skills?: unknown;
-    responsibilities?: unknown;
     behavioral_signals?: unknown;
   };
   const company = status?.company ?? null;
-  const snapshot = (company?.snapshot ?? {}) as {
-    mission?: unknown;
-    products?: unknown;
-    recent_news?: unknown;
-    values_and_signals?: unknown;
-  };
-  const profile = (status?.profile ?? null) as {
-    summary?: unknown;
-    skills?: unknown;
-    experiences?: unknown;
-    projects?: unknown;
-  } | null;
+  const mission = firstSentence((company?.snapshot as { mission?: unknown } | undefined)?.mission);
 
-  const seniority = typeof brief.seniority === "string" && brief.seniority !== "unknown" ? brief.seniority : null;
-  const experiences = asObjects(profile?.experiences).map((e) =>
-    [
-      [e.role, e.company].filter(isString).join(" · "),
-      [e.start, e.end].filter(isString).join(" - "),
-    ]
-      .filter(Boolean)
-      .join(", "),
-  );
-  const projects = asObjects(profile?.projects)
-    .map((p) => p.name)
-    .filter(isString);
+  const seniority = isString(brief.seniority) && brief.seniority !== "unknown" ? capitalise(brief.seniority) : null;
+  const companyName = isString(brief.company_name) ? brief.company_name : company?.company_name;
+  const lede = [seniority, isString(brief.title) ? brief.title : "the role", companyName ? `at ${companyName}` : null]
+    .filter(Boolean)
+    .join(" ");
+  const mustHave = strings(brief.must_have_skills).slice(0, 6);
+  const niceToHave = strings(brief.nice_to_have_skills).slice(0, 4);
+  const looksFor = strings(brief.behavioral_signals).slice(0, 6);
 
+  // The tally: what is in the packet, in the order the intake asks for it.
+  const have = [!!cv, true, techDocs.length > 0, repos.length > 0];
+  const count = have.filter(Boolean).length;
   const onFile = [
-    cv ? cv.filename : "no CV",
-    count(techDocs.length, "supporting doc"),
-    count(repos.length, "repo"),
+    cv ? "CV" : "no CV",
+    "job description",
+    techDocs.length > 0 ? plural(techDocs.length, "supporting doc") : "no docs",
+    repos.length > 0 ? plural(repos.length, "repo") : "no repos",
   ].join(" · ");
+
+  // The interviewer nudges toward whatever would sharpen its questions.
+  const nudges: { text: string; action: string; go: () => void }[] = [];
+  if (repos.length === 0) {
+    nudges.push({
+      text: "Add your GitHub repos. In the deep-dive I ask about the code itself, not just what the CV says about it.",
+      action: "Add repos",
+      go: onManage,
+    });
+  }
+  if (techDocs.length === 0) {
+    nudges.push({
+      text: "Add a project doc - an architecture note, a take-home, a write-up. I ground questions in it, not only in the CV.",
+      action: "Add a doc",
+      go: () => navigate("/setup?step=docs"),
+    });
+  }
 
   return (
     <div className="wizard">
-      <SheetHead title="Candidate intake" page="Complete · ready to practice">
+      <SheetHead
+        title="The packet"
+        page={company?.updated_at ? `Prepped ${shortDate(company.updated_at)}` : "Ready to practice"}
+      >
         <Field label="Candidate" value={user?.email} />
         <JobField />
       </SheetHead>
 
-      <div className="ready-actions">
+      <div className="box next">
+        <span className="lbl">Next</span>
+        <p>One topic at a time: the interviewer asks, follows up, then scores it and shows a model answer.</p>
         <button className="btn-primary" type="button" onClick={onStart}>
-          Start a practice round <ArrowRight size={14} />
+          Start a round <ArrowRight size={14} />
         </button>
-        <span className="ready-onfile">
-          <span>On file: {onFile}</span>
-          <button type="button" className="btn-quiet" onClick={onManage}>
-            Manage
-          </button>
-        </span>
       </div>
 
-      <div className="brief">
-        <section className="section" aria-label="Role brief">
-          <h2>Role brief</h2>
-          {seniority ? <BriefRow k="Seniority">{capitalise(seniority)}</BriefRow> : null}
-          {/* Requirements come back as sentences, not skill names, so they
-              read as lines; the duties as an unticked checklist. */}
-          <Lines k="Must have" items={strings(brief.must_have_skills).slice(0, 6)} />
-          <Lines k="Nice to have" items={strings(brief.nice_to_have_skills).slice(0, 4)} />
-          <Lines k="Duties" items={strings(brief.responsibilities).slice(0, 5)} boxes />
-          <Chips k="Signals" items={strings(brief.behavioral_signals)} />
-        </section>
+      <div className="spread">
+        <div className="box brief">
+          <span className="lbl">Role brief</span>
+          <p className="lede">{lede}</p>
+          {mission ? <p className="company">{mission}</p> : null}
+          {mustHave.length > 0 ? (
+            <div className="row">
+              <span className="k">Must have</span>
+              <ul className="lines">
+                {mustHave.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {niceToHave.length > 0 ? (
+            <div className="row">
+              <span className="k">Nice to have</span>
+              <ul className="lines">
+                {niceToHave.map((t) => (
+                  <li key={t}>{t}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {looksFor.length > 0 ? (
+            <div className="row">
+              <span className="k">Looks for</span>
+              <p>{looksFor.join(" · ")}</p>
+            </div>
+          ) : null}
+        </div>
 
-        <section className="section" aria-label="Company notes">
-          <h2>Company notes</h2>
-          {company ? (
-            <>
-              {isString(snapshot.mission) ? <p className="brief-lede clamp">{snapshot.mission}</p> : null}
-              <Chips k="Products" items={strings(snapshot.products)} />
-              <Lines k="Recently" items={strings(snapshot.recent_news).slice(0, 3)} />
-              <Chips k="Values" items={strings(snapshot.values_and_signals)} />
-              <span className="hint">
-                {count(company.source_urls.length, "source")} · {shortDate(company.updated_at)}
-              </span>
-            </>
-          ) : (
-            <p className="muted">
-              Research came up empty, so questions will be less company-specific. Re-analyze the JD
-              from Manage to retry.
-            </p>
-          )}
-        </section>
-
-        <section className="section" aria-label="Candidate profile">
-          <h2>Candidate profile</h2>
-          {profile ? (
-            <>
-              {isString(profile.summary) ? <p className="brief-lede clamp">{profile.summary}</p> : null}
-              <Chips k="Skills" items={strings(profile.skills)} max={14} />
-              <Lines k="Experience" items={experiences.slice(0, 5)} />
-              <Lines k="Projects" items={projects.slice(0, 5)} />
-            </>
-          ) : (
-            <p className="muted">Profile not built yet.</p>
-          )}
-        </section>
+        <aside className="margin" aria-label="How full the packet is">
+          <div className="tally">
+            <span className="k">
+              Packet · {count} of {have.length}
+            </span>
+            <div className="cells4" role="img" aria-label={`${count} of ${have.length} in the packet`}>
+              {have.map((on, i) => (
+                <i key={i} className={on ? undefined : "empty"} />
+              ))}
+            </div>
+            <span className="hint">
+              {onFile} ·{" "}
+              <button type="button" className="btn-quiet" onClick={onManage}>
+                Manage
+              </button>
+            </span>
+          </div>
+          {nudges.map((n) => (
+            <div key={n.action} className="nudge">
+              <PenNote kind="nudge" text={n.text} />
+              <button type="button" className="btn-quiet" onClick={n.go}>
+                {n.action}
+              </button>
+            </div>
+          ))}
+        </aside>
       </div>
-
     </div>
-  );
-}
-
-/** One line of a brief: a caps key and whatever it names. */
-function BriefRow({ k, children }: { k: string; children: ReactNode }) {
-  return (
-    <div className="brief-row">
-      <span className="k">{k}</span>
-      <div>{children}</div>
-    </div>
-  );
-}
-
-function Chips({ k, items, max = 10 }: { k: string; items: string[]; max?: number }) {
-  if (items.length === 0) return null;
-  const shown = items.slice(0, max);
-  return (
-    <BriefRow k={k}>
-      <div className="chips">
-        {shown.map((t) => (
-          <span key={t} className="chip">
-            {t}
-          </span>
-        ))}
-        {items.length > shown.length ? <span className="hint">+{items.length - shown.length} more</span> : null}
-      </div>
-    </BriefRow>
-  );
-}
-
-function Lines({ k, items, boxes }: { k: string; items: string[]; boxes?: boolean }) {
-  if (items.length === 0) return null;
-  return (
-    <BriefRow k={k}>
-      <ul className={boxes ? "checklist" : "lines"}>
-        {items.map((t) => (
-          <li key={t}>
-            {boxes ? <i aria-hidden="true" /> : null}
-            {t}
-          </li>
-        ))}
-      </ul>
-    </BriefRow>
   );
 }
 
 const isString = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter(isString) : []);
-const asObjects = (v: unknown): Record<string, unknown>[] =>
-  Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === "object") : [];
 
-function count(n: number, noun: string) {
-  return n === 0 ? `no ${noun}s` : `${n} ${noun}${n === 1 ? "" : "s"}`;
+function plural(n: number, noun: string) {
+  return `${n} ${noun}${n === 1 ? "" : "s"}`;
 }
 
 function capitalise(s: string) {
@@ -202,4 +177,11 @@ function capitalise(s: string) {
 
 function shortDate(iso: string) {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/** The first sentence of a paragraph, for a one-line company note. */
+function firstSentence(v: unknown): string | null {
+  if (!isString(v)) return null;
+  const m = v.trim().match(/^.*?[.!?](?=\s|$)/);
+  return (m ? m[0] : v.trim()).slice(0, 160);
 }

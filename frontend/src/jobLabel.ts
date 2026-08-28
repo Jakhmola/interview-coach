@@ -18,7 +18,7 @@
  * about the shape on the wire; we read role/company defensively.
  */
 
-import { JobItem, RoundType, SessionStatus } from "./api";
+import { JobItem, MoveKind, RoundType, SessionStatus } from "./api";
 
 const URL_LABEL_CHARS = 70;
 const TEXT_LABEL_CHARS = 80;
@@ -28,6 +28,14 @@ export const roundLabels: Record<RoundType, string> = {
   experience_deep_dive: "Experience deep-dive",
   technical_challenge: "Technical challenge",
   behavioral_star: "Behavioral / STAR",
+};
+
+/** The interviewer's moves as the form keys them. */
+export const moveLabels: Record<MoveKind, string> = {
+  question: "Question",
+  probe: "Probe",
+  clarify: "Clarify",
+  nudge: "Nudge",
 };
 
 /** A session's fate as a stamp colour: complete is ok green, abandoned is the
